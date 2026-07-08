@@ -1,0 +1,41 @@
+services:
+  backend:
+    build: ../backend
+    env_file: .env
+    secrets:
+      - mongodb_uri
+      - jwt_secret
+    volumes:
+      - artifacts_data:/data/artifacts
+    restart: unless-stopped
+
+  frontend:
+    build: ../frontend
+    env_file: .env
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    env_file: .env
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+secrets:
+  mongodb_uri:
+    file: ./secrets/mongodb_uri.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+
+volumes:
+  artifacts_data:
+  caddy_data:
+  caddy_config:
