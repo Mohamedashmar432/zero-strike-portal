@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.mongo import close_mongo_connection, connect_to_mongo
-from app.routers import api_keys, audit_logs, auth, projects, users
+from app.routers import api_keys, audit_logs, auth, projects, scans, users
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(audit_logs.router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")
     app.include_router(api_keys.router, prefix="/api/v1")
+    app.include_router(scans.router, prefix="/api/v1")
 
     @app.get("/health")
     async def health():

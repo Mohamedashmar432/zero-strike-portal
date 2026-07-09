@@ -3,6 +3,7 @@ from fastapi import HTTPException, status
 from app.models.api_key import ApiKey
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.scan import Scan
 from app.models.user import User
 
 
@@ -44,4 +45,6 @@ async def get_project_or_404(project_id: str) -> Project:
 async def delete_project_cascade(project: Project) -> None:
     await ProjectMember.find(ProjectMember.project_id == str(project.id)).delete()
     await ApiKey.find(ApiKey.project_id == str(project.id)).delete()
+    await Scan.find(Scan.project_id == str(project.id)).delete()
+    # Findings/Reports don't exist yet (Sprint 3) — extend this cascade once they do.
     await project.delete()

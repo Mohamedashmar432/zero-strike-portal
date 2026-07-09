@@ -16,5 +16,8 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # ponytail: demo-only status transitions until Sprint 3 wires real scan execution; flip off before a real cutover.
+    enable_mock_scan_endpoints: bool = True
+
 
 settings = Settings()
