@@ -133,13 +133,19 @@ Raw token is never stored — returned exactly once at creation.
 
 ### `scans` — orchestration/lifecycle only
 ```
-id, project_id (idx), api_key_id, triggered_by: "cli"|"ci"|"cloud"|"manual",
+id, project_id (idx), api_key_id, scan_type: "local"|"cloud"|"cicd",
+triggered_by: "cli"|"ci"|"cloud"|"manual",
 status: "pending"|"running"|"completed"|"failed" (idx),
 scanner_version, hostname, git_commit, branch, scan_label,
+repo_url (cloud only), ci_provider: "github_actions"|"gitlab_ci"|"azure_pipelines" (cicd only),
+created_by (user who set it up via the UI),
 started_at, completed_at, error_message, created_at, updated_at
 # compound index: (project_id, started_at desc)
 # index: (status)
+# compound index: (project_id, created_at desc)
+# compound index: (project_id, scan_type)
 ```
+`scan_type` (added in Sprint 2.5, see below) records *what the user configured*; `triggered_by` stays a separate field recording *how a run was mechanically invoked* — see the Sprint 2.5 note for why these don't collapse into one field.
 
 ### `reports` — ingested artifact/summary, separate from `scans` so JSON ingestion failure never corrupts scan lifecycle state
 ```
@@ -298,6 +304,12 @@ Repo scaffold (`frontend/`, `backend/`, `deploy/`, CI lint+test). FastAPI skelet
 ### Sprint 2 — Projects & API Keys (deep)
 `projects`/`project_members`/`api_keys` Documents. `project_service` CRUD + ownership checks, `deps.get_project_membership`. Routers: full `/projects` CRUD, members invite/list/remove, api-key create/list/revoke, `/apikeys/me`. `api_key_service`: token gen (`zst_live_` + `secrets.token_urlsafe(32)`), sha256 hash, prefix, expiry/revocation. Audit events for project/apikey/member actions. Frontend: Projects list/new/detail shell with six tabs (Members + API Keys functional, others stubs), API-key creation modal with "shown once" UX.
 **Deliverable**: full project management + scanner-facing API key issuance/validation, provable via `GET /apikeys/me`.
+
+### Sprint 2.5 — Scan Setup Flow (inserted, UI + data model only)
+
+Not in the original plan — inserted after Sprint 2 to close the gap between "projects exist" and "there's no way to start a scan anywhere in the product." Gives users a "New scan" flow in the project detail page's new Scans tab, letting them choose **Local**, **Cloud**, or **CI/CD** and save the relevant config as a `Scan` document. Deliberately shallow: no real CLI upload, no real OAuth, no real CI execution — those stay exactly where Sprints 3/4/5 already put them. A demo-only `POST /scans/{id}/_mock-complete` endpoint (gated behind `Settings.enable_mock_scan_endpoints`) lets the UI exercise status transitions before real scanners exist.
+
+Added `Scan.scan_type` alongside the existing `triggered_by` rather than overloading it: `triggered_by` must stay trustworthy once Sprint 3/4/5 wire up real invocation channels, so this sprint's UI-created scans always write `triggered_by="manual"` regardless of `scan_type`. `Project.scan_count`/`last_scan_at` are incremented at scan-*creation* time this sprint (not at completion, as originally implied for Sprint 3) via `scan_service.increment_scan_counter` — Sprint 3's real ingestion should call that same helper rather than adding a second increment site.
 
 ### Sprint 3 — Local Scanner Integration (deep)
 `scans`/`reports`/`findings` Documents, `artifact_store.py`. `scan_service`: `POST /scans` (via `get_api_key_scope`), `PUT /scans/{id}/status`. `report_ingestion_service`: parse aliased PascalCase DTOs, bulk-write findings, write reports doc, flip scan status, update project denorm fields — run via `BackgroundTasks` so the upload call returns fast. Routers: upload/json, upload/html, report get/download, project findings, single finding. Frontend: Scans tab (list, status badges, polling), scan detail with dense findings table, Reports tab (download JSON/HTML).
