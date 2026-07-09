@@ -8,7 +8,10 @@ class ScanCreateRequest(BaseModel):
     scan_type: Literal["local", "cloud", "cicd"]
     scan_label: str | None = None
     repo_url: str | None = None
+    branch: str | None = None
     ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
+    # Transient: used to clone a private repo for a cloud scan, never persisted on the Scan.
+    repo_token: str | None = None
 
     @model_validator(mode="after")
     def _validate_type_config(self):

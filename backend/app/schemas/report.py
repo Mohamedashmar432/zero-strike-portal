@@ -18,6 +18,16 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+from app.models.finding import (
+    ConfigEmbedded,
+    DependencyEmbedded,
+    EvidenceEmbedded,
+    LocationEmbedded,
+    SecretEmbedded,
+    TaintContextEmbedded,
+)
+from app.models.report import DiagnosticEmbedded, ScanStatsEmbedded
+
 _go = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -152,3 +162,52 @@ class GoReportIn(BaseModel):
     diagnostics: Annotated[list[GoDiagnosticIn], BeforeValidator(_nz_list)] = Field(
         default_factory=list, alias="Diagnostics"
     )
+
+
+# --- API response models (portal -> frontend) ---
+
+
+class FindingResponse(BaseModel):
+    id: str
+    scan_id: str
+    project_id: str
+    finding_id: str | None
+    fingerprint: str | None
+    rule_id: str | None
+    rule_name: str | None
+    category: str | None
+    severity: str | None
+    confidence: str | None
+    message: str
+    location: LocationEmbedded
+    language: str | None
+    evidence: list[EvidenceEmbedded]
+    cwe: list[str]
+    owasp: list[str]
+    references: list[str]
+    metadata: dict[str, str]
+    kind: str | None
+    secret: SecretEmbedded | None
+    dependency: DependencyEmbedded | None
+    config: ConfigEmbedded | None
+    rationale: str | None
+    remediation: str | None
+    taint_context: TaintContextEmbedded | None
+    created_at: datetime
+
+
+class ReportResponse(BaseModel):
+    scan_id: str
+    project_id: str
+    scanner_scan_id: str | None
+    scanner_version: str | None
+    started_at: datetime | None
+    duration_ms: int | None
+    root_path: str | None
+    git_commit: str | None
+    branch: str | None
+    hostname: str | None
+    stats: ScanStatsEmbedded
+    diagnostics: list[DiagnosticEmbedded]
+    html_available: bool
+    generated_at: datetime

@@ -1,12 +1,27 @@
 services:
   backend:
-    build: ../backend
+    build:
+      context: ../backend
+      args:
+        SCANNER_REPO: ${SCANNER_REPO:-https://github.com/zerostrike/scanner.git}
+        SCANNER_REF: ${SCANNER_REF:-v0.22.0}
+      # Private scanner repo? Uncomment and build with:
+      #   docker build --secret id=scanner_git_token,env=SCANNER_GIT_TOKEN ...
+      # secrets:
+      #   - scanner_git_token
     env_file: .env
+    environment:
+      # Reconcile the app's relative default with the mounted volume + ephemeral clone dir.
+      ARTIFACT_STORAGE_PATH: /data/artifacts
+      CLONE_WORKDIR_PATH: /tmp/zs-clones
     secrets:
       - mongodb_uri
       - jwt_secret
     volumes:
       - artifacts_data:/data/artifacts
+    tmpfs:
+      # Ephemeral, size-capped clone workspace — never the durable artifacts volume.
+      - /tmp/zs-clones:size=2147483648
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
