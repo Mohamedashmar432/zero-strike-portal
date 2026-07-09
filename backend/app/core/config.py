@@ -19,5 +19,11 @@ class Settings(BaseSettings):
     # ponytail: demo-only status transitions until Sprint 3 wires real scan execution; flip off before a real cutover.
     enable_mock_scan_endpoints: bool = True
 
+    # Server-side (cloud) scan execution — the CGO-enabled scanner binary baked into the image.
+    scanner_binary_path: str = "/usr/local/bin/zerostrike"
+    scan_timeout_seconds: int = 900
+    max_concurrent_cloud_scans: int = 2
+    clone_workdir_path: str = "/tmp/zs-clones"  # ephemeral; never the durable artifacts volume
+
 
 settings = Settings()

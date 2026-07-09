@@ -44,3 +44,25 @@ class ScanResponse(BaseModel):
 class ScanMockCompleteRequest(BaseModel):
     status: Literal["completed", "failed"] = "completed"
     error_message: str | None = None
+
+
+# --- Scanner-facing (api-key-authed) contract, matches the Go scanner's internal/portal client ---
+
+
+class ScannerCreateScanRequest(BaseModel):
+    project_id: str
+    scanner_version: str | None = None
+    hostname: str | None = None
+    git_commit: str | None = None
+    branch: str | None = None
+    scan_label: str | None = None
+
+
+class ScannerCreateScanResponse(BaseModel):
+    scan_id: str
+    status: str
+
+
+class ScannerStatusUpdateRequest(BaseModel):
+    status: Literal["pending", "running", "completed", "failed"]
+    error_message: str | None = None

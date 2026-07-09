@@ -14,13 +14,9 @@ from app.schemas.api_key import (
     ApiKeyValidateResponse,
 )
 from app.schemas.common import Page
-from app.services import audit_service, project_service
+from app.services import api_key_service, audit_service, project_service
 
 router = APIRouter(prefix="/apikeys", tags=["api-keys"])
-
-
-def _is_active(key: ApiKey) -> bool:
-    return key.revoked_at is None and key.expires_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
 
 
 def _to_response(key: ApiKey) -> ApiKeyResponse:
@@ -35,21 +31,13 @@ def _to_response(key: ApiKey) -> ApiKeyResponse:
         revoked_at=key.revoked_at,
         last_used_at=key.last_used_at,
         last_used_ip=key.last_used_ip,
-        is_active=_is_active(key),
+        is_active=api_key_service.is_active(key),
     )
 
 
 @router.post("/validate", response_model=ApiKeyValidateResponse)
 async def validate_key(payload: ApiKeyValidateRequest, request: Request):
-    key_hash = security.hash_token(payload.token)
-    key = await ApiKey.find_one(ApiKey.key_hash == key_hash)
-    if not key or not _is_active(key):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired API key")
-
-    key.last_used_at = datetime.now(timezone.utc)
-    key.last_used_ip = request.client.host if request.client else None
-    await key.save()
-
+    key = await api_key_service.resolve_api_key(payload.token, request)
     return ApiKeyValidateResponse(project_id=key.project_id, key_id=str(key.id), expires_at=key.expires_at)
 
 

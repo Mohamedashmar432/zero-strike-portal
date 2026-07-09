@@ -1,10 +1,13 @@
 from fastapi import HTTPException, status
 
 from app.models.api_key import ApiKey
+from app.models.finding import Finding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.report import Report
 from app.models.scan import Scan
 from app.models.user import User
+from app.storage import artifact_store
 
 
 async def get_membership(project_id: str, user_id: str) -> ProjectMember | None:
@@ -43,8 +46,11 @@ async def get_project_or_404(project_id: str) -> Project:
 
 
 async def delete_project_cascade(project: Project) -> None:
-    await ProjectMember.find(ProjectMember.project_id == str(project.id)).delete()
-    await ApiKey.find(ApiKey.project_id == str(project.id)).delete()
-    await Scan.find(Scan.project_id == str(project.id)).delete()
-    # Findings/Reports don't exist yet (Sprint 3) — extend this cascade once they do.
+    project_id = str(project.id)
+    await ProjectMember.find(ProjectMember.project_id == project_id).delete()
+    await ApiKey.find(ApiKey.project_id == project_id).delete()
+    await Scan.find(Scan.project_id == project_id).delete()
+    await Finding.find(Finding.project_id == project_id).delete()
+    await Report.find(Report.project_id == project_id).delete()
+    artifact_store.delete_project_dir(project_id)
     await project.delete()
