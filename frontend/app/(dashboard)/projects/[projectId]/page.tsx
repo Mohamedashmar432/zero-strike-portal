@@ -10,6 +10,7 @@ import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember } from "@/lib/api/project-members";
 import { getProject, updateProject } from "@/lib/api/projects";
+import { listScans, mockCompleteScan } from "@/lib/api/scans";
 import {
   createApiKeySchema,
   inviteMemberSchema,
@@ -24,6 +25,9 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NewScanDialog } from "@/components/scans/new-scan-dialog";
+import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
+import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 
 function canManage(role: string | undefined) {
   return role === "owner" || role === "admin";
@@ -204,6 +208,96 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
   );
 }
 
+function ScansTab({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["projects", projectId, "scans"],
+    queryFn: () => listScans(projectId),
+  });
+
+  const mockComplete = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: "completed" | "failed" }) =>
+      mockCompleteScan(id, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update scan"),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Local, Cloud, and CI/CD scans set up here appear below. Real execution ships in a later sprint —
+          use the demo actions to try out status transitions.
+        </p>
+        <NewScanDialog projectId={projectId} />
+      </div>
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : data?.items.length === 0 ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              No scans yet. Set up a local, cloud, or CI/CD scan to get started.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data?.items.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell>
+                      <ScanTypeBadge scanType={s.scan_type} />
+                    </TableCell>
+                    <TableCell>{s.scan_label || "—"}</TableCell>
+                    <TableCell>
+                      <ScanStatusBadge status={s.status} />
+                    </TableCell>
+                    <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
+                    <TableCell>
+                      {(s.status === "pending" || s.status === "running") && (
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={mockComplete.isPending}
+                            onClick={() => mockComplete.mutate({ id: s.id, status: "completed" })}
+                          >
+                            Complete (demo)
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={mockComplete.isPending}
+                            onClick={() => mockComplete.mutate({ id: s.id, status: "failed" })}
+                          >
+                            Fail (demo)
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function ApiKeysTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
@@ -343,7 +437,9 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") === "keys" ? "keys" : searchParams.get("tab") === "members" ? "members" : "overview";
+  const tabParam = searchParams.get("tab");
+  const initialTab =
+    tabParam === "keys" || tabParam === "members" || tabParam === "scans" ? tabParam : "overview";
   const { data: project } = useQuery({
     queryKey: ["projects", projectId],
     queryFn: () => getProject(projectId),
@@ -362,11 +458,15 @@ export default function ProjectDetailPage() {
       <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="scans">Scans</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="keys">API Keys</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <OverviewTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="scans">
+          <ScansTab projectId={projectId} />
         </TabsContent>
         <TabsContent value="members">
           <MembersTab projectId={projectId} myRole={project?.my_role} />
