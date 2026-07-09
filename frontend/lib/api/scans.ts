@@ -31,20 +31,18 @@ export function listScans(projectId: string, page = 1, pageSize = 20) {
   return apiFetch<Page<Scan>>(`/projects/${projectId}/scans?page=${page}&page_size=${pageSize}`);
 }
 
-export function createScan(
+// Only cloud scans are created via the API — local/CI scans are created by the
+// scanner itself (POST /api/v1/scans, api-key auth) after the user runs the CLI.
+export function createCloudScan(
   projectId: string,
-  input: { scan_type: ScanType; scan_label?: string; repo_url?: string; ci_provider?: CiProvider }
+  input: { repo_url: string; branch?: string; scan_label?: string; repo_token?: string }
 ) {
-  return apiFetch<Scan>(`/projects/${projectId}/scans`, { method: "POST", body: JSON.stringify(input) });
+  return apiFetch<Scan>(`/projects/${projectId}/scans`, {
+    method: "POST",
+    body: JSON.stringify({ scan_type: "cloud", ...input }),
+  });
 }
 
 export function getScan(id: string) {
   return apiFetch<Scan>(`/scans/${id}`);
-}
-
-export function mockCompleteScan(id: string, status: "completed" | "failed" = "completed", errorMessage?: string) {
-  return apiFetch<Scan>(`/scans/${id}/_mock-complete`, {
-    method: "POST",
-    body: JSON.stringify({ status, error_message: errorMessage }),
-  });
 }

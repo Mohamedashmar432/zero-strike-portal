@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
-from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.finding import Finding
 from app.models.report import Report
@@ -11,7 +10,7 @@ from app.models.scan import Scan
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.report import FindingResponse, ReportResponse
-from app.schemas.scan import ScanCreateRequest, ScanMockCompleteRequest, ScanResponse
+from app.schemas.scan import ScanCreateRequest, ScanResponse
 from app.services import audit_service, cloud_scan_service, project_service, scan_service
 from app.storage import artifact_store
 
@@ -211,33 +210,3 @@ async def download_report(scan_id: str, fmt: str, user: User = Depends(get_curre
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
     media_type = "application/json" if fmt == "json" else "text/html"
     return FileResponse(path, media_type=media_type, filename=f"report.{fmt}")
-
-
-@router.post("/scans/{scan_id}/_mock-complete", response_model=ScanResponse)
-async def mock_complete_scan(
-    scan_id: str, payload: ScanMockCompleteRequest, user: User = Depends(get_current_user)
-):
-    """TEMPORARY: demo-only, superseded by real scan-status transitions in Sprint 3."""
-    if not settings.enable_mock_scan_endpoints:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-
-    scan = await scan_service.get_scan_or_404(scan_id)
-    await project_service.require_member(scan.project_id, user)
-
-    now = datetime.now(timezone.utc)
-    if scan.started_at is None:
-        scan.started_at = now
-    scan.status = payload.status
-    scan.completed_at = now
-    scan.error_message = payload.error_message if payload.status == "failed" else None
-    scan.updated_at = now
-    await scan.save()
-    await audit_service.record(
-        "Scan Mock-Completed",
-        actor_user_id=str(user.id),
-        project_id=scan.project_id,
-        target_type="scan",
-        target_id=str(scan.id),
-        metadata={"status": scan.status},
-    )
-    return _to_response(scan)

@@ -153,16 +153,6 @@ def test_download_report_json(client):
     assert b"ZS-PY-001" in r.content
 
 
-def test_mock_complete_still_transitions(client):
-    owner = register_and_login(client, email="sowner10@zerostrike.dev")
-    project = _create_project(client, _headers(owner))
-    scan_id = _scanner_scan(client, _headers(owner), project["id"])
-
-    r = client.post(f"/api/v1/scans/{scan_id}/_mock-complete", json={}, headers=_headers(owner))
-    assert r.status_code == 200
-    assert r.json()["status"] == "completed"
-
-
 def test_delete_project_cascades_scans_findings_reports(client):
     owner = register_and_login(client, email="sowner11@zerostrike.dev")
     project = _create_project(client, _headers(owner))

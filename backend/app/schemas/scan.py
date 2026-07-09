@@ -44,11 +44,6 @@ class ScanResponse(BaseModel):
     updated_at: datetime
 
 
-class ScanMockCompleteRequest(BaseModel):
-    status: Literal["completed", "failed"] = "completed"
-    error_message: str | None = None
-
-
 # --- Scanner-facing (api-key-authed) contract, matches the Go scanner's internal/portal client ---
 
 

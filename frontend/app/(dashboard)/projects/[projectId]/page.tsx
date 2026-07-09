@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -10,7 +11,7 @@ import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember } from "@/lib/api/project-members";
 import { getProject, updateProject } from "@/lib/api/projects";
-import { listScans, mockCompleteScan } from "@/lib/api/scans";
+import { listScans } from "@/lib/api/scans";
 import {
   createApiKeySchema,
   inviteMemberSchema,
@@ -209,27 +210,20 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
 }
 
 function ScansTab({ projectId }: { projectId: string }) {
-  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["projects", projectId, "scans"],
     queryFn: () => listScans(projectId),
-  });
-
-  const mockComplete = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: "completed" | "failed" }) =>
-      mockCompleteScan(id, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update scan"),
+    // Poll while any scan is still running so cloud-scan status updates live.
+    refetchInterval: (q) =>
+      q.state.data?.items.some((s) => s.status === "pending" || s.status === "running") ? 3000 : false,
   });
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-muted-foreground">
-          Local, Cloud, and CI/CD scans set up here appear below. Real execution ships in a later sprint —
-          use the demo actions to try out status transitions.
+          Local and CI/CD scans appear here once the scanner runs and uploads. Cloud scans run on the
+          server — open one to watch progress and review findings.
         </p>
         <NewScanDialog projectId={projectId} />
       </div>
@@ -266,26 +260,14 @@ function ScansTab({ projectId }: { projectId: string }) {
                     </TableCell>
                     <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
                     <TableCell>
-                      {(s.status === "pending" || s.status === "running") && (
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={mockComplete.isPending}
-                            onClick={() => mockComplete.mutate({ id: s.id, status: "completed" })}
-                          >
-                            Complete (demo)
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={mockComplete.isPending}
-                            onClick={() => mockComplete.mutate({ id: s.id, status: "failed" })}
-                          >
-                            Fail (demo)
-                          </Button>
-                        </div>
-                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        nativeButton={false}
+                        render={<Link href={`/projects/${projectId}/scans/${s.id}`} />}
+                      >
+                        View
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

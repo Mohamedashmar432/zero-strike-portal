@@ -19,21 +19,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
-import { createScan, type CiProvider, type Scan, type ScanType } from "@/lib/api/scans";
-import {
-  newCicdScanSchema,
-  newCloudScanSchema,
-  newLocalScanSchema,
-  type NewCicdScanInput,
-  type NewCloudScanInput,
-  type NewLocalScanInput,
-} from "@/lib/validation/scan.schema";
+import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans";
+import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
+
+function portalOrigin(): string {
+  const env = process.env.NEXT_PUBLIC_PORTAL_ORIGIN;
+  if (env) return env.replace(/\/$/, "");
+  if (typeof window !== "undefined") return window.location.origin;
+  return "https://your-portal";
+}
 
 const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: typeof Terminal }[] = [
-  { value: "local", label: "Local", description: "Run the ZeroStrike CLI scanner and upload results via an API key.", icon: Terminal },
-  { value: "cloud", label: "Cloud", description: "Connect a repo via OAuth — coming soon. This saves your repo config only.", icon: Cloud },
-  { value: "cicd", label: "CI/CD", description: "Wire into GitHub Actions, GitLab CI, or Azure Pipelines — coming soon.", icon: GitBranch },
+  { value: "local", label: "Local", description: "Run the ZeroStrike CLI on your machine and upload results with an API key.", icon: Terminal },
+  { value: "cloud", label: "Cloud", description: "Give ZeroStrike a repo URL and it clones + scans it server-side.", icon: Cloud },
+  { value: "cicd", label: "CI/CD", description: "Add ZeroStrike to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
 
 const CI_PROVIDERS: { value: CiProvider; label: string }[] = [
@@ -41,6 +42,30 @@ const CI_PROVIDERS: { value: CiProvider; label: string }[] = [
   { value: "gitlab_ci", label: "GitLab CI" },
   { value: "azure_pipelines", label: "Azure Pipelines" },
 ];
+
+function CopyBlock({ text, label }: { text: string; label?: string }) {
+  return (
+    <div className="space-y-1">
+      {label && <Label>{label}</Label>}
+      <div className="flex items-start gap-2">
+        <code className="min-w-0 flex-1 rounded bg-muted px-2 py-1.5 text-xs break-all whitespace-pre-wrap">
+          {text}
+        </code>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            navigator.clipboard.writeText(text);
+            toast.success("Copied");
+          }}
+        >
+          Copy
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
   return (
@@ -68,98 +93,95 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
   );
 }
 
-function useCreateScan(projectId: string, onCreated: (scan: Scan) => void) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { scan_type: ScanType; scan_label?: string; repo_url?: string; ci_provider?: CiProvider }) =>
-      createScan(projectId, input),
-    onSuccess: (scan) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
-      toast.success("Scan created");
-      onCreated(scan);
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create scan"),
+function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+  const [rawToken, setRawToken] = useState<string | null>(null);
+  const generate = useMutation({
+    mutationFn: () => createApiKey(projectId, { label: "local CLI scan", expires_in_days: 90 }),
+    onSuccess: (key) => setRawToken(key.raw_token),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create API key"),
   });
-}
 
-function LocalConfigureStep({ projectId, onCreated }: { projectId: string; onCreated: (scan: Scan) => void }) {
-  const { register, handleSubmit } = useForm<NewLocalScanInput>({ resolver: zodResolver(newLocalScanSchema) });
-  const mutation = useCreateScan(projectId, onCreated);
+  const token = rawToken ?? "<API_KEY>";
+  const command = `zerostrike scan . --server ${portalOrigin()} --project-id ${projectId} --token ${token}`;
 
   return (
-    <form onSubmit={handleSubmit((values) => mutation.mutate({ scan_type: "local", ...values }))}>
+    <>
       <DialogHeader>
         <DialogTitle>Local scan</DialogTitle>
         <DialogDescription>
-          Run the CLI scanner on your machine and upload results using a project API key.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-2">
-        <Label htmlFor="local-label">Label (optional)</Label>
-        <Input id="local-label" placeholder="e.g. pre-release scan" autoComplete="off" {...register("scan_label")} />
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Creating…" : "Create scan"}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-function CloudConfigureStep({ projectId, onCreated }: { projectId: string; onCreated: (scan: Scan) => void }) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
-  const mutation = useCreateScan(projectId, onCreated);
-
-  return (
-    <form onSubmit={handleSubmit((values) => mutation.mutate({ scan_type: "cloud", ...values }))}>
-      <DialogHeader>
-        <DialogTitle>Cloud scan</DialogTitle>
-        <DialogDescription>
-          Coming soon — this saves your repository config only, no OAuth connection is made yet.
+          Run the ZeroStrike CLI on your machine — it uploads results here automatically. A scan appears
+          in this list once the CLI runs.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="cloud-repo">Repository URL</Label>
-          <Input id="cloud-repo" placeholder="https://github.com/org/repo" autoComplete="off" {...register("repo_url")} />
-          {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="cloud-label">Label (optional)</Label>
-          <Input id="cloud-label" autoComplete="off" {...register("scan_label")} />
-        </div>
+        {rawToken ? (
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-amber-500">
+              Copy this API key now — it won&apos;t be shown again.
+            </p>
+            <CopyBlock text={rawToken} />
+          </div>
+        ) : (
+          <Button type="button" onClick={() => generate.mutate()} disabled={generate.isPending}>
+            {generate.isPending ? "Generating…" : "Generate an API key"}
+          </Button>
+        )}
+        <CopyBlock label="Then run" text={command} />
       </div>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Saving…" : "Save scan config"}
+        <Button variant="ghost" onClick={onDone}>
+          Done
         </Button>
       </DialogFooter>
-    </form>
+    </>
   );
 }
 
-function CicdConfigureStep({ projectId, onCreated }: { projectId: string; onCreated: (scan: Scan) => void }) {
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    formState: { errors },
-  } = useForm<NewCicdScanInput>({ resolver: zodResolver(newCicdScanSchema) });
-  const mutation = useCreateScan(projectId, onCreated);
-  const [ciProvider, setCiProvider] = useState<CiProvider>();
+function cicdSnippet(provider: CiProvider, origin: string, projectId: string): string {
+  const cmdGh = `zerostrike scan . --server ${origin} --project-id ${projectId} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
+  const cmdSh = `zerostrike scan . --server ${origin} --project-id ${projectId} --token $ZEROSTRIKE_TOKEN`;
+  const cmdAz = `zerostrike scan . --server ${origin} --project-id ${projectId} --token $(ZEROSTRIKE_TOKEN)`;
+  if (provider === "github_actions") {
+    return [
+      "# .github/workflows/zerostrike.yml",
+      "name: ZeroStrike SAST",
+      "on: [push, pull_request]",
+      "jobs:",
+      "  zerostrike:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "      - name: ZeroStrike scan",
+      `        run: ${cmdGh}`,
+    ].join("\n");
+  }
+  if (provider === "gitlab_ci") {
+    return [
+      "# .gitlab-ci.yml",
+      "zerostrike_scan:",
+      "  stage: test",
+      "  script:",
+      `    - ${cmdSh}`,
+    ].join("\n");
+  }
+  return [
+    "# azure-pipelines.yml",
+    "steps:",
+    `  - script: ${cmdAz}`,
+    "    displayName: ZeroStrike scan",
+  ].join("\n");
+}
+
+function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+  const [provider, setProvider] = useState<CiProvider>();
 
   return (
-    <form onSubmit={handleSubmit((values) => mutation.mutate({ scan_type: "cicd", ...values }))}>
+    <>
       <DialogHeader>
         <DialogTitle>CI/CD scan</DialogTitle>
         <DialogDescription>
-          Coming soon — this saves your pipeline config only, no pipeline is wired up yet.
+          Add ZeroStrike to your pipeline. Store an API key as a secret named{" "}
+          <code>ZEROSTRIKE_TOKEN</code> (generate one on the API Keys tab), then drop in the snippet.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
@@ -171,92 +193,102 @@ function CicdConfigureStep({ projectId, onCreated }: { projectId: string; onCrea
                 key={p.value}
                 type="button"
                 size="sm"
-                variant={ciProvider === p.value ? "secondary" : "ghost"}
-                onClick={() => {
-                  setCiProvider(p.value);
-                  setValue("ci_provider", p.value, { shouldValidate: true });
-                }}
+                variant={provider === p.value ? "secondary" : "ghost"}
+                onClick={() => setProvider(p.value)}
               >
                 {p.label}
               </Button>
             ))}
           </div>
-          {errors.ci_provider && <p className="text-sm text-destructive">{errors.ci_provider.message}</p>}
         </div>
-        {ciProvider && (
-          <code className="block min-w-0 rounded bg-muted px-2 py-1 text-xs break-all whitespace-pre-wrap">
-            zerostrike scan . --project-id {projectId} --server $ZEROSTRIKE_SERVER --token $ZEROSTRIKE_TOKEN
-          </code>
-        )}
+        {provider && <CopyBlock label="Pipeline snippet" text={cicdSnippet(provider, portalOrigin(), projectId)} />}
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onDone}>
+          Done
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
+
+  const mutation = useMutation({
+    mutationFn: (values: NewCloudScanInput) => createCloudScan(projectId, values),
+    onSuccess: (scan) => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      toast.success("Cloud scan started");
+      onClose();
+      router.push(`/projects/${projectId}/scans/${scan.id}`);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start cloud scan"),
+  });
+
+  return (
+    <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+      <DialogHeader>
+        <DialogTitle>Cloud scan</DialogTitle>
+        <DialogDescription>
+          ZeroStrike clones the repository and scans it on the server. Provide a token below for private
+          repos — it is used only for this clone and never stored.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="cicd-label">Label (optional)</Label>
-          <Input id="cicd-label" autoComplete="off" {...register("scan_label")} />
+          <Label htmlFor="cloud-repo">Repository URL</Label>
+          <Input id="cloud-repo" placeholder="https://github.com/org/repo" autoComplete="off" {...register("repo_url")} />
+          {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cloud-branch">Branch (optional)</Label>
+          <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch")} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cloud-token">Access token (private repos only)</Label>
+          <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cloud-label">Label (optional)</Label>
+          <Input id="cloud-label" autoComplete="off" {...register("scan_label")} />
         </div>
       </div>
       <DialogFooter>
         <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Saving…" : "Save scan config"}
+          {mutation.isPending ? "Starting…" : "Start cloud scan"}
         </Button>
       </DialogFooter>
     </form>
   );
 }
 
-function CreatedStep({ scan, onDismiss }: { scan: Scan; onDismiss: () => void }) {
-  const router = useRouter();
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>Scan created</DialogTitle>
-        <DialogDescription>
-          {scan.scan_type === "local"
-            ? "Next: make sure this project has an active API key so the CLI can authenticate."
-            : "Saved. Real execution for this scan type ships in a later sprint."}
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button variant="ghost" onClick={onDismiss}>
-          Done
-        </Button>
-        {scan.scan_type === "local" && (
-          <Button
-            onClick={() => {
-              router.push(`/projects/${scan.project_id}?tab=keys`);
-              onDismiss();
-            }}
-          >
-            Set up API key
-          </Button>
-        )}
-      </DialogFooter>
-    </>
-  );
-}
-
 export function NewScanDialog({ projectId }: { projectId: string }) {
   const [open, setOpen] = useState(false);
   const [scanType, setScanType] = useState<ScanType | null>(null);
-  const [createdScan, setCreatedScan] = useState<Scan | null>(null);
 
   function close() {
     setOpen(false);
     setScanType(null);
-    setCreatedScan(null);
   }
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : close())}>
       <DialogTrigger render={<Button>New scan</Button>} />
       <DialogContent>
-        {createdScan ? (
-          <CreatedStep scan={createdScan} onDismiss={close} />
-        ) : scanType === "local" ? (
-          <LocalConfigureStep projectId={projectId} onCreated={setCreatedScan} />
+        {scanType === "local" ? (
+          <LocalSetupStep projectId={projectId} onDone={close} />
         ) : scanType === "cloud" ? (
-          <CloudConfigureStep projectId={projectId} onCreated={setCreatedScan} />
+          <CloudCreateStep projectId={projectId} onClose={close} />
         ) : scanType === "cicd" ? (
-          <CicdConfigureStep projectId={projectId} onCreated={setCreatedScan} />
+          <CicdSetupStep projectId={projectId} onDone={close} />
         ) : (
           <TypeSelectStep onSelect={setScanType} />
         )}
