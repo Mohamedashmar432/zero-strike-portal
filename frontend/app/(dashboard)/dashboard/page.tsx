@@ -26,7 +26,7 @@ export default function DashboardPage() {
         ))}
       </div>
       <p className="text-sm text-muted-foreground">
-        Recent scans and latest reports will appear here once Sprint 2/3 project + scan features land.
+        Recent SAST scans and latest reports will appear here once you run your first scan.
       </p>
     </div>
   );

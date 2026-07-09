@@ -1,13 +1,15 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as authApi from "@/lib/api/auth";
+import { tryRefresh } from "@/lib/api/client";
 import { clearTokens, getTokens, setTokens } from "@/lib/api/token-store";
 import { updateMyProfile } from "@/lib/api/users";
 
 type AuthContextValue = {
   user: authApi.User | null;
   isAuthenticating: boolean;
+  isRestoringSession: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -16,13 +18,29 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// ponytail: tokens are in-memory only (see token-store.ts), so a page reload
-// always requires re-login — no session restore on mount. Upgrade path: move
-// the refresh token to an httpOnly cookie set by the backend (see plan §7)
-// once that backend work is prioritized.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<authApi.User | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  // Access tokens are in-memory only; the refresh token survives in
+  // sessionStorage (see token-store.ts) so a reload/hard nav can silently
+  // re-issue an access token instead of forcing the user back to /login.
+  useEffect(() => {
+    (async () => {
+      const { refreshToken } = getTokens();
+      if (refreshToken && (await tryRefresh())) {
+        try {
+          setUser(await authApi.getMe());
+        } catch {
+          clearTokens();
+        }
+      } else if (refreshToken) {
+        clearTokens();
+      }
+      setIsRestoringSession(false);
+    })();
+  }, []);
 
   async function login(email: string, password: string) {
     setIsAuthenticating(true);
@@ -59,7 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticating, login, register, logout, updateProfile }}>
+    <AuthContext.Provider
+      value={{ user, isAuthenticating, isRestoringSession, login, register, logout, updateProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

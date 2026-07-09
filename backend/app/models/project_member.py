@@ -7,7 +7,8 @@ from pymongo import IndexModel
 
 class ProjectMember(Document):
     project_id: str
-    user_id: str
+    user_id: str | None = None
+    invited_email: str
     role: Literal["owner", "collaborator"] = "collaborator"
     invited_by: str
     invited_at: datetime
@@ -15,4 +16,4 @@ class ProjectMember(Document):
 
     class Settings:
         name = "project_members"
-        indexes = [IndexModel([("project_id", 1), ("user_id", 1)], unique=True)]
+        indexes = [IndexModel([("project_id", 1), ("invited_email", 1)], unique=True)]

@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 
 from app.core import security
 from app.core.config import settings
+from app.models.project_member import ProjectMember
 from app.models.user import RefreshTokenRecord, User
 
 
@@ -24,6 +25,15 @@ async def register(email: str, password: str, name: str) -> User:
         updated_at=now,
     )
     await user.insert()
+
+    pending = await ProjectMember.find(
+        ProjectMember.invited_email == email, ProjectMember.user_id == None  # noqa: E711
+    ).to_list()
+    for member in pending:
+        member.user_id = str(user.id)
+        member.accepted_at = now
+        await member.save()
+
     return user
 
 

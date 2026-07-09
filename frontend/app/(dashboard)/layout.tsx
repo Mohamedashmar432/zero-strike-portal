@@ -7,12 +7,12 @@ import { Topbar } from "@/components/layout/topbar";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, isAuthenticating } = useAuth();
+  const { user, isAuthenticating, isRestoringSession } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticating && !user) router.replace("/login");
-  }, [user, isAuthenticating, router]);
+    if (!isAuthenticating && !isRestoringSession && !user) router.replace("/login");
+  }, [user, isAuthenticating, isRestoringSession, router]);
 
   if (!user) return null;
 
