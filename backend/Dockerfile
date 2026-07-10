@@ -52,10 +52,10 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --no-cache-dir -e .
 
-# Non-root runtime. Artifact + ephemeral clone dirs owned by the app user.
+# Non-root runtime. Ephemeral clone dir owned by the app user (reports persist in Mongo).
 RUN useradd --create-home --uid 10001 appuser \
-    && mkdir -p /data/artifacts /tmp/zs-clones \
-    && chown -R appuser:appuser /app /data/artifacts /tmp/zs-clones
+    && mkdir -p /tmp/zs-clones \
+    && chown -R appuser:appuser /app /tmp/zs-clones
 USER appuser
 
 EXPOSE 8000

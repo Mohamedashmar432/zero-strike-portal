@@ -1,7 +1,4 @@
 import { apiFetch } from "./client";
-import { getTokens } from "./token-store";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
 export type ReportStats = {
   files_scanned: number | null;
@@ -34,15 +31,4 @@ export type Report = {
 
 export function getReport(scanId: string) {
   return apiFetch<Report>(`/scans/${scanId}/report`);
-}
-
-// Download endpoints are JWT-gated, so a plain <a href> (no auth header) won't work —
-// fetch the bytes with the access token and return a Blob for a client-side download.
-export async function downloadReport(scanId: string, fmt: "json" | "html"): Promise<Blob> {
-  const { accessToken } = getTokens();
-  const res = await fetch(`${API_BASE_URL}/scans/${scanId}/report/download/${fmt}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-  });
-  if (!res.ok) throw new Error(`Download failed (${res.status})`);
-  return res.blob();
 }

@@ -123,11 +123,12 @@ def _diagnostic(d: GoDiagnosticIn) -> DiagnosticEmbedded:
     )
 
 
-async def ingest(scan: Scan, report: GoReportIn, json_path: str) -> int:
+async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     """Write findings + report for `scan` from a parsed Go report, mark the scan completed.
 
+    The raw report JSON is stored on the Report doc in Mongo (no filesystem artifacts).
     Idempotent: any prior Finding/Report docs for this scan are replaced (supports re-upload).
-    Returns the number of findings ingested. The caller is responsible for the raw artifact file.
+    Returns the number of findings ingested.
     """
     scan_id = str(scan.id)
     project_id = scan.project_id
@@ -154,7 +155,7 @@ async def ingest(scan: Scan, report: GoReportIn, json_path: str) -> int:
         hostname=report.hostname,
         stats=_stats(report.stats),
         diagnostics=[_diagnostic(d) for d in report.diagnostics],
-        json_path=json_path,
+        raw_json=raw_json,
         json_uploaded_at=now,
     ).insert()
 

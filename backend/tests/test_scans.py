@@ -143,16 +143,6 @@ def test_scan_report_and_findings_readable(client):
     assert critical["items"][0]["rule_id"] == "ZS-PY-001"
 
 
-def test_download_report_json(client):
-    owner = register_and_login(client, email="sowner9@zerostrike.dev")
-    project = _create_project(client, _headers(owner))
-    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
-
-    r = client.get(f"/api/v1/scans/{scan_id}/report/download/json", headers=_headers(owner))
-    assert r.status_code == 200
-    assert b"ZS-PY-001" in r.content
-
-
 def test_delete_project_cascades_scans_findings_reports(client):
     owner = register_and_login(client, email="sowner11@zerostrike.dev")
     project = _create_project(client, _headers(owner))

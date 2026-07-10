@@ -12,15 +12,14 @@ class Settings(BaseSettings):
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 30
 
-    artifact_storage_path: str = "./data/artifacts"
-
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Server-side (cloud) scan execution — the CGO-enabled scanner binary baked into the image.
-    scanner_binary_path: str = "/usr/local/bin/zerostrike"
+    # Server-side (cloud) scan execution. The scanner runs as a subprocess — no Docker at runtime.
+    # Point scanner_binary_path at a local `zerostrike`/`zerostrike.exe` (dev) or the container binary.
+    scanner_binary_path: str = "zerostrike"
     scan_timeout_seconds: int = 900
     max_concurrent_cloud_scans: int = 2
-    clone_workdir_path: str = "/tmp/zs-clones"  # ephemeral; never the durable artifacts volume
+    clone_workdir_path: str = ""  # empty => OS temp dir/zs-clones (cross-platform)
 
 
 settings = Settings()

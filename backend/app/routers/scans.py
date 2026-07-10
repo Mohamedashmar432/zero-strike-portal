@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
 
 from app.core.deps import get_current_user
 from app.models.finding import Finding
@@ -12,7 +11,6 @@ from app.schemas.common import Page
 from app.schemas.report import FindingResponse, ReportResponse
 from app.schemas.scan import ScanCreateRequest, ScanResponse
 from app.services import audit_service, cloud_scan_service, project_service, scan_service
-from app.storage import artifact_store
 
 router = APIRouter(tags=["scans"])
 
@@ -168,7 +166,7 @@ async def get_scan_report(scan_id: str, user: User = Depends(get_current_user)):
         hostname=report.hostname,
         stats=report.stats,
         diagnostics=report.diagnostics,
-        html_available=report.html_path is not None,
+        html_available=report.raw_html is not None,
         generated_at=report.generated_at,
     )
 
@@ -197,16 +195,3 @@ async def list_scan_findings(
     return Page(
         items=[_to_finding_response(f) for f in findings], total=total, page=page, page_size=page_size
     )
-
-
-@router.get("/scans/{scan_id}/report/download/{fmt}")
-async def download_report(scan_id: str, fmt: str, user: User = Depends(get_current_user)):
-    if fmt not in ("json", "html"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "fmt must be 'json' or 'html'")
-    scan = await scan_service.get_scan_or_404(scan_id)
-    await project_service.require_member(scan.project_id, user)
-    path = artifact_store.path_for(scan.project_id, scan_id, fmt)
-    if not path.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
-    media_type = "application/json" if fmt == "json" else "text/html"
-    return FileResponse(path, media_type=media_type, filename=f"report.{fmt}")

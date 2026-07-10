@@ -17,7 +17,6 @@ from app.models.scan import Scan
 from app.schemas.report import GoReportIn
 from app.schemas.scan import ScannerCreateScanRequest, ScannerCreateScanResponse, ScannerStatusUpdateRequest
 from app.services import audit_service, project_service, report_ingestion_service, scan_service
-from app.storage import artifact_store
 
 router = APIRouter(tags=["scanner"])
 
@@ -76,8 +75,7 @@ async def upload_json(scan_id: str, request: Request, ctx: ApiKeyContext = Depen
     except ValidationError:
         raise HTTPException(422, "Invalid scanner report JSON")
 
-    json_path = artifact_store.write_json(scan.project_id, scan_id, raw)
-    count = await report_ingestion_service.ingest(scan, report, json_path)
+    count = await report_ingestion_service.ingest(scan, report, raw.decode("utf-8", errors="replace"))
     await audit_service.record(
         "Scan Report Uploaded",
         actor_type="api_key",
@@ -93,12 +91,11 @@ async def upload_json(scan_id: str, request: Request, ctx: ApiKeyContext = Depen
 async def upload_html(
     scan_id: str, file: UploadFile, ctx: ApiKeyContext = Depends(get_api_key_context)
 ):
-    scan = await _owned_scan(scan_id, ctx)
+    await _owned_scan(scan_id, ctx)  # ownership check (404 if the key's project doesn't own it)
     data = await file.read()
-    html_path = artifact_store.write_html(scan.project_id, scan_id, data)
     report = await Report.find_one(Report.scan_id == scan_id)
     if report:
-        report.html_path = html_path
+        report.raw_html = data.decode("utf-8", errors="replace")
         report.html_uploaded_at = datetime.now(timezone.utc)
         await report.save()
     return {"status": "ok"}

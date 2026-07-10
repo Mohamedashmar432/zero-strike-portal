@@ -90,7 +90,8 @@ def test_ingest_writes_findings_report_and_completes_scan(client):
         now = datetime.now(timezone.utc)
         scan = Scan(project_id="proj-x", scan_type="local", created_at=now, updated_at=now)
         await scan.insert()
-        count = await ingest_svc.ingest(scan, _load(), json_path="/data/artifacts/x/y/report.json")
+        raw = _FIXTURE.read_text()
+        count = await ingest_svc.ingest(scan, _load(), raw_json=raw)
 
         from app.models.finding import Finding
         from app.models.report import Report
@@ -101,13 +102,14 @@ def test_ingest_writes_findings_report_and_completes_scan(client):
         assert report is not None
         assert report.duration_ms == 4200
         assert report.scanner_version == "v0.22.0"
+        assert report.raw_json == raw  # stored in Mongo, not on disk
         reloaded = await Scan.get(scan.id)
         assert reloaded.status == "completed"
         assert reloaded.completed_at is not None
         assert reloaded.git_commit.startswith("a1b2c3d4")
 
         # Re-ingest replaces rather than duplicates.
-        await ingest_svc.ingest(scan, _load(), json_path="/data/artifacts/x/y/report.json")
+        await ingest_svc.ingest(scan, _load(), raw_json=raw)
         assert await Finding.find(Finding.scan_id == str(scan.id)).count() == 4
         assert await Report.find(Report.scan_id == str(scan.id)).count() == 1
 

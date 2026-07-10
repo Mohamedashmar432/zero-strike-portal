@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { toast } from "sonner";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -14,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listFindings, type FindingKind, type Severity } from "@/lib/api/findings";
-import { downloadReport, getReport } from "@/lib/api/reports";
+import { getReport } from "@/lib/api/reports";
 import { getScan } from "@/lib/api/scans";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -53,20 +52,6 @@ export default function ScanDetailPage() {
     enabled: completed,
     retry: false,
   });
-
-  async function handleDownload(fmt: "json" | "html") {
-    try {
-      const blob = await downloadReport(scanId, fmt);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `report.${fmt}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast.error("Download failed");
-    }
-  }
 
   if (scanLoading || !scan) {
     return <Skeleton className="h-40 w-full" />;
@@ -112,18 +97,8 @@ export default function ScanDetailPage() {
       {completed && (
         <>
           <Card>
-            <CardHeader className="flex-row items-center justify-between">
+            <CardHeader>
               <CardTitle>Summary</CardTitle>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => handleDownload("json")}>
-                  Download JSON
-                </Button>
-                {report?.html_available && (
-                  <Button size="sm" variant="outline" onClick={() => handleDownload("html")}>
-                    Download HTML
-                  </Button>
-                )}
-              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">

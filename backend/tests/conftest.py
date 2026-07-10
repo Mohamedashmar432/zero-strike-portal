@@ -1,15 +1,8 @@
-import os
-import tempfile
+import pytest
+from fastapi.testclient import TestClient
+from mongomock_motor import AsyncMongoMockClient
 
-# Point artifact storage at a throwaway dir before Settings is instantiated, so
-# tests never write scan artifacts into the repo's ./data/artifacts.
-os.environ.setdefault("ARTIFACT_STORAGE_PATH", tempfile.mkdtemp(prefix="zs-test-artifacts-"))
-
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from mongomock_motor import AsyncMongoMockClient  # noqa: E402
-
-import app.db.mongo as mongo_module  # noqa: E402
+import app.db.mongo as mongo_module
 
 mongo_module.AsyncIOMotorClient = AsyncMongoMockClient
 

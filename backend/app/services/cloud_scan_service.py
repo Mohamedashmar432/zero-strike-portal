@@ -6,16 +6,17 @@ report_ingestion_service, and delete the clone (crash-safe). Kicked off as a
 FastAPI BackgroundTask from the JWT create-scan endpoint.
 
 Static analysis only — the target code is never executed — but git clone and the
-SCA scanner hit the network, so: SSRF guard on repo_url, per-step timeouts with
-process-group kill, and guaranteed workdir cleanup.
+SCA scanner hit the network, so: SSRF guard on repo_url, per-step timeouts, and
+guaranteed workdir cleanup. Subprocesses run via subprocess.run in a worker thread
+so the same code path works on Windows (local dev) and Linux (container).
 """
 
 import asyncio
 import ipaddress
 import os
 import shutil
-import signal
 import socket
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,6 @@ from app.core.config import settings
 from app.models.scan import Scan
 from app.schemas.report import GoReportIn
 from app.services import report_ingestion_service
-from app.storage import artifact_store
 
 _semaphore: asyncio.Semaphore | None = None
 
@@ -42,7 +42,9 @@ def _sem() -> asyncio.Semaphore:
 
 
 def _workdir_root() -> str:
-    root = Path(settings.clone_workdir_path)
+    # Empty setting => OS temp dir, so this resolves sensibly on Windows and Linux alike.
+    base = settings.clone_workdir_path or str(Path(tempfile.gettempdir()) / "zs-clones")
+    root = Path(base)
     root.mkdir(parents=True, exist_ok=True)
     return str(root)
 
@@ -72,33 +74,21 @@ def _sanitize(message: str, repo_token: str | None) -> str:
     return message[:1000]
 
 
-def _kill(proc: asyncio.subprocess.Process) -> None:
+def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, bytes, bytes]:
+    # subprocess.run is used (in a worker thread) rather than asyncio.create_subprocess_exec:
+    # it works identically on Windows and Linux and handles the timeout kill itself, avoiding
+    # the POSIX-only process-group machinery and the Windows event-loop subprocess pitfall.
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env, check=False)
+    except subprocess.TimeoutExpired:
+        raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
+    except FileNotFoundError:
+        raise CloudScanError(f"executable not found: {cmd[0]}")
+    return proc.returncode, proc.stdout or b"", proc.stderr or b""
 
 
 async def _run(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, bytes, bytes]:
-    kwargs = {}
-    if os.name == "posix":
-        kwargs["start_new_session"] = True  # own process group so a timeout kills children too
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        **kwargs,
-    )
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        _kill(proc)
-        raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
-    return proc.returncode, out, err
+    return await asyncio.to_thread(_run_sync, cmd, timeout, env)
 
 
 async def _clone(repo_url: str, branch: str | None, workdir: str, repo_token: str | None) -> None:
@@ -134,8 +124,7 @@ async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
     if rc not in (0, 1):
         raise CloudScanError(f"scanner exited {rc}: {err.decode(errors='replace')}")
     report = GoReportIn.model_validate_json(out)
-    json_path = artifact_store.write_json(scan.project_id, str(scan.id), out)
-    await report_ingestion_service.ingest(scan, report, json_path)
+    await report_ingestion_service.ingest(scan, report, out.decode("utf-8", errors="replace"))
 
 
 async def _fail(scan: Scan, message: str) -> None:

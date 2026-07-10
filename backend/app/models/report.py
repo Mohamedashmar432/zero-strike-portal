@@ -36,8 +36,10 @@ class Report(Document):
     hostname: str | None = None
     stats: ScanStatsEmbedded = Field(default_factory=ScanStatsEmbedded)
     diagnostics: list[DiagnosticEmbedded] = []
-    json_path: str
-    html_path: str | None = None
+    # Report content lives in Mongo (no filesystem volume). ponytail: ~10MB doc ceiling —
+    # move to GridFS/Blob if reports ever get that big.
+    raw_json: str | None = None
+    raw_html: str | None = None
     json_uploaded_at: datetime
     html_uploaded_at: datetime | None = None
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -10,23 +10,19 @@ from app.models.scan import Scan
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
 
 
-class _FakeProc:
-    """Stand-in for asyncio subprocess: returns canned (returncode, stdout, stderr)."""
+class _FakeCompleted:
+    """Stand-in for subprocess.CompletedProcess."""
 
     def __init__(self, returncode, stdout=b"", stderr=b""):
         self.returncode = returncode
-        self._out = stdout
-        self._err = stderr
-        self.pid = 4321
-
-    async def communicate(self):
-        return self._out, self._err
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def _make_cloud_scan(repo_url="https://github.com/example/repo"):
     now = datetime.now(timezone.utc)
     return Scan(
-        project_id="aaaaaaaaaaaaaaaaaaaaaaaa",  # valid 24-hex ObjectId shape for artifact_store
+        project_id="cloudproj",
         scan_type="cloud",
         triggered_by="cloud",
         status="pending",
@@ -37,17 +33,17 @@ def _make_cloud_scan(repo_url="https://github.com/example/repo"):
 
 
 def _patch_subprocess(monkeypatch, tmp_path, clone_rc=0, scan_rc=1, scan_stdout=None):
-    """Route both git-clone and scanner invocations through fake procs; keep workdir in tmp."""
+    """Route both git-clone and scanner invocations through a fake subprocess.run; keep workdir in tmp."""
     monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
     monkeypatch.setattr(css, "validate_repo_url", lambda url: None)  # DNS-independent in tests
     scan_stdout = scan_stdout if scan_stdout is not None else _FIXTURE.read_bytes()
 
-    async def fake_exec(*cmd, **kwargs):
+    def fake_run(cmd, **kwargs):
         if cmd[0] == "git":
-            return _FakeProc(clone_rc, b"", b"clone stderr")
-        return _FakeProc(scan_rc, scan_stdout, b"")
+            return _FakeCompleted(clone_rc, b"", b"clone stderr")
+        return _FakeCompleted(scan_rc, scan_stdout, b"")
 
-    monkeypatch.setattr(css.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
 
 
 def test_cloud_scan_completes_and_ingests(client, monkeypatch, tmp_path):

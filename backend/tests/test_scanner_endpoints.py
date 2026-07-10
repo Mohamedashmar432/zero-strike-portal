@@ -129,7 +129,7 @@ def test_upload_json_rejects_malformed_body(client):
     assert r.status_code == 422
 
 
-def test_upload_html_stores_artifact(client):
+def test_upload_html_stores_in_mongo(client):
     owner = register_and_login(client, email="scn6@zerostrike.dev")
     project = _project(client, _headers(owner))
     token = _raw_key(client, _headers(owner), project["id"])
@@ -147,6 +147,10 @@ def test_upload_html_stores_artifact(client):
     )
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+    # HTML is persisted in Mongo (no filesystem) — surfaced as html_available on the report.
+    report = client.get(f"/api/v1/scans/{scan['scan_id']}/report", headers=_headers(owner)).json()
+    assert report["html_available"] is True
 
 
 def test_status_update_marks_failed(client):
