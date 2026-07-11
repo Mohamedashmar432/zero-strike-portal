@@ -8,5 +8,8 @@ export const newCloudScanSchema = z.object({
   branch: z.string().optional(),
   scan_label: z.string().optional(),
   repo_token: z.string().optional(),
+  // Set instead of repo_token when the repo was picked from a connected GitHub/Azure DevOps
+  // account — resolved to a real credential server-side (see connection_service).
+  connection_id: z.string().optional(),
 });
 export type NewCloudScanInput = z.infer<typeof newCloudScanSchema>;

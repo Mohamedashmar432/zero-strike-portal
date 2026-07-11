@@ -20,12 +20,13 @@ class _FakeCompleted:
 
 
 def _make_cloud_scan(repo_url="https://github.com/example/repo"):
+    # run_cloud_scan is only ever invoked post-claim, so tests reflect the already-claimed state.
     now = datetime.now(timezone.utc)
     return Scan(
         project_id="cloudproj",
         scan_type="cloud",
         triggered_by="cloud",
-        status="pending",
+        status="running",
         repo_url=repo_url,
         created_at=now,
         updated_at=now,
@@ -113,6 +114,71 @@ def test_cloud_scan_bad_json_marks_failed(client, monkeypatch, tmp_path):
 def test_ssrf_guard_rejects_dangerous_urls(bad_url):
     with pytest.raises(css.CloudScanError):
         css.validate_repo_url(bad_url)
+
+
+def test_scanner_binary_missing_gives_actionable_message(client, monkeypatch, tmp_path):
+    """A FileNotFoundError for the scanner specifically (not git) is a portal misconfiguration —
+    the surfaced message must say so distinctly from a generic 'executable not found'."""
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git":
+            return _FakeCompleted(0, b"", b"")
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "failed"
+        assert "not available on this server" in reloaded.error_message
+        assert "contact an administrator" in reloaded.error_message
+
+    asyncio.run(run())
+
+
+def test_git_missing_gives_generic_message(client, monkeypatch, tmp_path):
+    """A FileNotFoundError for git (not the scanner) keeps the plain generic message — only the
+    scanner binary is a portal-wide misconfiguration; git missing is a different kind of problem."""
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+    monkeypatch.setattr(css.subprocess, "run", lambda cmd, **kwargs: (_ for _ in ()).throw(FileNotFoundError(cmd[0])))
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "failed"
+        assert reloaded.error_message == "executable not found: git"
+
+    asyncio.run(run())
+
+
+def test_scanner_available_reflects_binary_resolution(monkeypatch):
+    monkeypatch.setattr(css.shutil, "which", lambda path: None)
+    assert css.scanner_available() is False
+
+    monkeypatch.setattr(css.shutil, "which", lambda path: path)
+    assert css.scanner_available() is True
+
+
+def test_missing_scanner_warns_at_startup(monkeypatch, caplog):
+    """The whole point of this check is that it's visible the moment the server boots, not just
+    buried in the first failed scan's error_message — verify the warning actually fires."""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    monkeypatch.setattr(css, "scanner_available", lambda: False)
+    with caplog.at_level("WARNING", logger="app.main"):
+        with TestClient(create_app()):
+            pass
+    assert any("SCANNER_BINARY_PATH" in r.message for r in caplog.records)
 
 
 def test_workdir_cleaned_up_after_scan(client, monkeypatch, tmp_path):

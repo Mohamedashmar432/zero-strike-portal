@@ -2,8 +2,9 @@
 
 For a scan_type="cloud" Scan: clone the repo into an ephemeral workdir, run the
 baked-in Go scanner binary against it, ingest the report via the shared
-report_ingestion_service, and delete the clone (crash-safe). Kicked off as a
-FastAPI BackgroundTask from the JWT create-scan endpoint.
+report_ingestion_service, and delete the clone (crash-safe). Invoked only after
+scan_queue_service has atomically claimed the scan (set status="running") —
+this module no longer manages concurrency itself, see scan_queue_service.
 
 Static analysis only — the target code is never executed — but git clone and the
 SCA scanner hit the network, so: SSRF guard on repo_url, per-step timeouts, and
@@ -13,6 +14,7 @@ so the same code path works on Windows (local dev) and Linux (container).
 
 import asyncio
 import ipaddress
+import logging
 import os
 import shutil
 import socket
@@ -27,18 +29,18 @@ from app.models.scan import Scan
 from app.schemas.report import GoReportIn
 from app.services import report_ingestion_service
 
-_semaphore: asyncio.Semaphore | None = None
+logger = logging.getLogger(__name__)
 
 
 class CloudScanError(Exception):
     """A recoverable cloud-scan failure; message is surfaced (sanitized) on the scan."""
 
 
-def _sem() -> asyncio.Semaphore:
-    global _semaphore
-    if _semaphore is None:
-        _semaphore = asyncio.Semaphore(settings.max_concurrent_cloud_scans)
-    return _semaphore
+def scanner_available() -> bool:
+    """Whether settings.scanner_binary_path currently resolves to a real executable — checked at
+    startup (main.py's lifespan) so a misconfigured/missing binary is an immediate, loud log line
+    instead of a silent surprise on the first cloud scan a user happens to try."""
+    return shutil.which(settings.scanner_binary_path) is not None
 
 
 def _workdir_root() -> str:
@@ -83,6 +85,22 @@ def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[in
     except subprocess.TimeoutExpired:
         raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
     except FileNotFoundError:
+        if cmd[0] == settings.scanner_binary_path:
+            # Distinct from every other failure here: this is a portal misconfiguration (or a
+            # process that never picked up a SCANNER_BINARY_PATH change — .env is only read at
+            # startup), not something a user can fix by retrying or fixing their repo/token. Log
+            # loudly so it's diagnosable from server logs alone, without reproducing a scan.
+            logger.error(
+                "Scanner binary not found at %r (SCANNER_BINARY_PATH) — every cloud scan will fail "
+                "until this is fixed; restart the backend after correcting it.",
+                cmd[0],
+            )
+            raise CloudScanError(
+                f"ZeroStrike scanner is not available on this server (binary not found at "
+                f"'{cmd[0]}'). This is a portal configuration issue, not a problem with your repo — "
+                "contact an administrator."
+            )
+        logger.error("Required executable not found: %r", cmd[0])
         raise CloudScanError(f"executable not found: {cmd[0]}")
     return proc.returncode, proc.stdout or b"", proc.stderr or b""
 
@@ -135,25 +153,37 @@ async def _fail(scan: Scan, message: str) -> None:
     scan.updated_at = now
     await scan.save()
 
+    # A failure frees a concurrency slot — nudge the queue rather than waiting for the next poll tick.
+    from app.services import scan_queue_service
+
+    await scan_queue_service.drain_queue()
+
 
 async def run_cloud_scan(scan_id: str, repo_token: str | None = None) -> None:
+    """Clone + scan + ingest an already-claimed scan (status="running", set by scan_queue_service)."""
     scan = await Scan.get(scan_id)
     if not scan or scan.scan_type != "cloud" or not scan.repo_url:
         return
 
-    async with _sem():
-        now = datetime.now(timezone.utc)
-        scan.status = "running"
-        scan.started_at = now
-        scan.updated_at = now
-        await scan.save()
-
-        workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
-        try:
-            validate_repo_url(scan.repo_url)
-            await _clone(scan.repo_url, scan.branch, workdir, repo_token)
-            await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
-        except Exception as e:
-            await _fail(scan, _sanitize(str(e), repo_token))
-        finally:
-            shutil.rmtree(workdir, ignore_errors=True)
+    workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
+    try:
+        validate_repo_url(scan.repo_url)
+        await _clone(scan.repo_url, scan.branch, workdir, repo_token)
+        await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
+    except Exception as e:
+        message = _sanitize(str(e), repo_token)
+        # CloudScanError covers every expected failure mode (bad repo_url, clone/scanner failure,
+        # timeout) and is already a clear, complete message — a traceback would only point at
+        # subprocess.run internals. Anything else is unexpected (e.g. a bad ingestion parse) and
+        # gets a full traceback since that's a real bug worth debugging from the log alone.
+        logger.error(
+            "Cloud scan %s failed: %s (repo=%s branch=%s)",
+            scan_id,
+            message,
+            scan.repo_url,
+            scan.branch or "<default>",
+            exc_info=not isinstance(e, CloudScanError),
+        )
+        await _fail(scan, message)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)

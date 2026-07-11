@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-import app.services.cloud_scan_service as cloud_scan_service
+import app.services.scan_queue_service as scan_queue_service
 from tests.test_auth_flow import register_and_login
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
@@ -45,7 +45,7 @@ async def _noop(*args, **kwargs):
 
 
 def test_create_cloud_scan_schedules_execution(client, monkeypatch):
-    monkeypatch.setattr(cloud_scan_service, "run_cloud_scan", _noop)
+    monkeypatch.setattr(scan_queue_service, "drain_queue", _noop)
     owner = register_and_login(client, email="sowner1@zerostrike.dev")
     project = _create_project(client, _headers(owner))
 
@@ -58,7 +58,7 @@ def test_create_cloud_scan_schedules_execution(client, monkeypatch):
     body = r.json()
     assert body["scan_type"] == "cloud"
     assert body["triggered_by"] == "cloud"
-    assert body["status"] == "pending"
+    assert body["status"] == "queued"
 
     detail = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(owner)).json()
     assert detail["scan_count"] == 1

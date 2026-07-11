@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import get_current_user
 from app.models.finding import Finding
@@ -10,7 +10,14 @@ from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.report import FindingResponse, ReportResponse
 from app.schemas.scan import ScanCreateRequest, ScanResponse
-from app.services import audit_service, cloud_scan_service, project_service, scan_service
+from app.services import (
+    audit_service,
+    connection_service,
+    pdf_report_service,
+    project_service,
+    scan_queue_service,
+    scan_service,
+)
 
 router = APIRouter(tags=["scans"])
 
@@ -89,11 +96,17 @@ async def create_scan(
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
+    repo_token = payload.repo_token
+    if payload.connection_id:
+        repo_token = await connection_service.get_decrypted_token(payload.connection_id, user)
+
     now = datetime.now(timezone.utc)
     scan = Scan(
         project_id=project_id,
         scan_type="cloud",
         triggered_by="cloud",
+        status="queued",
+        repo_token=repo_token,
         scan_label=payload.scan_label,
         repo_url=payload.repo_url,
         branch=payload.branch,
@@ -111,7 +124,8 @@ async def create_scan(
         target_id=str(scan.id),
         metadata={"scan_type": scan.scan_type, "scan_label": scan.scan_label},
     )
-    background.add_task(cloud_scan_service.run_cloud_scan, str(scan.id), payload.repo_token)
+    # Attempt to start immediately if capacity is free; the poll loop is the backstop otherwise.
+    background.add_task(scan_queue_service.drain_queue)
     return _to_response(scan)
 
 
@@ -168,6 +182,23 @@ async def get_scan_report(scan_id: str, user: User = Depends(get_current_user)):
         diagnostics=report.diagnostics,
         html_available=report.raw_html is not None,
         generated_at=report.generated_at,
+    )
+
+
+@router.get("/scans/{scan_id}/report/pdf")
+async def get_scan_report_pdf(scan_id: str, user: User = Depends(get_current_user)):
+    scan = await scan_service.get_scan_or_404(scan_id)
+    await project_service.require_member(scan.project_id, user)
+    report = await Report.find_one(Report.scan_id == scan_id)
+    if not report:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No report for this scan yet")
+
+    findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+    pdf_bytes = await pdf_report_service.render_scan_report_pdf(scan, report, findings)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="scan-{scan_id}-report.pdf"'},
     )
 
 

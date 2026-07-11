@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchBlob } from "./client";
 
 export type ReportStats = {
   files_scanned: number | null;
@@ -31,4 +31,8 @@ export type Report = {
 
 export function getReport(scanId: string) {
   return apiFetch<Report>(`/scans/${scanId}/report`);
+}
+
+export function downloadReportPdf(scanId: string) {
+  return apiFetchBlob(`/scans/${scanId}/report/pdf`);
 }

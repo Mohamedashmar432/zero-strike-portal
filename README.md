@@ -23,6 +23,19 @@ cp .env.example .env.local
 npm run dev
 ```
 
+**Run both** (two terminals, after the one-time setup above):
+```
+# terminal 1 — backend on :8000
+cd backend && ./.venv/Scripts/uvicorn app.main:app --reload
+
+# terminal 2 — frontend on :3000
+cd frontend && npm run dev
+```
+Then open http://localhost:3000. For cloud scans to actually run (not just queue), set
+`SCANNER_BINARY_PATH` in `backend/.env` to a real built `zerostrike`/`zerostrike.exe` —
+e.g. the one in the sibling `../zero-strike-code-scanner` repo — otherwise the scanner
+subprocess fails with "executable not found".
+
 ## Deployment
 
 Single-VM Docker Compose (`deploy/`), with MongoDB Atlas as the only external managed service:

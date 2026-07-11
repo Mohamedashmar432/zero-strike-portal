@@ -4,19 +4,25 @@ from typing import Literal
 from beanie import Document
 from pymongo import IndexModel
 
+# Single source of truth for the status enum — import this everywhere a Scan status
+# is typed (schemas, etc.) instead of repeating the Literal, which used to drift.
+ScanStatus = Literal["pending", "queued", "running", "completed", "failed"]
+
 
 class Scan(Document):
     project_id: str
     api_key_id: str | None = None
     scan_type: Literal["local", "cloud", "cicd"]
     triggered_by: Literal["cli", "ci", "cloud", "manual"] = "cli"
-    status: Literal["pending", "running", "completed", "failed"] = "pending"
+    status: ScanStatus = "pending"
     scanner_version: str | None = None
     hostname: str | None = None
     git_commit: str | None = None
     branch: str | None = None
     scan_label: str | None = None
     repo_url: str | None = None
+    # Transient: only set while status="queued" (cloud scans), cleared atomically at claim time.
+    repo_token: str | None = None
     ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
     created_by: str | None = None
     started_at: datetime | None = None
@@ -30,6 +36,7 @@ class Scan(Document):
         indexes = [
             IndexModel([("project_id", 1), ("started_at", -1)]),
             IndexModel([("status", 1)]),
+            IndexModel([("status", 1), ("created_at", 1)]),  # oldest-queued claim query
             IndexModel([("project_id", 1), ("created_at", -1)]),
             IndexModel([("project_id", 1), ("scan_type", 1)]),
         ]

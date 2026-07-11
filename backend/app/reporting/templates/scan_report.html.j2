@@ -1,0 +1,151 @@
+<html>
+<head>
+<style>
+  @page { size: A4; margin: 2cm 1.5cm; }
+  body { font-family: Helvetica, sans-serif; font-size: 9pt; color: #1a1a1a; }
+  h1 { font-size: 20pt; color: #7a1622; margin-bottom: 0; }
+  h2 { font-size: 13pt; color: #7a1622; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 22px; }
+  .subtitle { color: #555; font-size: 10pt; margin-top: 2px; }
+  .meta-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  .meta-table td { padding: 3px 6px; font-size: 8.5pt; }
+  .meta-table td.label { color: #666; width: 30%; }
+  .stats-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 5px 8px; text-align: left; font-size: 8.5pt; }
+  .stats-table th { background: #f2f2f2; }
+  .badge { padding: 2px 7px; border-radius: 3px; color: #fff; font-size: 8pt; }
+  .sev-critical { background: #7a1622; }
+  .sev-high { background: #c0392b; }
+  .sev-medium { background: #d68910; }
+  .sev-low { background: #2e86c1; }
+  .sev-info { background: #7f8c8d; }
+  .finding { border: 1px solid #ddd; border-radius: 4px; padding: 8px 10px; margin-top: 10px; page-break-inside: avoid; }
+  .finding-title { font-size: 10.5pt; font-weight: bold; }
+  .finding-meta { color: #555; font-size: 8pt; margin-top: 2px; }
+  .finding-section-label { font-weight: bold; color: #444; margin-top: 6px; font-size: 8.5pt; }
+  .code { font-family: Courier, monospace; background: #f7f7f7; border: 1px solid #eee; padding: 5px; font-size: 8pt; white-space: pre-wrap; }
+  .banner { background: #fdf3cd; border: 1px solid #e2c56a; padding: 6px 10px; margin-top: 10px; font-size: 8.5pt; }
+  .footer { color: #999; font-size: 7.5pt; margin-top: 24px; border-top: 1px solid #eee; padding-top: 6px; }
+  .empty { color: #666; font-style: italic; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>ZeroStrike Scan Report</h1>
+<div class="subtitle">{{ scan.scan_label or "Untitled scan" }} &middot; {{ scan.scan_type }}</div>
+
+<table class="meta-table">
+  <tr><td class="label">Repository</td><td>{{ scan.repo_url or report.root_path or "-" }}</td></tr>
+  <tr><td class="label">Branch / commit</td><td>{{ report.branch or scan.branch or "-" }} {% if report.git_commit %}({{ report.git_commit[:12] }}){% endif %}</td></tr>
+  <tr><td class="label">Scanner version</td><td>{{ report.scanner_version or scan.scanner_version or "-" }}</td></tr>
+  <tr><td class="label">Started</td><td>{{ report.started_at or scan.started_at or "-" }}</td></tr>
+  <tr><td class="label">Duration</td><td>{% if report.duration_ms is not none %}{{ "%.1f"|format(report.duration_ms / 1000) }}s{% else %}-{% endif %}</td></tr>
+  <tr><td class="label">Host</td><td>{{ report.hostname or scan.hostname or "-" }}</td></tr>
+</table>
+
+<h2>Scan Summary</h2>
+<table class="stats-table">
+  <tr>
+    <th>Total findings</th><th>Files scanned</th><th>Files skipped</th><th>Files cached</th><th>Suppressed</th>
+  </tr>
+  <tr>
+    <td>{{ report.stats.total_findings if report.stats.total_findings is not none else total_findings }}</td>
+    <td>{{ report.stats.files_scanned if report.stats.files_scanned is not none else "-" }}</td>
+    <td>{{ report.stats.files_skipped if report.stats.files_skipped is not none else "-" }}</td>
+    <td>{{ report.stats.files_cached if report.stats.files_cached is not none else "-" }}</td>
+    <td>{{ report.stats.suppressed if report.stats.suppressed is not none else "-" }}</td>
+  </tr>
+</table>
+
+{% if report.stats.by_severity %}
+<table class="stats-table">
+  <tr><th>Severity</th><th>Count</th></tr>
+  {% for sev in ["critical", "high", "medium", "low", "info"] %}
+  {% if report.stats.by_severity.get(sev) %}
+  <tr><td><span class="badge sev-{{ sev }}">{{ sev }}</span></td><td>{{ report.stats.by_severity[sev] }}</td></tr>
+  {% endif %}
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if report.diagnostics %}
+<h2>Scanner Diagnostics</h2>
+<table class="stats-table">
+  <tr><th>Severity</th><th>Message</th><th>Location</th></tr>
+  {% for d in report.diagnostics %}
+  <tr><td>{{ d.severity or "-" }}</td><td>{{ d.message or "-" }}</td><td>{{ d.location or "-" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Findings ({{ total_findings }})</h2>
+{% if truncated %}
+<div class="banner">Showing the first {{ findings|length }} of {{ total_findings }} findings, sorted by severity.</div>
+{% endif %}
+{% if not findings %}
+<div class="empty">No findings for this scan.</div>
+{% endif %}
+
+{% for f in findings %}
+<div class="finding">
+  <div class="finding-title">
+    {% if f.severity %}<span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>{% endif %}
+    {{ f.rule_name or f.rule_id or "Untitled finding" }}
+  </div>
+  <div class="finding-meta">
+    {% if f.rule_id %}Rule: {{ f.rule_id }} &middot; {% endif %}
+    {% if f.kind %}Kind: {{ f.kind }} &middot; {% endif %}
+    {% if f.category %}Category: {{ f.category }} &middot; {% endif %}
+    Location: {{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}
+  </div>
+  <div style="margin-top: 6px;">{{ f.message }}</div>
+
+  {% if f.cwe or f.owasp %}
+  <div class="finding-meta">
+    {% if f.cwe %}CWE: {{ f.cwe|join(", ") }}{% endif %}
+    {% if f.cwe and f.owasp %} &middot; {% endif %}
+    {% if f.owasp %}OWASP: {{ f.owasp|join(", ") }}{% endif %}
+  </div>
+  {% endif %}
+
+  {% if f.evidence %}
+  <div class="finding-section-label">Evidence</div>
+  {% for e in f.evidence %}
+  {% if e.snippet %}<div class="code">{{ e.snippet }}</div>{% endif %}
+  {% endfor %}
+  {% endif %}
+
+  {% if f.secret %}
+  <div class="finding-section-label">Secret detail</div>
+  <div class="finding-meta">Detector: {{ f.secret.detector_id or "-" }}{% if f.secret.redacted %} &middot; Value: {{ f.secret.redacted }}{% endif %}</div>
+  {% endif %}
+
+  {% if f.dependency %}
+  <div class="finding-section-label">Dependency detail</div>
+  <div class="finding-meta">
+    {{ f.dependency.ecosystem or "-" }} package {{ f.dependency.package or "-" }} {{ f.dependency.installed_version or "" }}
+    {% if f.dependency.fixed_version %} &rarr; fix in {{ f.dependency.fixed_version }}{% endif %}
+    {% if f.dependency.advisory_ids %} &middot; {{ f.dependency.advisory_ids|join(", ") }}{% endif %}
+  </div>
+  {% endif %}
+
+  {% if f.config %}
+  <div class="finding-section-label">Configuration detail</div>
+  <div class="finding-meta">{{ f.config.framework or "-" }} &middot; {{ f.config.config_file or "-" }} &middot; key: {{ f.config.key or "-" }}</div>
+  {% endif %}
+
+  {% if f.rationale %}
+  <div class="finding-section-label">Rationale</div>
+  <div>{{ f.rationale }}</div>
+  {% endif %}
+
+  {% if f.remediation %}
+  <div class="finding-section-label">Remediation</div>
+  <div>{{ f.remediation }}</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="footer">Generated by ZeroStrike Portal &middot; scan {{ scan.id }}</div>
+
+</body>
+</html>

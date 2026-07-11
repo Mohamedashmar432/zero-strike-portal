@@ -2,7 +2,7 @@ import { apiFetch } from "./client";
 import type { Page } from "./users";
 
 export type ScanType = "local" | "cloud" | "cicd";
-export type ScanStatus = "pending" | "running" | "completed" | "failed";
+export type ScanStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type CiProvider = "github_actions" | "gitlab_ci" | "azure_pipelines";
 
 export type Scan = {
@@ -35,7 +35,13 @@ export function listScans(projectId: string, page = 1, pageSize = 20) {
 // scanner itself (POST /api/v1/scans, api-key auth) after the user runs the CLI.
 export function createCloudScan(
   projectId: string,
-  input: { repo_url: string; branch?: string; scan_label?: string; repo_token?: string }
+  input: {
+    repo_url: string;
+    branch?: string;
+    scan_label?: string;
+    repo_token?: string;
+    connection_id?: string;
+  }
 ) {
   return apiFetch<Scan>(`/projects/${projectId}/scans`, {
     method: "POST",

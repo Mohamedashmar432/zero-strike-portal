@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import { ApiError } from "@/lib/api/client";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -13,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listFindings, type FindingKind, type Severity } from "@/lib/api/findings";
-import { getReport } from "@/lib/api/reports";
+import { downloadReportPdf, getReport } from "@/lib/api/reports";
 import { getScan } from "@/lib/api/scans";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -27,6 +29,24 @@ export default function ScanDetailPage() {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
   const [severity, setSeverity] = useState<Severity>();
   const [kind, setKind] = useState<FindingKind>();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true);
+    try {
+      const blob = await downloadReportPdf(scanId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `scan-${scanId}-report.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to download PDF report");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
 
   const { data: scan, isLoading: scanLoading } = useQuery({
     queryKey: ["scans", scanId],
@@ -97,8 +117,11 @@ export default function ScanDetailPage() {
       {completed && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Summary</CardTitle>
+              <Button size="sm" variant="outline" disabled={downloadingPdf} onClick={handleDownloadPdf}>
+                {downloadingPdf ? "Preparing…" : "Download PDF"}
+              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">

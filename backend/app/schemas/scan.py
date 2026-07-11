@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
+from app.models.scan import ScanStatus
+
 
 class ScanCreateRequest(BaseModel):
     scan_type: Literal["local", "cloud", "cicd"]
@@ -12,6 +14,9 @@ class ScanCreateRequest(BaseModel):
     ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
     # Transient: used to clone a private repo for a cloud scan, never persisted on the Scan.
     repo_token: str | None = None
+    # Alternative to repo_token: resolve the clone credential from a connected GitHub/Azure DevOps
+    # account (see connection_service.get_decrypted_token) instead of a hand-pasted token.
+    connection_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_type_config(self):
@@ -19,6 +24,8 @@ class ScanCreateRequest(BaseModel):
             raise ValueError("repo_url is required for cloud scans")
         if self.scan_type == "cicd" and not self.ci_provider:
             raise ValueError("ci_provider is required for CI/CD scans")
+        if self.repo_token and self.connection_id:
+            raise ValueError("Provide either repo_token or connection_id, not both")
         return self
 
 
@@ -27,7 +34,7 @@ class ScanResponse(BaseModel):
     project_id: str
     scan_type: Literal["local", "cloud", "cicd"]
     triggered_by: Literal["cli", "ci", "cloud", "manual"]
-    status: Literal["pending", "running", "completed", "failed"]
+    status: ScanStatus
     api_key_id: str | None
     scanner_version: str | None
     hostname: str | None
@@ -62,5 +69,5 @@ class ScannerCreateScanResponse(BaseModel):
 
 
 class ScannerStatusUpdateRequest(BaseModel):
-    status: Literal["pending", "running", "completed", "failed"]
+    status: ScanStatus
     error_message: str | None = None

@@ -31,6 +31,9 @@ export function Topbar() {
         />
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={() => router.push("/settings/profile")}>Profile</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => router.push("/settings/integrations")}>
+            Integrations
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

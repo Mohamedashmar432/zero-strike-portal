@@ -63,3 +63,24 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _retr
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+export async function apiFetchBlob(path: string, options: RequestInit = {}, _retried = false): Promise<Blob> {
+  const { accessToken } = getTokens();
+  const headers = new Headers(options.headers);
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+
+  if (res.status === 401 && !_retried && accessToken) {
+    const refreshed = await tryRefresh();
+    if (refreshed) return apiFetchBlob(path, options, true);
+    clearTokens();
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body);
+  }
+
+  return res.blob();
+}

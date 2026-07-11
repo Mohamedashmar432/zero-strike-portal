@@ -170,4 +170,9 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     scan.updated_at = now
     await scan.save()
 
+    # Completion frees a cloud-scan concurrency slot — harmless no-op for local/CI scans.
+    from app.services import scan_queue_service
+
+    await scan_queue_service.drain_queue()
+
     return len(findings)

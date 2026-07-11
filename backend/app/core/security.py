@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+from cryptography.fernet import Fernet, InvalidToken
 from jose import JWTError, jwt
 
 from app.core.config import settings
@@ -64,8 +65,35 @@ def generate_api_key() -> tuple[str, str, str]:
     return raw, prefix, hash_token(raw)
 
 
+def encrypt_secret(raw: str) -> str:
+    """Symmetric encryption for values that must be decrypted for reuse (OAuth access/refresh
+    tokens) — unlike API keys/refresh tokens, which only need one-way hash comparison."""
+    return Fernet(settings.oauth_encryption_key.encode()).encrypt(raw.encode()).decode()
+
+
+def decrypt_secret(token: str) -> str:
+    return Fernet(settings.oauth_encryption_key.encode()).decrypt(token.encode()).decode()
+
+
+def create_oauth_state_token(user_id: str, provider: str) -> tuple[str, str]:
+    """Returns (state_jwt, jti). The jti is also stashed in a short-lived cookie by the caller so the
+    callback can verify the browser completing it is the one that started it (see connections.py)."""
+    now = datetime.now(timezone.utc)
+    jti = str(uuid.uuid4())
+    claims = {
+        "sub": user_id,
+        "provider": provider,
+        "jti": jti,
+        "iat": now,
+        "exp": now + timedelta(minutes=10),
+        "type": "oauth_state",
+    }
+    return _encode(claims), jti
+
+
 __all__ = [
     "JWTError",
+    "InvalidToken",
     "hash_password",
     "verify_password",
     "create_access_token",
@@ -73,4 +101,7 @@ __all__ = [
     "decode_token",
     "hash_token",
     "generate_api_key",
+    "encrypt_secret",
+    "decrypt_secret",
+    "create_oauth_state_token",
 ]

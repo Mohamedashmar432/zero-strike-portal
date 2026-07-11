@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, GitBranch, Terminal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -19,8 +19,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
+import {
+  listAzureOrgs,
+  listAzureProjects,
+  listAzureRepos,
+  listConnections,
+  listGithubRepos,
+  type Repo,
+} from "@/lib/api/connections";
 import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 
@@ -43,7 +52,17 @@ const CI_PROVIDERS: { value: CiProvider; label: string }[] = [
   { value: "azure_pipelines", label: "Azure Pipelines" },
 ];
 
-function CopyBlock({ text, label }: { text: string; label?: string }) {
+function downloadTextFile(filename: string, text: string) {
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function CopyBlock({ text, label, filename }: { text: string; label?: string; filename?: string }) {
   return (
     <div className="space-y-1">
       {label && <Label>{label}</Label>}
@@ -62,6 +81,11 @@ function CopyBlock({ text, label }: { text: string; label?: string }) {
         >
           Copy
         </Button>
+        {filename && (
+          <Button type="button" size="sm" variant="outline" onClick={() => downloadTextFile(filename, text)}>
+            Download
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -93,8 +117,45 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
   );
 }
 
+type LocalOs = "linux" | "macos" | "windows";
+
+const LOCAL_OS: { value: LocalOs; label: string }[] = [
+  { value: "linux", label: "Linux" },
+  { value: "macos", label: "macOS" },
+  { value: "windows", label: "Windows" },
+];
+
+function defaultLocalOs(): LocalOs {
+  if (typeof navigator === "undefined") return "linux";
+  if (/Win/i.test(navigator.userAgent)) return "windows";
+  if (/Mac/i.test(navigator.userAgent)) return "macos";
+  return "linux";
+}
+
+// Hardcoded to "latest" for now (YAGNI) — add a `version` param + version-picker UI if pinning
+// a specific zerostrike release ever becomes necessary.
+function localInstallCmd(os: LocalOs, origin: string): string {
+  if (os === "windows") {
+    return `Invoke-WebRequest ${origin}/api/v1/downloads/zerostrike/latest/windows-amd64 -OutFile zerostrike.exe`;
+  }
+  if (os === "macos") {
+    return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/darwin-arm64 -o zerostrike && chmod +x zerostrike`;
+  }
+  return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o zerostrike && chmod +x zerostrike`;
+}
+
+function localRunCmd(os: LocalOs, projectId: string, token: string): string {
+  const bin = os === "windows" ? ".\\zerostrike.exe" : "./zerostrike";
+  return `${bin} scan . --server ${portalOrigin()} --project-id ${projectId} --token ${token}`;
+}
+
+function localFilename(os: LocalOs): string {
+  return os === "windows" ? "zerostrike-scan.ps1" : "zerostrike-scan.sh";
+}
+
 function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
   const [rawToken, setRawToken] = useState<string | null>(null);
+  const [os, setOs] = useState<LocalOs>(defaultLocalOs);
   const generate = useMutation({
     mutationFn: () => createApiKey(projectId, { label: "local CLI scan", expires_in_days: 90 }),
     onSuccess: (key) => setRawToken(key.raw_token),
@@ -102,7 +163,7 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
   });
 
   const token = rawToken ?? "<API_KEY>";
-  const command = `zerostrike scan . --server ${portalOrigin()} --project-id ${projectId} --token ${token}`;
+  const command = `${localInstallCmd(os, portalOrigin())}\n${localRunCmd(os, projectId, token)}`;
 
   return (
     <>
@@ -114,6 +175,22 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Operating system</Label>
+          <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
+            {LOCAL_OS.map((o) => (
+              <Button
+                key={o.value}
+                type="button"
+                size="sm"
+                variant={os === o.value ? "secondary" : "ghost"}
+                onClick={() => setOs(o.value)}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+        </div>
         {rawToken ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-amber-500">
@@ -126,7 +203,7 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
             {generate.isPending ? "Generating…" : "Generate an API key"}
           </Button>
         )}
-        <CopyBlock label="Then run" text={command} />
+        <CopyBlock label="Install & run" text={command} filename={localFilename(os)} />
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onDone}>
@@ -137,10 +214,25 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
   );
 }
 
+// Runners for all three providers below default to Linux (ubuntu-latest / default GitLab image /
+// Azure's ubuntu pool), so linux-amd64 is the only download target needed for v1. Windows/macOS
+// CI runner variants are a documented future extension, not built now.
+// Hardcoded to "latest" (YAGNI) — see localInstallCmd for the same call on the local-scan side.
+function cicdInstallCmd(origin: string): string {
+  return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o ./zerostrike && chmod +x ./zerostrike`;
+}
+
+function cicdFilename(provider: CiProvider): string {
+  if (provider === "github_actions") return "zerostrike.yml";
+  if (provider === "gitlab_ci") return ".gitlab-ci.yml";
+  return "azure-pipelines.yml";
+}
+
 function cicdSnippet(provider: CiProvider, origin: string, projectId: string): string {
-  const cmdGh = `zerostrike scan . --server ${origin} --project-id ${projectId} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
-  const cmdSh = `zerostrike scan . --server ${origin} --project-id ${projectId} --token $ZEROSTRIKE_TOKEN`;
-  const cmdAz = `zerostrike scan . --server ${origin} --project-id ${projectId} --token $(ZEROSTRIKE_TOKEN)`;
+  const install = cicdInstallCmd(origin);
+  const cmdGh = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
+  const cmdSh = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token $ZEROSTRIKE_TOKEN`;
+  const cmdAz = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token $(ZEROSTRIKE_TOKEN)`;
   if (provider === "github_actions") {
     return [
       "# .github/workflows/zerostrike.yml",
@@ -151,6 +243,8 @@ function cicdSnippet(provider: CiProvider, origin: string, projectId: string): s
       "    runs-on: ubuntu-latest",
       "    steps:",
       "      - uses: actions/checkout@v4",
+      "      - name: Install ZeroStrike scanner",
+      `        run: ${install}`,
       "      - name: ZeroStrike scan",
       `        run: ${cmdGh}`,
     ].join("\n");
@@ -160,6 +254,8 @@ function cicdSnippet(provider: CiProvider, origin: string, projectId: string): s
       "# .gitlab-ci.yml",
       "zerostrike_scan:",
       "  stage: test",
+      "  before_script:",
+      `    - ${install}`,
       "  script:",
       `    - ${cmdSh}`,
     ].join("\n");
@@ -167,6 +263,8 @@ function cicdSnippet(provider: CiProvider, origin: string, projectId: string): s
   return [
     "# azure-pipelines.yml",
     "steps:",
+    `  - script: ${install}`,
+    "    displayName: Install ZeroStrike scanner",
     `  - script: ${cmdAz}`,
     "    displayName: ZeroStrike scan",
   ].join("\n");
@@ -201,7 +299,20 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
             ))}
           </div>
         </div>
-        {provider && <CopyBlock label="Pipeline snippet" text={cicdSnippet(provider, portalOrigin(), projectId)} />}
+        {provider && (
+          <div className="space-y-1">
+            <CopyBlock
+              label="Pipeline snippet"
+              text={cicdSnippet(provider, portalOrigin(), projectId)}
+              filename={cicdFilename(provider)}
+            />
+            {provider === "github_actions" && (
+              <p className="text-xs text-muted-foreground">
+                Save the downloaded file as <code>.github/workflows/zerostrike.yml</code>.
+              </p>
+            )}
+          </div>
+        )}
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onDone}>
@@ -212,12 +323,141 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
   );
 }
 
+function SelectedRepoSummary({ repo, onChange }: { repo: Repo; onChange: () => void }) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
+      <span className="truncate font-mono">{repo.full_name}</span>
+      <Button type="button" size="sm" variant="ghost" onClick={onChange}>
+        Change
+      </Button>
+    </div>
+  );
+}
+
+function RepoPickerList({
+  repos,
+  isLoading,
+  isError,
+  onSelect,
+}: {
+  repos: Repo[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onSelect: (repo: Repo) => void;
+}) {
+  return (
+    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-1">
+      {isLoading ? (
+        <p className="p-2 text-sm text-muted-foreground">Loading…</p>
+      ) : isError ? (
+        <p className="p-2 text-sm text-destructive">
+          Couldn&apos;t load repos — the connection may need to be reconnected in Settings →
+          Integrations.
+        </p>
+      ) : repos?.length ? (
+        repos.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+            onClick={() => onSelect(r)}
+          >
+            {r.full_name}
+          </button>
+        ))
+      ) : (
+        <p className="p-2 text-sm text-muted-foreground">No repos found.</p>
+      )}
+    </div>
+  );
+}
+
+function GithubRepoPicker({ onSelect }: { onSelect: (repo: Repo) => void }) {
+  const [query, setQuery] = useState("");
+  const { data: repos, isLoading, isError } = useQuery({
+    queryKey: ["connections", "github", "repos", query],
+    queryFn: () => listGithubRepos(query),
+  });
+  return (
+    <div className="space-y-2">
+      <Input
+        placeholder="Search repos…"
+        autoComplete="off"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <RepoPickerList repos={repos} isLoading={isLoading} isError={isError} onSelect={onSelect} />
+    </div>
+  );
+}
+
+function AzureDevOpsRepoPicker({ onSelect }: { onSelect: (repo: Repo) => void }) {
+  const [org, setOrg] = useState("");
+  const [project, setProject] = useState("");
+  const { data: orgs } = useQuery({ queryKey: ["connections", "azure", "orgs"], queryFn: listAzureOrgs });
+  const { data: projects } = useQuery({
+    queryKey: ["connections", "azure", "projects", org],
+    queryFn: () => listAzureProjects(org),
+    enabled: !!org,
+  });
+  const { data: repos, isLoading, isError } = useQuery({
+    queryKey: ["connections", "azure", "repos", org, project],
+    queryFn: () => listAzureRepos(org, project),
+    enabled: !!org && !!project,
+  });
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          className="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+          value={org}
+          onChange={(e) => {
+            setOrg(e.target.value);
+            setProject("");
+          }}
+        >
+          <option value="">Organization…</option>
+          {orgs?.map((o) => (
+            <option key={o.id} value={o.name}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+          value={project}
+          onChange={(e) => setProject(e.target.value)}
+          disabled={!org}
+        >
+          <option value="">Project…</option>
+          {projects?.map((p) => (
+            <option key={p.id} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {org && project && (
+        <RepoPickerList repos={repos} isLoading={isLoading} isError={isError} onSelect={onSelect} />
+      )}
+    </div>
+  );
+}
+
 function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [source, setSource] = useState<"manual" | "github" | "azure_devops">("manual");
+  const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
+  const { data: connections } = useQuery({ queryKey: ["connections"], queryFn: listConnections });
+  const githubConnection = connections?.find((c) => c.provider === "github");
+  const azureConnection = connections?.find((c) => c.provider === "azure_devops");
+
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
 
@@ -233,36 +473,91 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start cloud scan"),
   });
 
+  function selectRepo(repo: Repo, connectionId: string) {
+    setSelectedRepo(repo);
+    setValue("repo_url", repo.clone_url, { shouldValidate: true });
+    setValue("connection_id", connectionId);
+    setValue("repo_token", "");
+    if (repo.default_branch) setValue("branch", repo.default_branch);
+  }
+
+  function clearRepoSelection() {
+    setSelectedRepo(null);
+    setValue("repo_url", "");
+    setValue("connection_id", undefined);
+  }
+
+  const needsRepoSelection = source !== "manual" && !selectedRepo;
+
   return (
     <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
       <DialogHeader>
         <DialogTitle>Cloud scan</DialogTitle>
         <DialogDescription>
-          ZeroStrike clones the repository and scans it on the server. Provide a token below for private
-          repos — it is used only for this clone and never stored.
+          ZeroStrike clones the repository and scans it on the server. Import from a connected account
+          or provide a URL and token for private repos — a pasted token is used only for this clone and
+          never stored.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="cloud-repo">Repository URL</Label>
-          <Input id="cloud-repo" placeholder="https://github.com/org/repo" autoComplete="off" {...register("repo_url")} />
-          {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
-        </div>
+        {(githubConnection || azureConnection) && (
+          <Tabs
+            value={source}
+            onValueChange={(value) => {
+              setSource(value as typeof source);
+              clearRepoSelection();
+              setValue("repo_token", "");
+            }}
+          >
+            <TabsList>
+              <TabsTrigger value="manual">Manual URL</TabsTrigger>
+              {githubConnection && <TabsTrigger value="github">GitHub</TabsTrigger>}
+              {azureConnection && <TabsTrigger value="azure_devops">Azure DevOps</TabsTrigger>}
+            </TabsList>
+          </Tabs>
+        )}
+
+        {source === "github" && githubConnection ? (
+          selectedRepo ? (
+            <SelectedRepoSummary repo={selectedRepo} onChange={clearRepoSelection} />
+          ) : (
+            <GithubRepoPicker onSelect={(r) => selectRepo(r, githubConnection.id)} />
+          )
+        ) : source === "azure_devops" && azureConnection ? (
+          selectedRepo ? (
+            <SelectedRepoSummary repo={selectedRepo} onChange={clearRepoSelection} />
+          ) : (
+            <AzureDevOpsRepoPicker onSelect={(r) => selectRepo(r, azureConnection.id)} />
+          )
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="cloud-repo">Repository URL</Label>
+            <Input
+              id="cloud-repo"
+              placeholder="https://github.com/org/repo"
+              autoComplete="off"
+              {...register("repo_url")}
+            />
+            {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="cloud-branch">Branch (optional)</Label>
           <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch")} />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="cloud-token">Access token (private repos only)</Label>
-          <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
-        </div>
+        {source === "manual" && (
+          <div className="space-y-2">
+            <Label htmlFor="cloud-token">Access token (private repos only)</Label>
+            <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="cloud-label">Label (optional)</Label>
           <Input id="cloud-label" autoComplete="off" {...register("scan_label")} />
         </div>
       </div>
       <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
+        <Button type="submit" disabled={mutation.isPending || needsRepoSelection}>
           {mutation.isPending ? "Starting…" : "Start cloud scan"}
         </Button>
       </DialogFooter>
