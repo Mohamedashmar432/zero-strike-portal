@@ -96,5 +96,6 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request):
 
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(payload: ResetPasswordRequest):
-    await auth_service.reset_password(payload.token, payload.new_password)
+    user = await auth_service.reset_password(payload.token, payload.new_password)
+    await audit_service.record("password_reset", actor_user_id=str(user.id))
     return MessageResponse(message="Password has been reset. Please sign in.")

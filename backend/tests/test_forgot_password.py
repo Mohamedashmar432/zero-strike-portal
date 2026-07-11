@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import app.services.email_service as email_service
 from app.core.config import settings
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from tests.test_auth_flow import register_and_login
 
@@ -116,3 +117,26 @@ def test_reset_password_revokes_existing_refresh_tokens(client, monkeypatch):
 
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh_token})
     assert r.status_code == 401
+
+
+def test_reset_password_records_audit_log(client, monkeypatch):
+    captured = {}
+    _capture_send(monkeypatch, captured)
+    tokens = register_and_login(client, email="forgot5@zerostrike.dev", password="oldpassword1")
+    user_id = client.get(
+        "/api/v1/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    ).json()["id"]
+
+    client.post("/api/v1/auth/forgot-password", json={"email": "forgot5@zerostrike.dev"})
+    token = _extract_token(captured["reset_url"])
+
+    r = client.post("/api/v1/auth/reset-password", json={"token": token, "new_password": "newpassword1"})
+    assert r.status_code == 200
+
+    async def fetch_logs():
+        return await AuditLog.find(
+            AuditLog.actor_user_id == user_id, AuditLog.action == "password_reset"
+        ).to_list()
+
+    logs = asyncio.run(fetch_logs())
+    assert len(logs) == 1

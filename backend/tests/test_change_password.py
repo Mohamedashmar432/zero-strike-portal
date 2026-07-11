@@ -73,3 +73,18 @@ def test_change_password_rejects_short_new_password(client):
         headers=headers,
     )
     assert r.status_code == 422
+
+
+def test_change_password_allows_new_password_same_as_current(client):
+    tokens = register_and_login(client, email="cp5@zerostrike.dev", password="correctpass1")
+    headers = _headers(tokens)
+
+    r = client.post(
+        "/api/v1/users/me/change-password",
+        json={"current_password": "correctpass1", "new_password": "correctpass1"},
+        headers=headers,
+    )
+    assert r.status_code == 204
+
+    r = client.post("/api/v1/auth/login", json={"email": "cp5@zerostrike.dev", "password": "correctpass1"})
+    assert r.status_code == 200

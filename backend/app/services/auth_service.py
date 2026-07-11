@@ -69,6 +69,16 @@ def _prune_refresh_tokens(user: User) -> None:
     user.refresh_tokens = [r for r in user.refresh_tokens if _keep(r)]
 
 
+def _revoke_all_refresh_tokens(user: User, now: datetime) -> None:
+    """Revoke (never delete) every not-yet-revoked refresh token record on `user`.
+
+    Shared by the reuse-detected branch of refresh_token_pair and the
+    change_password/reset_password "invalidate all sessions" step.
+    """
+    for record in user.refresh_tokens:
+        record.revoked_at = record.revoked_at or now
+
+
 async def issue_token_pair(
     user: User, *, user_agent: str | None = None, ip: str | None = None
 ) -> tuple[str, str, int]:
@@ -110,9 +120,7 @@ async def refresh_token_pair(
 
     if record.revoked_at is not None:
         # Reuse of an already-rotated token: treat as theft, revoke everything.
-        now = datetime.now(timezone.utc)
-        for r in user.refresh_tokens:
-            r.revoked_at = r.revoked_at or now
+        _revoke_all_refresh_tokens(user, datetime.now(timezone.utc))
         await user.save()
         raise AuthError("Refresh token reuse detected — all sessions revoked")
 
@@ -139,13 +147,13 @@ async def logout(refresh_token: str) -> str | None:
     return str(user.id)
 
 
-def _revoke_all_refresh_tokens(user: User, now: datetime) -> None:
-    """Mirrors the reuse-detected branch in refresh_token_pair — revoke, never delete."""
-    for record in user.refresh_tokens:
-        record.revoked_at = record.revoked_at or now
-
-
 async def change_password(user: User, current_password: str, new_password: str) -> None:
+    """Verify the current password, set the new one, and revoke every existing session.
+
+    Revoking all refresh tokens forces re-authentication everywhere else the account is
+    logged in — the same treatment as a detected refresh-token-reuse (theft) event, since a
+    password change is exactly the point a compromised session should be kicked out.
+    """
     if not security.verify_password(current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
 
@@ -185,7 +193,14 @@ async def request_password_reset(email: str) -> None:
         logger.exception("Failed to send password reset email to %s", user.email)
 
 
-async def reset_password(token: str, new_password: str) -> None:
+async def reset_password(token: str, new_password: str) -> User:
+    """Consume a password-reset token: verify it, set the new password, and revoke all sessions.
+
+    Single-use by construction — both password_reset_token_hash and password_reset_expires_at
+    are cleared on success, so a second attempt with the same token always falls into the
+    "invalid or expired" branch below. Returns the affected user so the caller (the router) can
+    record an audit log entry for this account-recovery event.
+    """
     token_hash = security.hash_token(token)
     user = await User.find_one(User.password_reset_token_hash == token_hash)
 
@@ -203,3 +218,4 @@ async def reset_password(token: str, new_password: str) -> None:
     _revoke_all_refresh_tokens(user, now)
     user.updated_at = now
     await user.save()
+    return user
