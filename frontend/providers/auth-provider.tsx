@@ -13,7 +13,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (name: string) => Promise<void>;
+  updateProfile: (payload: string | { name?: string; email?: string }) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -72,8 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  async function updateProfile(name: string) {
-    setUser(await updateMyProfile(name));
+  async function updateProfile(payload: string | { name?: string; email?: string }) {
+    setUser(await updateMyProfile(typeof payload === "string" ? { name: payload } : payload));
   }
 
   return (
