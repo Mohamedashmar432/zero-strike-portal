@@ -3,8 +3,8 @@ services:
     build:
       context: ../backend
       args:
-        SCANNER_REPO: ${SCANNER_REPO:-https://github.com/zerostrike/scanner.git}
-        SCANNER_REF: ${SCANNER_REF:-v0.22.0}
+        SCANNER_REPO: ${SCANNER_REPO:-https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git}
+        SCANNER_REF: ${SCANNER_REF:-v0.23.0}
       # Private scanner repo? Uncomment and build with:
       #   docker build --secret id=scanner_git_token,env=SCANNER_GIT_TOKEN ...
       # secrets:

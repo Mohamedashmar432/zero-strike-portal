@@ -1,6 +1,6 @@
 """Pydantic models for parsing the Go scanner's report JSON.
 
-The scanner (github.com/zerostrike/scanner, internal/report + internal/core) marshals
+The scanner (github.com/Mohamedashmar432/zero-strike-SAST-engine, internal/report + internal/core) marshals
 its structs with no JSON tags, so keys are the Go field names verbatim (PascalCase,
 acronyms preserved: ID, RuleID, CWE, OWASP, DetectorID, AdvisoryIDs, ...). These models
 mirror that shape via explicit aliases and are mapped to the snake_case Beanie

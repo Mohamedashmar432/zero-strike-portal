@@ -6,8 +6,8 @@
 # below fails the image build if that ever regresses.
 FROM golang:1.26-bookworm AS scanner-builder
 
-ARG SCANNER_REPO=https://github.com/zerostrike/scanner.git
-ARG SCANNER_REF=v0.22.0
+ARG SCANNER_REPO=https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git
+ARG SCANNER_REF=v0.23.0
 ENV CGO_ENABLED=1
 
 WORKDIR /src
