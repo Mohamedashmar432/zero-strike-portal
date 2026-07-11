@@ -7,9 +7,9 @@ const scanTypeBadgeVariants = cva(
   {
     variants: {
       scanType: {
-        local: "bg-sky-500/15 text-sky-400",
-        cloud: "bg-violet-500/15 text-violet-400",
-        cicd: "bg-emerald-500/15 text-emerald-400",
+        local: "bg-muted-foreground/15 text-muted-foreground",
+        cloud: "bg-brand/15 text-brand",
+        cicd: "bg-status-success/15 text-status-success",
       },
     },
     defaultVariants: { scanType: "local" },

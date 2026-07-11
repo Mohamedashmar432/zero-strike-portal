@@ -52,6 +52,9 @@
   --color-severity-medium: var(--severity-medium);
   --color-severity-low: var(--severity-low);
   --color-severity-info: var(--severity-info);
+  --color-brand: var(--brand);
+  --color-status-success: var(--status-success);
+  --color-status-progress: var(--status-progress);
 }
 
 :root {
@@ -93,6 +96,10 @@
   --severity-medium: #fbbf24;
   --severity-low: #0ea5e9;
   --severity-info: #94a3b8;
+
+  --brand: #14b8a6;
+  --status-success: #10b981;
+  --status-progress: #38bdf8;
 }
 
 .dark {

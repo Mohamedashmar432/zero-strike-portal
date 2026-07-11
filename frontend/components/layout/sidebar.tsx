@@ -23,7 +23,7 @@ export function Sidebar() {
     <aside className="hidden w-56 shrink-0 border-r border-border bg-card/40 md:flex md:flex-col">
       <div className="px-4 py-4">
         <span className="font-mono text-sm font-semibold tracking-tight">
-          zero<span className="text-severity-high">strike</span>
+          zero<span className="text-brand">strike</span>
         </span>
       </div>
       <nav className="flex-1 space-y-1 px-2">
