@@ -26,7 +26,7 @@ export function changePassword(currentPassword: string, newPassword: string) {
   });
 }
 
-export function updateUser(id: string, payload: { role?: string; is_active?: boolean }) {
+export function updateUser(id: string, payload: { role?: User["role"]; is_active?: boolean }) {
   return apiFetch<User>(`/users/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

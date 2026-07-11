@@ -13,6 +13,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
+  // TODO: drop the string branch once settings/profile/page.tsx passes {name, email} directly
   updateProfile: (payload: string | { name?: string; email?: string }) => Promise<void>;
 };
 
@@ -73,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateProfile(payload: string | { name?: string; email?: string }) {
+    // TODO: drop the string branch once settings/profile/page.tsx passes {name, email} directly
     setUser(await updateMyProfile(typeof payload === "string" ? { name: payload } : payload));
   }
 
