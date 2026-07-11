@@ -42,17 +42,22 @@ def send_email(to_address: str, subject: str, text_body: str, html_body: str | N
         server.sendmail(settings.smtp_from_address, [to_address], message.as_string())
 
 
-def send_password_reset_email(to_address: str, reset_url: str) -> None:
-    """Send the password-reset link email. Single hardcoded template — not worth Jinja2."""
+def send_password_reset_email(to_address: str, reset_url: str, ttl_minutes: int) -> None:
+    """Send the password-reset link email. Single hardcoded template — not worth Jinja2.
+
+    ttl_minutes must reflect the caller's actual token lifetime (settings.password_reset_token_ttl_minutes)
+    — the email body quotes it directly, so a mismatch would tell users the wrong expiry.
+    """
     subject = "Reset your ZeroStrike Portal password"
     text_body = (
         "You requested a password reset for your ZeroStrike Portal account.\n\n"
         f"Reset your password using this link:\n{reset_url}\n\n"
-        "This link expires in 1 hour. If you did not request this, you can ignore this email."
+        f"This link expires in {ttl_minutes} minutes. If you did not request this, you can ignore this email."
     )
     html_body = (
         "<p>You requested a password reset for your ZeroStrike Portal account.</p>"
         f'<p><a href="{reset_url}">Reset your password</a></p>'
-        "<p>This link expires in 1 hour. If you did not request this, you can ignore this email.</p>"
+        f"<p>This link expires in {ttl_minutes} minutes. If you did not request this, you can ignore this "
+        "email.</p>"
     )
     send_email(to_address, subject, text_body, html_body)

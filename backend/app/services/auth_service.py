@@ -175,7 +175,12 @@ async def request_password_reset(email: str) -> None:
 
     reset_url = f"{settings.frontend_origin}/reset-password?token={raw}"
     try:
-        await asyncio.to_thread(email_service.send_password_reset_email, user.email, reset_url)
+        await asyncio.to_thread(
+            email_service.send_password_reset_email,
+            user.email,
+            reset_url,
+            settings.password_reset_token_ttl_minutes,
+        )
     except Exception:
         logger.exception("Failed to send password reset email to %s", user.email)
 

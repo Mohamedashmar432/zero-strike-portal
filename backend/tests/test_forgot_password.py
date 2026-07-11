@@ -2,14 +2,16 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import app.services.email_service as email_service
+from app.core.config import settings
 from app.models.user import User
 from tests.test_auth_flow import register_and_login
 
 
 def _capture_send(monkeypatch, captured):
-    def fake_send_password_reset_email(to_address, reset_url):
+    def fake_send_password_reset_email(to_address, reset_url, ttl_minutes):
         captured["to_address"] = to_address
         captured["reset_url"] = reset_url
+        captured["ttl_minutes"] = ttl_minutes
 
     # Patch at the module auth_service calls through (email_service.send_password_reset_email),
     # not smtplib directly — this is the seam auth_service actually calls.
@@ -42,6 +44,7 @@ def test_known_email_sends_reset_email_and_token_resets_password(client, monkeyp
 
     assert captured["to_address"] == "forgot1@zerostrike.dev"
     assert "token=" in captured["reset_url"]
+    assert captured["ttl_minutes"] == settings.password_reset_token_ttl_minutes
     token = _extract_token(captured["reset_url"])
 
     r = client.post("/api/v1/auth/reset-password", json={"token": token, "new_password": "newpassword1"})

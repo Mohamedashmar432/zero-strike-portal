@@ -137,10 +137,12 @@ def test_send_password_reset_email_includes_reset_url_in_both_bodies(monkeypatch
     monkeypatch.setattr(email_service, "send_email", fake_send_email)
 
     reset_url = "https://portal.example.com/reset-password?token=abc123"
-    email_service.send_password_reset_email("user@example.com", reset_url)
+    email_service.send_password_reset_email("user@example.com", reset_url, ttl_minutes=30)
 
     assert captured["to_address"] == "user@example.com"
     assert captured["subject"]  # non-empty
     assert "password" in captured["subject"].lower()
     assert reset_url in captured["text_body"]
     assert reset_url in captured["html_body"]
+    assert "30 minutes" in captured["text_body"]
+    assert "30 minutes" in captured["html_body"]
