@@ -57,7 +57,6 @@ export default function IntegrationsPage() {
 
   return (
     <div className="max-w-md space-y-6">
-      <h1 className="text-xl font-semibold">Integrations</h1>
       <p className="text-sm text-muted-foreground">
         Connect GitHub or Azure DevOps to import a repo directly when starting a cloud scan, instead of
         pasting a URL and access token.

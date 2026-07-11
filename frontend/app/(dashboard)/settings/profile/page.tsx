@@ -54,7 +54,6 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-md space-y-6">
-      <h1 className="text-xl font-semibold">Profile</h1>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
