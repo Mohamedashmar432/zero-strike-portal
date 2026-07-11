@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
-import { adminLinks, mainLinks } from "./nav-links";
+import { adminLinks, mainLinks, settingsLinks } from "./nav-links";
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -62,6 +62,21 @@ export function MobileNav() {
               ))}
             </>
           )}
+          <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Settings
+          </div>
+          {settingsLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "block rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+                pathname?.startsWith(link.href) && "bg-accent text-foreground"
+              )}
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
       </SheetContent>
     </Sheet>
