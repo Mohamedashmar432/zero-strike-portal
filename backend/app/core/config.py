@@ -37,5 +37,15 @@ class Settings(BaseSettings):
     backend_public_url: str = "http://localhost:8000"  # used to build each provider's redirect_uri
     frontend_origin: str = "http://localhost:3000"  # where /connections/{provider}/callback redirects to
 
+    # SMTP (email_service) — used by the forgot-password flow to send reset links. Empty smtp_host
+    # (the dev default) means email_service.send_email() logs a warning and no-ops instead of trying
+    # to connect, so local/dev works without SMTP configured.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from_address: str = "noreply@zerostrike.dev"
+
 
 settings = Settings()
