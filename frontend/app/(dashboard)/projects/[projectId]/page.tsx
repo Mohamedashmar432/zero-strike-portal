@@ -304,23 +304,23 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
       setRevealedToken(key.raw_token);
       reset({ expires_in_days: 90 });
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create API key"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create project token"),
   });
 
   const revoke = useMutation({
     mutationFn: (id: string) => revokeApiKey(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "apiKeys"] });
-      toast.success("API key revoked");
+      toast.success("Project token revoked");
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to revoke key"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to revoke project token"),
   });
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Generate a token here, then pass it to the ZeroStrike SAST scanner CLI so it can authenticate and
-        upload scan results for this project.
+        Generate a project token here, then pass it to the ZeroStrike SAST scanner CLI with{" "}
+        <code>--token</code>. The token alone identifies this project — no project ID needed.
       </p>
       {revealedToken && (
         <Card className="border-amber-500/50 bg-amber-500/5">
@@ -362,7 +362,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
           />
         </div>
         <Button type="submit" disabled={create.isPending}>
-          {create.isPending ? "Generating…" : "Generate key"}
+          {create.isPending ? "Generating…" : "Generate token"}
         </Button>
       </form>
       <Card>
@@ -442,7 +442,7 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="scans">Scans</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="keys">API Keys</TabsTrigger>
+          <TabsTrigger value="keys">Project Tokens</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <OverviewTab projectId={projectId} />

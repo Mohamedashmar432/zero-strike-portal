@@ -12,6 +12,11 @@ User decisions locked in:
 3. Deployment target: single VM/VPS via Docker Compose, MongoDB Atlas as the only external managed service.
 4. UI: dark, terminal-adjacent AppSec aesthetic (Snyk/Wiz/GitHub Advanced Security) — no light mode in Phase 1.
 
+> **Superseded**: every CLI example below showing `--project-id` is stale. The
+> project token alone now resolves the project server-side; `--project-id` is
+> a deprecated, ignored, backward-compat-only flag. See `POST /api/v1/scans`
+> in `scanner_scans.py` and `internal/portal/client.go`'s `CreateScanRequest`.
+
 ---
 
 ## 1. Repo & Folder Structure
