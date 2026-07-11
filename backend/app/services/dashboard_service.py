@@ -46,7 +46,7 @@ async def get_stats(user: User) -> DashboardStatsResponse:
         )
 
     memberships = await ProjectMember.find(ProjectMember.user_id == str(user.id)).to_list()
-    project_ids = [m.project_id for m in memberships]
+    project_ids = list({m.project_id for m in memberships})
 
     if not project_ids:
         return DashboardStatsResponse(
