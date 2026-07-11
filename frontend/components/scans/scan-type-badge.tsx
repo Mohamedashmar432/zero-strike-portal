@@ -9,7 +9,7 @@ const scanTypeBadgeVariants = cva(
       scanType: {
         local: "bg-muted-foreground/15 text-muted-foreground",
         cloud: "bg-brand/15 text-brand",
-        cicd: "bg-status-success/15 text-status-success",
+        cicd: "bg-type-cicd/15 text-type-cicd",
       },
     },
     defaultVariants: { scanType: "local" },

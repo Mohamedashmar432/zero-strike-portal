@@ -55,6 +55,7 @@
   --color-brand: var(--brand);
   --color-status-success: var(--status-success);
   --color-status-progress: var(--status-progress);
+  --color-type-cicd: var(--type-cicd);
 }
 
 :root {
@@ -98,8 +99,13 @@
   --severity-info: #94a3b8;
 
   --brand: #14b8a6;
-  --status-success: #10b981;
-  --status-progress: #38bdf8;
+
+  /* pending/queued reuse severity tokens since they map cleanly (not-started/waiting);
+     running/completed/cicd get dedicated tokens since no severity token fits "in progress"
+     or "success" semantically */
+  --status-success: #22c55e;
+  --status-progress: #6366f1;
+  --type-cicd: #8b5cf6;
 }
 
 .dark {
