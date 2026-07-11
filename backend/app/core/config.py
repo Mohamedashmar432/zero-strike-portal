@@ -47,5 +47,19 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_from_address: str = "noreply@zerostrike.dev"
 
+    # Password reset tokens (auth_service.request_password_reset / reset_password).
+    password_reset_token_ttl_minutes: int = 30
+    # How long past revocation/expiry a refresh token record is kept before pruning
+    # (auth_service._prune_refresh_tokens) — bounds unbounded growth of User.refresh_tokens.
+    refresh_token_retention_days: int = 7
+
+    # In-memory sliding-window rate limits (app.core.rate_limit) for auth endpoints.
+    rate_limit_login_max_attempts: int = 10
+    rate_limit_login_window_seconds: int = 60
+    rate_limit_register_max_attempts: int = 5
+    rate_limit_register_window_seconds: int = 60
+    rate_limit_forgot_password_max_attempts: int = 5
+    rate_limit_forgot_password_window_seconds: int = 300
+
 
 settings = Settings()

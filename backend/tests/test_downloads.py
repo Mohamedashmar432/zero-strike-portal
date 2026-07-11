@@ -6,7 +6,7 @@ from tests.test_auth_flow import register_and_login
 
 
 def _admin_headers(client, email="dlAdmin@zerostrike.dev"):
-    tokens = register_and_login(client, email=email)
+    register_and_login(client, email=email)
 
     async def promote():
         user = await User.find_one(User.email == email)

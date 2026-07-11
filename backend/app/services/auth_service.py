@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 
@@ -6,6 +8,9 @@ from app.core import security
 from app.core.config import settings
 from app.models.project_member import ProjectMember
 from app.models.user import RefreshTokenRecord, User
+from app.services import email_service
+
+logger = logging.getLogger(__name__)
 
 
 class AuthError(HTTPException):
@@ -46,9 +51,28 @@ async def authenticate(email: str, password: str) -> User:
     return user
 
 
+def _prune_refresh_tokens(user: User) -> None:
+    """Drop old revoked/expired refresh-token records so the list doesn't grow forever.
+
+    Keeps any record that is still active (unrevoked and unexpired) regardless of age;
+    only drops records that are revoked or expired AND older than the retention cutoff.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.refresh_token_retention_days)
+
+    def _keep(record: RefreshTokenRecord) -> bool:
+        if record.revoked_at is not None and record.revoked_at.replace(tzinfo=timezone.utc) < cutoff:
+            return False
+        if record.expires_at.replace(tzinfo=timezone.utc) < cutoff:
+            return False
+        return True
+
+    user.refresh_tokens = [r for r in user.refresh_tokens if _keep(r)]
+
+
 async def issue_token_pair(
     user: User, *, user_agent: str | None = None, ip: str | None = None
 ) -> tuple[str, str, int]:
+    _prune_refresh_tokens(user)
     access_token = security.create_access_token(str(user.id), user.role)
     refresh_token, jti, expires_at = security.create_refresh_token(str(user.id))
     user.refresh_tokens.append(
@@ -113,3 +137,64 @@ async def logout(refresh_token: str) -> str | None:
         record.revoked_at = datetime.now(timezone.utc)
         await user.save()
     return str(user.id)
+
+
+def _revoke_all_refresh_tokens(user: User, now: datetime) -> None:
+    """Mirrors the reuse-detected branch in refresh_token_pair — revoke, never delete."""
+    for record in user.refresh_tokens:
+        record.revoked_at = record.revoked_at or now
+
+
+async def change_password(user: User, current_password: str, new_password: str) -> None:
+    if not security.verify_password(current_password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+
+    now = datetime.now(timezone.utc)
+    user.password_hash = security.hash_password(new_password)
+    _revoke_all_refresh_tokens(user, now)
+    user.updated_at = now
+    await user.save()
+
+
+async def request_password_reset(email: str) -> None:
+    """Anti-enumeration: always returns silently regardless of whether the email exists/is active.
+
+    Callers (the router) must always show the same generic success message no matter what
+    this function does internally.
+    """
+    user = await User.find_one(User.email == email)
+    if user is None or not user.is_active:
+        return
+
+    raw, token_hash = security.generate_reset_token()
+    user.password_reset_token_hash = token_hash
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.password_reset_token_ttl_minutes
+    )
+    await user.save()
+
+    reset_url = f"{settings.frontend_origin}/reset-password?token={raw}"
+    try:
+        await asyncio.to_thread(email_service.send_password_reset_email, user.email, reset_url)
+    except Exception:
+        logger.exception("Failed to send password reset email to %s", user.email)
+
+
+async def reset_password(token: str, new_password: str) -> None:
+    token_hash = security.hash_token(token)
+    user = await User.find_one(User.password_reset_token_hash == token_hash)
+
+    if (
+        user is None
+        or user.password_reset_expires_at is None
+        or user.password_reset_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired reset token")
+
+    now = datetime.now(timezone.utc)
+    user.password_hash = security.hash_password(new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    _revoke_all_refresh_tokens(user, now)
+    user.updated_at = now
+    await user.save()

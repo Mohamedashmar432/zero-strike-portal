@@ -65,6 +65,12 @@ def generate_api_key() -> tuple[str, str, str]:
     return raw, prefix, hash_token(raw)
 
 
+def generate_reset_token() -> tuple[str, str]:
+    """Returns (raw_token, sha256_hash) — mirrors generate_api_key() but no display-prefix needed."""
+    raw = secrets.token_urlsafe(32)
+    return raw, hash_token(raw)
+
+
 def encrypt_secret(raw: str) -> str:
     """Symmetric encryption for values that must be decrypted for reuse (OAuth access/refresh
     tokens) — unlike API keys/refresh tokens, which only need one-way hash comparison."""
@@ -101,6 +107,7 @@ __all__ = [
     "decode_token",
     "hash_token",
     "generate_api_key",
+    "generate_reset_token",
     "encrypt_secret",
     "decrypt_secret",
     "create_oauth_state_token",

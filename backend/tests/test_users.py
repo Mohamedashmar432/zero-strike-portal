@@ -41,6 +41,41 @@ def test_update_my_profile_partial_update_is_noop_when_omitted(client):
     assert r.json()["name"] == "User"
 
 
+def test_update_my_profile_changes_email(client):
+    tokens = register_and_login(client, email="email-old@zerostrike.dev")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    r = client.patch("/api/v1/users/me", json={"email": "email-new@zerostrike.dev"}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["email"] == "email-new@zerostrike.dev"
+
+    r = client.get("/api/v1/users/me", headers=headers)
+    assert r.json()["email"] == "email-new@zerostrike.dev"
+
+
+def test_update_my_profile_rejects_email_already_in_use_by_another_user(client):
+    register_and_login(client, email="email-taken@zerostrike.dev")
+    tokens = register_and_login(client, email="email-wants-it@zerostrike.dev")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    r = client.patch("/api/v1/users/me", json={"email": "email-taken@zerostrike.dev"}, headers=headers)
+    assert r.status_code == 409
+
+
+def test_update_my_profile_keeping_own_email_is_not_a_conflict(client):
+    tokens = register_and_login(client, email="email-same@zerostrike.dev")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    r = client.patch(
+        "/api/v1/users/me",
+        json={"name": "Still Me", "email": "email-same@zerostrike.dev"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["email"] == "email-same@zerostrike.dev"
+    assert r.json()["name"] == "Still Me"
+
+
 def test_non_admin_forbidden_on_admin_user_routes(client):
     tokens = register_and_login(client, email="plain@zerostrike.dev")
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
