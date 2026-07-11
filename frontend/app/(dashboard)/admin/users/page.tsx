@@ -81,7 +81,12 @@ export default function AdminUsersPage() {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  // Two separate pieces of state rather than one `deleteTarget: User | null`:
+  // deleteTargetId controls the dialog's open state and is nulled on success/cancel,
+  // but deleteTargetEmail is intentionally left stale so the ~100ms dialog exit
+  // animation doesn't render "undefined" while the content is still mounted.
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteTargetEmail, setDeleteTargetEmail] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin", "users", page],
@@ -93,12 +98,30 @@ export default function AdminUsersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
       toast.success("User deleted");
-      setDeleteTarget(null);
+      setDeleteTargetId(null);
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete user"),
   });
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
+
+  // Deleting the last user on the last page (or the page shrinking otherwise)
+  // can leave `page` past the new `totalPages` — snap back so the table isn't
+  // left showing an empty "Page N of M" with only Prev enabled. Adjusted here
+  // during render (React's "adjusting state when a prop changes" pattern)
+  // rather than in a useEffect, which would cause an extra render pass.
+  const [prevTotalPages, setPrevTotalPages] = useState(totalPages);
+  if (totalPages !== prevTotalPages) {
+    setPrevTotalPages(totalPages);
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }
+
+  function requestDelete(u: User) {
+    setDeleteTargetId(u.id);
+    setDeleteTargetEmail(u.email);
+  }
 
   return (
     <div className="space-y-6">
@@ -140,7 +163,7 @@ export default function AdminUsersPage() {
                       </TableCell>
                       <TableCell>{u.is_active ? "Active" : "Disabled"}</TableCell>
                       <TableCell>
-                        <UserRowActions targetUser={u} isSelf={isSelf} onRequestDelete={setDeleteTarget} />
+                        <UserRowActions targetUser={u} isSelf={isSelf} onRequestDelete={requestDelete} />
                       </TableCell>
                     </TableRow>
                   );
@@ -175,22 +198,22 @@ export default function AdminUsersPage() {
           </div>
         </div>
       )}
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <Dialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete user</DialogTitle>
             <DialogDescription>
-              This will permanently delete {deleteTarget?.email}. This action cannot be undone.
+              This will permanently delete {deleteTargetEmail}. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}
-              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              onClick={() => deleteTargetId && deleteMutation.mutate(deleteTargetId)}
             >
               {deleteMutation.isPending ? "Deleting…" : "Delete"}
             </Button>
