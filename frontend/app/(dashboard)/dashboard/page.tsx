@@ -4,19 +4,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SeverityBadge } from "@/components/severity/severity-badge";
-import { listProjects } from "@/lib/api/projects";
+import { getDashboardStats } from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => listProjects(1, 100),
+    queryKey: ["dashboard", "stats"],
+    queryFn: getDashboardStats,
   });
 
   const stats = [
-    { label: "Projects", value: data?.total ?? 0 },
-    { label: "Scans", value: data?.items.reduce((sum, p) => sum + p.scan_count, 0) ?? 0 },
-    { label: "Critical Findings", value: 0, severity: "critical" as const },
-    { label: "High Findings", value: 0, severity: "high" as const },
+    { label: "Projects", value: data?.project_count ?? 0 },
+    { label: "Scans", value: data?.scan_count ?? 0 },
+    { label: "Critical Findings", value: data?.findings_by_severity.critical ?? 0, severity: "critical" as const },
+    { label: "High Findings", value: data?.findings_by_severity.high ?? 0, severity: "high" as const },
   ];
 
   return (
