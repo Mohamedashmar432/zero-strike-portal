@@ -45,6 +45,8 @@ def test_create_scan_returns_pending_and_sets_scanner_fields(client):
     body = _create_scan(client, token, project["id"])
     assert body["status"] == "pending"
     assert body["scan_id"]
+    assert body["project_id"] == project["id"]
+    assert body["project_name"] == project["name"]
 
     detail = client.get(f"/api/v1/scans/{body['scan_id']}", headers=_headers(owner)).json()
     assert detail["scan_type"] == "local"
@@ -54,6 +56,23 @@ def test_create_scan_returns_pending_and_sets_scanner_fields(client):
 
     project_detail = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(owner)).json()
     assert project_detail["scan_count"] == 1
+
+
+def test_create_scan_without_project_id_in_body_succeeds(client):
+    """New-style CLI: the token alone resolves the project, no --project-id needed."""
+    owner = register_and_login(client, email="scn1b@zerostrike.dev")
+    project = _project(client, _headers(owner))
+    token = _raw_key(client, _headers(owner), project["id"])
+
+    r = client.post(
+        "/api/v1/scans",
+        json={"scanner_version": "v0.23.0", "branch": "main"},
+        headers=_scanner(token),
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["project_id"] == project["id"]
+    assert body["project_name"] == project["name"]
 
 
 def test_create_scan_project_mismatch_forbidden(client):

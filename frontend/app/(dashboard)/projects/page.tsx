@@ -36,7 +36,7 @@ function CreatedProjectNextSteps({ project, onDismiss }: { project: Project; onD
       <DialogHeader>
         <DialogTitle>&quot;{project.name}&quot; is ready</DialogTitle>
         <DialogDescription>
-          Next: generate a scanner API key so the ZeroStrike SAST scanner can authenticate and upload
+          Next: generate a project token so the ZeroStrike SAST scanner can authenticate and upload
           results for this project.
         </DialogDescription>
       </DialogHeader>
@@ -50,7 +50,7 @@ function CreatedProjectNextSteps({ project, onDismiss }: { project: Project; onD
             onDismiss();
           }}
         >
-          Set up API key
+          Set up project token
         </Button>
       </DialogFooter>
     </>
@@ -80,7 +80,7 @@ function CreateProjectForm({ onCreated }: { onCreated: (project: Project) => voi
       <DialogHeader>
         <DialogTitle>New project</DialogTitle>
         <DialogDescription>
-          A project groups the SAST scans, members, and scanner API keys for one codebase.
+          A project groups the SAST scans, members, and scanner project tokens for one codebase.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
@@ -112,7 +112,7 @@ function ApiKeysQuickLink({ projectId }: { projectId: string }) {
       render={<Link href={`/projects/${projectId}?tab=keys`} />}
     >
       <KeyRound />
-      API Keys
+      Project Tokens
     </Button>
   );
 }

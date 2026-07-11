@@ -55,7 +55,10 @@ class ScanResponse(BaseModel):
 
 
 class ScannerCreateScanRequest(BaseModel):
-    project_id: str
+    # Optional: the API token alone already resolves to a project server-side. Kept for
+    # backward compatibility with older scanner CLI versions that still send it — when
+    # present, it's checked against the token's project as a client-error guard.
+    project_id: str | None = None
     scanner_version: str | None = None
     hostname: str | None = None
     git_commit: str | None = None
@@ -66,6 +69,8 @@ class ScannerCreateScanRequest(BaseModel):
 class ScannerCreateScanResponse(BaseModel):
     scan_id: str
     status: str
+    project_id: str
+    project_name: str
 
 
 class ScannerStatusUpdateRequest(BaseModel):

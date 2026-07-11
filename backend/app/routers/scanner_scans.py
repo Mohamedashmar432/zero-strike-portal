@@ -32,15 +32,15 @@ async def _owned_scan(scan_id: str, ctx: ApiKeyContext) -> Scan:
 async def scanner_create_scan(
     payload: ScannerCreateScanRequest, ctx: ApiKeyContext = Depends(get_api_key_context)
 ):
-    if payload.project_id != ctx.project_id:
+    if payload.project_id is not None and payload.project_id != ctx.project_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "API key does not grant access to this project")
-    project = await project_service.get_project_or_404(payload.project_id)
+    project = await project_service.get_project_or_404(ctx.project_id)
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
     now = datetime.now(timezone.utc)
     scan = Scan(
-        project_id=payload.project_id,
+        project_id=ctx.project_id,
         api_key_id=ctx.key_id,
         scan_type="local",
         triggered_by="cli",
@@ -58,12 +58,14 @@ async def scanner_create_scan(
     await audit_service.record(
         "Scan Created",
         actor_type="api_key",
-        project_id=payload.project_id,
+        project_id=ctx.project_id,
         target_type="scan",
         target_id=str(scan.id),
         metadata={"scanner_version": payload.scanner_version or "", "scan_label": payload.scan_label or ""},
     )
-    return ScannerCreateScanResponse(scan_id=str(scan.id), status="pending")
+    return ScannerCreateScanResponse(
+        scan_id=str(scan.id), status="pending", project_id=ctx.project_id, project_name=project.name
+    )
 
 
 @router.post("/scans/{scan_id}/upload/json")

@@ -41,7 +41,7 @@ function portalOrigin(): string {
 }
 
 const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: typeof Terminal }[] = [
-  { value: "local", label: "Local", description: "Run the ZeroStrike CLI on your machine and upload results with an API key.", icon: Terminal },
+  { value: "local", label: "Local", description: "Run the ZeroStrike CLI on your machine and upload results with a project token.", icon: Terminal },
   { value: "cloud", label: "Cloud", description: "Give ZeroStrike a repo URL and it clones + scans it server-side.", icon: Cloud },
   { value: "cicd", label: "CI/CD", description: "Add ZeroStrike to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
@@ -144,9 +144,9 @@ function localInstallCmd(os: LocalOs, origin: string): string {
   return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o zerostrike && chmod +x zerostrike`;
 }
 
-function localRunCmd(os: LocalOs, projectId: string, token: string): string {
+function localRunCmd(os: LocalOs, token: string): string {
   const bin = os === "windows" ? ".\\zerostrike.exe" : "./zerostrike";
-  return `${bin} scan . --server ${portalOrigin()} --project-id ${projectId} --token ${token}`;
+  return `${bin} scan . --server ${portalOrigin()} --token ${token}`;
 }
 
 function localFilename(os: LocalOs): string {
@@ -159,11 +159,11 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
   const generate = useMutation({
     mutationFn: () => createApiKey(projectId, { label: "local CLI scan", expires_in_days: 90 }),
     onSuccess: (key) => setRawToken(key.raw_token),
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create API key"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create project token"),
   });
 
-  const token = rawToken ?? "<API_KEY>";
-  const command = `${localInstallCmd(os, portalOrigin())}\n${localRunCmd(os, projectId, token)}`;
+  const token = rawToken ?? "<PROJECT_TOKEN>";
+  const command = `${localInstallCmd(os, portalOrigin())}\n${localRunCmd(os, token)}`;
 
   return (
     <>
@@ -194,13 +194,13 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
         {rawToken ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-amber-500">
-              Copy this API key now — it won&apos;t be shown again.
+              Copy this project token now — it won&apos;t be shown again.
             </p>
             <CopyBlock text={rawToken} />
           </div>
         ) : (
           <Button type="button" onClick={() => generate.mutate()} disabled={generate.isPending}>
-            {generate.isPending ? "Generating…" : "Generate an API key"}
+            {generate.isPending ? "Generating…" : "Generate a project token"}
           </Button>
         )}
         <CopyBlock label="Install & run" text={command} filename={localFilename(os)} />
@@ -228,11 +228,11 @@ function cicdFilename(provider: CiProvider): string {
   return "azure-pipelines.yml";
 }
 
-function cicdSnippet(provider: CiProvider, origin: string, projectId: string): string {
+function cicdSnippet(provider: CiProvider, origin: string): string {
   const install = cicdInstallCmd(origin);
-  const cmdGh = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
-  const cmdSh = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token $ZEROSTRIKE_TOKEN`;
-  const cmdAz = `./zerostrike scan . --server ${origin} --project-id ${projectId} --token $(ZEROSTRIKE_TOKEN)`;
+  const cmdGh = `./zerostrike scan . --server ${origin} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
+  const cmdSh = `./zerostrike scan . --server ${origin} --token $ZEROSTRIKE_TOKEN`;
+  const cmdAz = `./zerostrike scan . --server ${origin} --token $(ZEROSTRIKE_TOKEN)`;
   if (provider === "github_actions") {
     return [
       "# .github/workflows/zerostrike.yml",
@@ -270,7 +270,7 @@ function cicdSnippet(provider: CiProvider, origin: string, projectId: string): s
   ].join("\n");
 }
 
-function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+function CicdSetupStep({ onDone }: { onDone: () => void }) {
   const [provider, setProvider] = useState<CiProvider>();
 
   return (
@@ -278,8 +278,8 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
       <DialogHeader>
         <DialogTitle>CI/CD scan</DialogTitle>
         <DialogDescription>
-          Add ZeroStrike to your pipeline. Store an API key as a secret named{" "}
-          <code>ZEROSTRIKE_TOKEN</code> (generate one on the API Keys tab), then drop in the snippet.
+          Add ZeroStrike to your pipeline. Store a project token as a secret named{" "}
+          <code>ZEROSTRIKE_TOKEN</code> (generate one on the Project Tokens tab), then drop in the snippet.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
@@ -303,7 +303,7 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
           <div className="space-y-1">
             <CopyBlock
               label="Pipeline snippet"
-              text={cicdSnippet(provider, portalOrigin(), projectId)}
+              text={cicdSnippet(provider, portalOrigin())}
               filename={cicdFilename(provider)}
             />
             {provider === "github_actions" && (
@@ -583,7 +583,7 @@ export function NewScanDialog({ projectId }: { projectId: string }) {
         ) : scanType === "cloud" ? (
           <CloudCreateStep projectId={projectId} onClose={close} />
         ) : scanType === "cicd" ? (
-          <CicdSetupStep projectId={projectId} onDone={close} />
+          <CicdSetupStep onDone={close} />
         ) : (
           <TypeSelectStep onSelect={setScanType} />
         )}
