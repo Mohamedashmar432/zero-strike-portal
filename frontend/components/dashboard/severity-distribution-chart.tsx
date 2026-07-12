@@ -36,7 +36,7 @@ export function SeverityDistributionChart({ data }: { data: SeverityCounts }) {
 
   return (
     <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-      <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[220px]">
+      <ChartContainer config={chartConfig} className="aspect-square max-h-[220px]">
         <PieChart>
           <ChartTooltip cursor={false} content={<ChartTooltipContent nameKey="severity" hideLabel />} />
           <Pie data={chartData} dataKey="count" nameKey="severity" innerRadius={55} outerRadius={85} paddingAngle={2}>
