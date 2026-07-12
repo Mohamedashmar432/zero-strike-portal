@@ -25,6 +25,21 @@ def test_admin_cannot_delete_own_account_via_admin_endpoint(client):
     assert r.status_code == 200
 
 
+def test_update_user_rejects_invalid_role(client):
+    admin_headers = _admin_headers(client, email="selfmod-admin4@zerostrike.dev")
+    other_tokens = register_and_login(client, email="selfmod-other4@zerostrike.dev")
+    other_id = client.get(
+        "/api/v1/users/me", headers={"Authorization": f"Bearer {other_tokens['access_token']}"}
+    ).json()["id"]
+
+    r = client.patch(f"/api/v1/users/{other_id}", json={"role": "superadmin"}, headers=admin_headers)
+    assert r.status_code == 422
+
+    # Rejected before mutation — role must be untouched.
+    r = client.get(f"/api/v1/users/{other_id}", headers=admin_headers)
+    assert r.json()["role"] == "user"
+
+
 def test_admin_can_still_modify_a_different_admin_account(client):
     admin_headers = _admin_headers(client, email="selfmod-admin3@zerostrike.dev")
     other_tokens = register_and_login(client, email="selfmod-other3@zerostrike.dev")
