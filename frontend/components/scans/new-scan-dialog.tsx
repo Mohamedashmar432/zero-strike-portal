@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
@@ -409,34 +410,36 @@ function AzureDevOpsRepoPicker({ onSelect }: { onSelect: (repo: Repo) => void })
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <select
-          className="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+        <Select
           value={org}
-          onChange={(e) => {
-            setOrg(e.target.value);
+          onValueChange={(value) => {
+            setOrg(value ?? "");
             setProject("");
           }}
         >
-          <option value="">Organization…</option>
-          {orgs?.map((o) => (
-            <option key={o.id} value={o.name}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
-          value={project}
-          onChange={(e) => setProject(e.target.value)}
-          disabled={!org}
-        >
-          <option value="">Project…</option>
-          {projects?.map((p) => (
-            <option key={p.id} value={p.name}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Organization…" />
+          </SelectTrigger>
+          <SelectContent>
+            {orgs?.map((o) => (
+              <SelectItem key={o.id} value={o.name}>
+                {o.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={project} onValueChange={(value) => setProject(value ?? "")} disabled={!org}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Project…" />
+          </SelectTrigger>
+          <SelectContent>
+            {projects?.map((p) => (
+              <SelectItem key={p.id} value={p.name}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {org && project && (
         <RepoPickerList repos={repos} isLoading={isLoading} isError={isError} onSelect={onSelect} />

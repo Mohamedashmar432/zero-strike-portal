@@ -18,6 +18,11 @@ import {
   type CreateApiKeyInput,
   type InviteMemberInput,
 } from "@/lib/validation/project.schema";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { EmptyState } from "@/components/common/empty-state";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
+import { PageHeader } from "@/components/layout/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -160,51 +165,53 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
           </Button>
         </form>
       )}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members?.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="font-mono text-xs">{m.invited_email}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="font-mono uppercase">
-                        {m.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{m.status === "pending" ? "Pending" : "Accepted"}</TableCell>
-                    <TableCell>
-                      {m.role !== "owner" && (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => remove.mutate(m.id)}
-                          disabled={remove.isPending}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <DataTableCard
+        isLoading={isLoading}
+        isError={false}
+        isEmpty={!!members && members.length === 0}
+        emptyState={
+          <EmptyState
+            title="No members yet"
+            description="Invite a teammate by email to give them access to this project."
+          />
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {members?.map((m) => (
+              <TableRow key={m.id}>
+                <TableCell className="font-mono text-xs">{m.invited_email}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary" className="font-mono uppercase">
+                    {m.role}
+                  </Badge>
+                </TableCell>
+                <TableCell>{m.status === "pending" ? "Pending" : "Accepted"}</TableCell>
+                <TableCell>
+                  {m.role !== "owner" && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => remove.mutate(m.id)}
+                      disabled={remove.isPending}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </DataTableCard>
     </div>
   );
 }
@@ -227,55 +234,53 @@ function ScansTab({ projectId }: { projectId: string }) {
         </p>
         <NewScanDialog projectId={projectId} />
       </div>
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : data?.items.length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">
-              No scans yet. Set up a local, cloud, or CI/CD scan to get started.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>
-                      <ScanTypeBadge scanType={s.scan_type} />
-                    </TableCell>
-                    <TableCell>{s.scan_label || "—"}</TableCell>
-                    <TableCell>
-                      <ScanStatusBadge status={s.status} />
-                    </TableCell>
-                    <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        nativeButton={false}
-                        render={<Link href={`/projects/${projectId}/scans/${s.id}`} />}
-                      >
-                        View
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <DataTableCard
+        isLoading={isLoading}
+        isError={false}
+        isEmpty={data?.items.length === 0}
+        emptyState={
+          <EmptyState
+            title="No scans yet"
+            description="Set up a local, cloud, or CI/CD scan to get started."
+          />
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Label</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.items.map((s) => (
+              <TableRow key={s.id}>
+                <TableCell>
+                  <ScanTypeBadge scanType={s.scan_type} />
+                </TableCell>
+                <TableCell>{s.scan_label || "—"}</TableCell>
+                <TableCell>
+                  <ScanStatusBadge status={s.status} />
+                </TableCell>
+                <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
+                <TableCell>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    nativeButton={false}
+                    render={<Link href={`/projects/${projectId}/scans/${s.id}`} />}
+                  >
+                    View
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </DataTableCard>
     </div>
   );
 }
@@ -323,11 +328,9 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
         <code>--token</code>. The token alone identifies this project — no project ID needed.
       </p>
       {revealedToken && (
-        <Card className="border-amber-500/50 bg-amber-500/5">
-          <CardContent className="space-y-2 pt-4">
-            <p className="text-sm font-medium">
-              Copy this token now — you won&apos;t be able to see it again.
-            </p>
+        <Alert>
+          <AlertTitle>Copy this token now — you won&apos;t be able to see it again.</AlertTitle>
+          <AlertDescription>
             <div className="flex items-center gap-2">
               <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{revealedToken}</code>
               <Button
@@ -344,8 +347,8 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
                 Dismiss
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </AlertDescription>
+        </Alert>
       )}
       <form onSubmit={handleSubmit((values) => create.mutate(values))} className="flex items-end gap-2">
         <div className="space-y-2">
@@ -365,53 +368,55 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
           {create.isPending ? "Generating…" : "Generate token"}
         </Button>
       </form>
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Prefix</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((k) => (
-                  <TableRow key={k.id}>
-                    <TableCell>{k.label}</TableCell>
-                    <TableCell className="font-mono text-xs">{k.prefix}…</TableCell>
-                    <TableCell>{new Date(k.expires_at).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Badge variant={k.is_active ? "secondary" : "outline"}>
-                        {k.is_active ? "Active" : k.revoked_at ? "Revoked" : "Expired"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {k.is_active && (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => revoke.mutate(k.id)}
-                          disabled={revoke.isPending}
-                        >
-                          Revoke
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <DataTableCard
+        isLoading={isLoading}
+        isError={false}
+        isEmpty={data?.items.length === 0}
+        emptyState={
+          <EmptyState
+            title="No project tokens yet"
+            description="Generate one below so the scanner can authenticate and upload results."
+          />
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Label</TableHead>
+              <TableHead>Prefix</TableHead>
+              <TableHead>Expires</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.items.map((k) => (
+              <TableRow key={k.id}>
+                <TableCell>{k.label}</TableCell>
+                <TableCell className="font-mono text-xs">{k.prefix}…</TableCell>
+                <TableCell>{new Date(k.expires_at).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <Badge variant={k.is_active ? "secondary" : "outline"}>
+                    {k.is_active ? "Active" : k.revoked_at ? "Revoked" : "Expired"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {k.is_active && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => revoke.mutate(k.id)}
+                      disabled={revoke.isPending}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </DataTableCard>
     </div>
   );
 }
@@ -429,16 +434,23 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">{project?.name ?? "Project"}</h1>
-        {project && (
-          <Badge variant="secondary" className="font-mono uppercase">
-            {project.my_role}
-          </Badge>
-        )}
-      </div>
+      <PageHeader
+        title={project?.name ?? "Project"}
+        breadcrumb={
+          <Breadcrumbs
+            items={[{ label: "Projects", href: "/projects" }, { label: project?.name ?? "Project" }]}
+          />
+        }
+        actions={
+          project && (
+            <Badge variant="secondary" className="font-mono uppercase">
+              {project.my_role}
+            </Badge>
+          )
+        }
+      />
       <Tabs defaultValue={initialTab}>
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="scans">Scans</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
