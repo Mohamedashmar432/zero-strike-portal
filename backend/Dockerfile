@@ -31,9 +31,11 @@ RUN mkdir -p /smoke && printf '%s\n' \
       "    sql = 'SELECT * FROM users WHERE name = ' + q" \
       "    sqlite3.connect('db').cursor().execute(sql)" \
       > /smoke/vuln.py \
-    && ( /out/zerostrike scan /smoke --format json > /smoke/out.json || test $? -eq 1 ) \
-    && grep -q '"RuleID"' /smoke/out.json \
-    && echo "scanner smoke check passed (findings present -> CGO parsers active)"
+    ; /out/zerostrike scan /smoke --format json > /smoke/out.json 2>/smoke/err.log ; \
+    grep -q '"RuleID"' /smoke/out.json \
+      && echo "scanner smoke check passed (findings present -> CGO parsers active)" \
+      || { echo "=== smoke check FAILED — /out/zerostrike stdout ==="; cat /smoke/out.json; \
+           echo "=== stderr ==="; cat /smoke/err.log; exit 1; }
 
 # --- Stage 2: the FastAPI backend --------------------------------------------
 FROM python:3.12-slim
