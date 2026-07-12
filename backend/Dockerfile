@@ -31,7 +31,7 @@ RUN mkdir -p /smoke && printf '%s\n' \
       "    sql = 'SELECT * FROM users WHERE name = ' + q" \
       "    sqlite3.connect('db').cursor().execute(sql)" \
       > /smoke/vuln.py \
-    && /out/zerostrike scan /smoke --format json > /smoke/out.json \
+    && ( /out/zerostrike scan /smoke --format json > /smoke/out.json || test $? -eq 1 ) \
     && grep -q '"RuleID"' /smoke/out.json \
     && echo "scanner smoke check passed (findings present -> CGO parsers active)"
 
