@@ -12,6 +12,13 @@ export function listUsers(page = 1, pageSize = 20) {
   return apiFetch<Page<User>>(`/users?page=${page}&page_size=${pageSize}`);
 }
 
+export function updateUserRole(userId: string, role: "admin" | "user") {
+  return apiFetch<User>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  });
+}
+
 export function updateMyProfile(name: string) {
   return apiFetch<User>("/users/me", {
     method: "PATCH",

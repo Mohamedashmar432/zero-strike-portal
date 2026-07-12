@@ -33,8 +33,16 @@ DEMO_PROJECT_NAME = "Demo Project"
 
 
 async def _upsert_user(spec: dict) -> User:
+    """Re-running this must always leave the account matching docs/TEST_USERS.md exactly —
+    otherwise a password changed via the app (or any other drift) silently breaks the
+    documented login and nobody notices until someone tries it."""
     user = await User.find_one(User.email == spec["email"])
     if user:
+        user.password_hash = hash_password(spec["password"])
+        user.name = spec["name"]
+        user.role = spec["role"]
+        user.is_active = True
+        await user.save()
         return user
     now = datetime.now(timezone.utc)
     user = User(
