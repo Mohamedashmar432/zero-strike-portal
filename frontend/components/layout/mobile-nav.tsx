@@ -3,6 +3,7 @@
 import { Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -12,9 +13,20 @@ import { adminLinks, mainLinks, settingsLinks } from "./nav-links";
 export function MobileNav() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  // Close the drawer once navigation actually completes (pathname changes), rather than
+  // on link click — a click-handler close would race the route transition and could
+  // flash-close before the new page paints. Adjusted during render (see the same pattern
+  // in admin/users/page.tsx) instead of a useEffect, which would cost an extra render pass.
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
+    setOpen(false);
+  }
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         render={
           <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open navigation menu">
