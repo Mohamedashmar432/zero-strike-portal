@@ -11,14 +11,12 @@ ARG SCANNER_REF=v0.23.1
 ENV CGO_ENABLED=1
 
 WORKDIR /src
-# Private repo? Provide auth via BuildKit secret:
-#   docker build --secret id=scanner_git_token,env=SCANNER_GIT_TOKEN ...
-RUN --mount=type=secret,id=scanner_git_token \
-    sh -eux -c '\
-      if [ -f /run/secrets/scanner_git_token ]; then \
-        git config --global credential.helper "!f() { echo username=x-access-token; echo password=$(cat /run/secrets/scanner_git_token); }; f"; \
-      fi; \
-      git clone --depth 1 --branch "${SCANNER_REF}" "${SCANNER_REPO}" .'
+# ponytail: no BuildKit secret mount here — Railway's builder rejects any
+# `--mount=type=secret` outright (build fails even when unused), and SCANNER_REPO
+# is public by default so no auth is needed. Private repo on a builder that
+# supports BuildKit secrets? Add the mount back locally; on Railway, build the
+# image via CI where secrets work and push to GHCR instead (docs/DEPLOYMENT_OPTIONS.md).
+RUN git clone --depth 1 --branch "${SCANNER_REF}" "${SCANNER_REPO}" .
 RUN go build -o /out/zerostrike ./cmd/zerostrike
 
 # Smoke check: a real CGO build must find the vulnerable pattern below. A
