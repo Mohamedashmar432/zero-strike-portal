@@ -3,9 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { EmptyState } from "@/components/common/empty-state";
+import { PageHeader } from "@/components/layout/page-header";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
@@ -22,6 +24,15 @@ import { deleteUser, listUsers, updateUser } from "@/lib/api/users";
 import { useAuth } from "@/providers/auth-provider";
 
 const PAGE_SIZE = 20;
+
+// Derives up-to-two-letter initials for the Avatar fallback: first+last word
+// initials for multi-word names, or just the first letter for a single word.
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
 
 function UserRowActions({
   targetUser,
@@ -88,7 +99,7 @@ export default function AdminUsersPage() {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteTargetEmail, setDeleteTargetEmail] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["admin", "users", page],
     queryFn: () => listUsers(page, PAGE_SIZE),
   });
@@ -125,54 +136,56 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Users</h1>
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          ) : error ? (
-            <p className="p-4 text-sm text-destructive">Failed to load users.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((u) => {
-                  const isSelf = u.id === currentUser?.id;
-                  return (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-mono text-xs">{u.email}</TableCell>
-                      <TableCell>
+      <PageHeader title="Users" description="Manage portal accounts, roles, and access." />
+      <DataTableCard
+        isLoading={isLoading}
+        isError={isError}
+        errorMessage="Failed to load users."
+        isEmpty={!!data && data.items.length === 0}
+        emptyState={<EmptyState title="No users found" />}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Email</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.items.map((u) => {
+              const isSelf = u.id === currentUser?.id;
+              return (
+                <TableRow key={u.id}>
+                  <TableCell className="font-mono text-xs">{u.email}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Avatar size="sm">
+                        <AvatarFallback>{getInitials(u.name)}</AvatarFallback>
+                      </Avatar>
+                      <span>
                         {u.name}
                         {isSelf && <span className="ml-1 text-xs text-muted-foreground">(you)</span>}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="font-mono uppercase">
-                          {u.role}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{u.is_active ? "Active" : "Disabled"}</TableCell>
-                      <TableCell>
-                        <UserRowActions targetUser={u} isSelf={isSelf} onRequestDelete={requestDelete} />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="font-mono uppercase">
+                      {u.role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{u.is_active ? "Active" : "Disabled"}</TableCell>
+                  <TableCell>
+                    <UserRowActions targetUser={u} isSelf={isSelf} onRequestDelete={requestDelete} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </DataTableCard>
       {data && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
