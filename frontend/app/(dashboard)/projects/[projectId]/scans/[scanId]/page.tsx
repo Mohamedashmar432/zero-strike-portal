@@ -219,8 +219,15 @@ export default function ScanDetailPage() {
                   <TableRow key={f.id}>
                     <TableCell>{f.severity && <SeverityBadge severity={f.severity} />}</TableCell>
                     <TableCell className="font-mono text-xs">{f.rule_id ?? "—"}</TableCell>
-                    <TableCell className="max-w-md">{f.message}</TableCell>
-                    <TableCell className="font-mono text-xs">{fileLine(f.location.file, f.location.start_line)}</TableCell>
+                    <TableCell className="max-w-md truncate" title={f.message}>
+                      {f.message}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-xs truncate font-mono text-xs"
+                      title={fileLine(f.location.file, f.location.start_line)}
+                    >
+                      {fileLine(f.location.file, f.location.start_line)}
+                    </TableCell>
                     <TableCell>
                       {f.kind && (
                         <Badge variant="secondary" className="font-mono uppercase">
