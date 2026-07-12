@@ -46,8 +46,10 @@ RUN apt-get update \
 COPY --from=scanner-builder /out/zerostrike /usr/local/bin/zerostrike
 
 WORKDIR /app
-COPY pyproject.toml ./
-COPY app ./app
+# ponytail: one COPY, not two — Railway's remote build cache has been observed
+# returning "failed to calculate checksum of ref ...: not found" on a stale/evicted
+# COPY layer here; a single instruction avoids depending on that intermediate ref.
+COPY . .
 RUN pip install --no-cache-dir -e .
 
 # Non-root runtime. Ephemeral clone dir owned by the app user (reports persist in Mongo).
