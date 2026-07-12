@@ -21,15 +21,19 @@ RUN go build -o /out/zerostrike ./cmd/zerostrike
 
 # Smoke check: a real CGO build must find the vulnerable pattern below. A
 # parserless build finds nothing and this RUN fails, blocking a broken image.
-# ponytail: this fixture is tuned to fire ZS-PY SQL-injection taint; if the rule
-# set changes and it stops matching, update the sample rather than dropping the gate.
+# ponytail: fires ZS-PY-005 (os.system() command injection) — a single-expression
+# rule, not a cross-line taint flow, so it's less likely to silently stop matching
+# across scanner versions than the previous SQL-injection fixture (confirmed via
+# local docker build against v0.23.1: that fixture no longer matches any rule,
+# while CGO/tree-sitter parsing itself is fine — Diagnostics comes back clean).
+# If this rule ID also stops matching a future scanner version, update the sample
+# rather than dropping the gate.
 RUN mkdir -p /smoke && printf '%s\n' \
-      'import sqlite3' \
+      'import os' \
       'from flask import request' \
       'def handler():' \
-      "    q = request.args.get('q')" \
-      "    sql = 'SELECT * FROM users WHERE name = ' + q" \
-      "    sqlite3.connect('db').cursor().execute(sql)" \
+      "    cmd = request.args.get('cmd')" \
+      '    os.system(cmd)' \
       > /smoke/vuln.py \
     ; /out/zerostrike scan /smoke --format json > /smoke/out.json 2>/smoke/err.log ; \
     grep -q '"RuleID"' /smoke/out.json \
