@@ -65,4 +65,8 @@ RUN useradd --create-home --uid 10001 appuser \
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ponytail: shell form, not exec form — Railway assigns its own $PORT and routes
+# external traffic there; a hardcoded --port 8000 leaves the app unreachable even
+# though it starts up healthy. ${PORT:-8000} keeps 8000 as the default for
+# docker-compose/local runs that never set $PORT.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
