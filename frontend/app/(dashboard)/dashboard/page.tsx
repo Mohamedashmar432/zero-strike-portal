@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SeverityBadge } from "@/components/severity/severity-badge";
+import { SeverityDistributionChart } from "@/components/dashboard/severity-distribution-chart";
 import { getDashboardStats } from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
@@ -39,9 +40,18 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
-      <p className="text-sm text-muted-foreground">
-        Recent SAST scans and latest reports will appear here once you run your first scan.
-      </p>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-normal text-muted-foreground">Severity Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <Skeleton className="h-[220px] w-full" />
+          ) : (
+            data && <SeverityDistributionChart data={data.findings_by_severity} />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
