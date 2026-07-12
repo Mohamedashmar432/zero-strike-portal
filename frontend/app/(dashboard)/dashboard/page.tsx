@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SeverityBadge } from "@/components/severity/severity-badge";
 import { SeverityDistributionChart } from "@/components/dashboard/severity-distribution-chart";
+import { PageHeader } from "@/components/layout/page-header";
 import { getDashboardStats } from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
@@ -22,7 +23,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
+      <PageHeader title="Dashboard" />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
