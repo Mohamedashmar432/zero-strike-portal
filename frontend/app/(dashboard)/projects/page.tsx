@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, LayoutGrid, List as ListIcon } from "lucide-react";
+import { GitBranch, KeyRound, LayoutGrid, List as ListIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -119,6 +119,20 @@ function ApiKeysQuickLink({ projectId }: { projectId: string }) {
   );
 }
 
+function RepoQuickLink({ projectId }: { projectId: string }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      nativeButton={false}
+      render={<Link href={`/projects/${projectId}?tab=repos`} />}
+    >
+      <GitBranch />
+      Repositories
+    </Button>
+  );
+}
+
 export default function ProjectsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
@@ -203,7 +217,10 @@ export default function ProjectsPage() {
                   <p className="text-sm text-muted-foreground">
                     {p.scan_count} scan{p.scan_count === 1 ? "" : "s"} · {p.is_archived ? "Archived" : "Active"}
                   </p>
-                  <ApiKeysQuickLink projectId={p.id} />
+                  <div className="flex flex-wrap gap-2">
+                    <RepoQuickLink projectId={p.id} />
+                    <ApiKeysQuickLink projectId={p.id} />
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -243,7 +260,10 @@ export default function ProjectsPage() {
                   <TableCell>{p.scan_count}</TableCell>
                   <TableCell>{p.is_archived ? "Archived" : "Active"}</TableCell>
                   <TableCell>
-                    <ApiKeysQuickLink projectId={p.id} />
+                    <div className="flex flex-wrap gap-2">
+                      <RepoQuickLink projectId={p.id} />
+                      <ApiKeysQuickLink projectId={p.id} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

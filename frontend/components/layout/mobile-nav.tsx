@@ -2,17 +2,26 @@
 
 import { Menu } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks, settingsLinks } from "./nav-links";
 
 export function MobileNav() {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
   // Close the drawer once navigation actually completes (pathname changes), rather than
@@ -23,6 +32,12 @@ export function MobileNav() {
   if (pathname !== prevPathname) {
     setPrevPathname(pathname);
     setOpen(false);
+  }
+
+  async function handleLogout() {
+    setOpen(false);
+    await logout();
+    router.push("/login");
   }
 
   return (
@@ -90,6 +105,30 @@ export function MobileNav() {
             </Link>
           ))}
         </nav>
+        <div className="border-t border-border p-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent">
+                  <Avatar size="sm">
+                    <AvatarFallback>{getInitials(user?.name ?? user?.email ?? "?")}</AvatarFallback>
+                  </Avatar>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium text-foreground">{user?.name ?? "…"}</span>
+                    <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
+                  </span>
+                </button>
+              }
+            />
+            <DropdownMenuContent align="start" side="top">
+              <DropdownMenuItem render={<Link href="/settings/profile">Profile settings</Link>} />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={handleLogout}>
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </SheetContent>
     </Sheet>
   );

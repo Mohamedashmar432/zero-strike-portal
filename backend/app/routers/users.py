@@ -75,6 +75,13 @@ async def update_user(user_id: str, payload: UpdateUserRequest, admin: User = De
         user.is_active = payload.is_active
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
+    await audit_service.record(
+        "User Updated",
+        actor_user_id=str(admin.id),
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"role": user.role, "is_active": user.is_active},
+    )
     return _to_user_response(user)
 
 
@@ -86,3 +93,10 @@ async def delete_user(user_id: str, admin: User = Depends(require_admin)):
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     await user.delete()
+    await audit_service.record(
+        "User Deleted",
+        actor_user_id=str(admin.id),
+        target_type="user",
+        target_id=user_id,
+        metadata={"email": user.email},
+    )

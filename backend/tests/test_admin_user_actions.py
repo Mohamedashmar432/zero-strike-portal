@@ -55,3 +55,19 @@ def test_admin_can_still_modify_a_different_admin_account(client):
 
     r = client.delete(f"/api/v1/users/{other_id}", headers=admin_headers)
     assert r.status_code == 204
+
+
+def test_role_change_and_delete_are_audited(client):
+    admin_headers = _admin_headers(client, email="selfmod-admin5@zerostrike.dev")
+    other_tokens = register_and_login(client, email="selfmod-other5@zerostrike.dev")
+    other_id = client.get(
+        "/api/v1/users/me", headers={"Authorization": f"Bearer {other_tokens['access_token']}"}
+    ).json()["id"]
+
+    client.patch(f"/api/v1/users/{other_id}", json={"role": "admin"}, headers=admin_headers)
+    client.delete(f"/api/v1/users/{other_id}", headers=admin_headers)
+
+    logs = client.get("/api/v1/audit-logs", headers=admin_headers).json()["items"]
+    actions_for_target = [log["action"] for log in logs if log["target_id"] == other_id]
+    assert "User Updated" in actions_for_target
+    assert "User Deleted" in actions_for_target

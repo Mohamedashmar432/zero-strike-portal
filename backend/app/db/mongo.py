@@ -8,7 +8,9 @@ from app.models.finding import Finding
 from app.models.oauth_connection import OAuthConnection
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.project_repo import ProjectRepo
 from app.models.report import Report
+from app.models.repo_credential import RepoCredential
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
 from app.models.user import User
@@ -38,6 +40,8 @@ async def connect_to_mongo() -> None:
             AuditLog,
             ScannerBinary,
             OAuthConnection,
+            RepoCredential,
+            ProjectRepo,
         ],
     )
 

@@ -21,18 +21,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { deleteUser, listUsers, updateUser } from "@/lib/api/users";
+import { getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 const PAGE_SIZE = 20;
-
-// Derives up-to-two-letter initials for the Avatar fallback: first+last word
-// initials for multi-word names, or just the first letter for a single word.
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-}
 
 function UserRowActions({
   targetUser,

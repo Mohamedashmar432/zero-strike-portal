@@ -51,7 +51,7 @@ async def _claim_next() -> Scan | None:
         {"status": "queued"},
         {
             "$set": {"status": "running", "started_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)},
-            "$unset": {"repo_token": ""},
+            "$unset": {"repo_token": "", "repo_token_auth_scheme": ""},
         },
         sort=[("created_at", 1)],
         return_document=ReturnDocument.BEFORE,
@@ -68,7 +68,9 @@ async def drain_queue() -> None:
         scan = await _claim_next()
         if scan is None:
             break
-        task = asyncio.create_task(cloud_scan_service.run_cloud_scan(str(scan.id), scan.repo_token))
+        task = asyncio.create_task(
+            cloud_scan_service.run_cloud_scan(str(scan.id), scan.repo_token, scan.repo_token_auth_scheme)
+        )
         _track(task)
 
 

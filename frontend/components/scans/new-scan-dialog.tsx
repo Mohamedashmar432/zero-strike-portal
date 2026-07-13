@@ -23,14 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
-import {
-  listAzureOrgs,
-  listAzureProjects,
-  listAzureRepos,
-  listConnections,
-  listGithubRepos,
-  type Repo,
-} from "@/lib/api/connections";
+import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 
@@ -105,11 +98,11 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
             key={t.value}
             type="button"
             variant="outline"
-            className="h-auto flex-col items-start gap-1 whitespace-normal p-3 text-left"
+            className="h-auto flex-col items-start gap-2 whitespace-normal p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent"
             onClick={() => onSelect(t.value)}
           >
-            <t.icon className="size-5 text-muted-foreground" />
-            <span className="font-medium">{t.label}</span>
+            <t.icon className="size-5 text-brand" />
+            <span className="font-medium text-foreground">{t.label}</span>
             <span className="text-xs text-muted-foreground">{t.description}</span>
           </Button>
         ))}
@@ -324,138 +317,16 @@ function CicdSetupStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-function SelectedRepoSummary({ repo, onChange }: { repo: Repo; onChange: () => void }) {
-  return (
-    <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-      <span className="truncate font-mono">{repo.full_name}</span>
-      <Button type="button" size="sm" variant="ghost" onClick={onChange}>
-        Change
-      </Button>
-    </div>
-  );
-}
-
-function RepoPickerList({
-  repos,
-  isLoading,
-  isError,
-  onSelect,
-}: {
-  repos: Repo[] | undefined;
-  isLoading: boolean;
-  isError: boolean;
-  onSelect: (repo: Repo) => void;
-}) {
-  return (
-    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-1">
-      {isLoading ? (
-        <p className="p-2 text-sm text-muted-foreground">Loading…</p>
-      ) : isError ? (
-        <p className="p-2 text-sm text-destructive">
-          Couldn&apos;t load repos — the connection may need to be reconnected in Settings →
-          Integrations.
-        </p>
-      ) : repos?.length ? (
-        repos.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-            onClick={() => onSelect(r)}
-          >
-            {r.full_name}
-          </button>
-        ))
-      ) : (
-        <p className="p-2 text-sm text-muted-foreground">No repos found.</p>
-      )}
-    </div>
-  );
-}
-
-function GithubRepoPicker({ onSelect }: { onSelect: (repo: Repo) => void }) {
-  const [query, setQuery] = useState("");
-  const { data: repos, isLoading, isError } = useQuery({
-    queryKey: ["connections", "github", "repos", query],
-    queryFn: () => listGithubRepos(query),
-  });
-  return (
-    <div className="space-y-2">
-      <Input
-        placeholder="Search repos…"
-        autoComplete="off"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <RepoPickerList repos={repos} isLoading={isLoading} isError={isError} onSelect={onSelect} />
-    </div>
-  );
-}
-
-function AzureDevOpsRepoPicker({ onSelect }: { onSelect: (repo: Repo) => void }) {
-  const [org, setOrg] = useState("");
-  const [project, setProject] = useState("");
-  const { data: orgs } = useQuery({ queryKey: ["connections", "azure", "orgs"], queryFn: listAzureOrgs });
-  const { data: projects } = useQuery({
-    queryKey: ["connections", "azure", "projects", org],
-    queryFn: () => listAzureProjects(org),
-    enabled: !!org,
-  });
-  const { data: repos, isLoading, isError } = useQuery({
-    queryKey: ["connections", "azure", "repos", org, project],
-    queryFn: () => listAzureRepos(org, project),
-    enabled: !!org && !!project,
-  });
-
-  return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2">
-        <Select
-          value={org}
-          onValueChange={(value) => {
-            setOrg(value ?? "");
-            setProject("");
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Organization…" />
-          </SelectTrigger>
-          <SelectContent>
-            {orgs?.map((o) => (
-              <SelectItem key={o.id} value={o.name}>
-                {o.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={project} onValueChange={(value) => setProject(value ?? "")} disabled={!org}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Project…" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects?.map((p) => (
-              <SelectItem key={p.id} value={p.name}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {org && project && (
-        <RepoPickerList repos={repos} isLoading={isLoading} isError={isError} onSelect={onSelect} />
-      )}
-    </div>
-  );
-}
-
 function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [source, setSource] = useState<"manual" | "github" | "azure_devops">("manual");
-  const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
-  const { data: connections } = useQuery({ queryKey: ["connections"], queryFn: listConnections });
-  const githubConnection = connections?.find((c) => c.provider === "github");
-  const azureConnection = connections?.find((c) => c.provider === "azure_devops");
+  const { data: projectRepos } = useQuery({
+    queryKey: ["projects", projectId, "repos"],
+    queryFn: () => listProjectRepos(projectId),
+  });
+  const [source, setSource] = useState<"connected" | "manual">("manual");
+  const [selectedRepoId, setSelectedRepoId] = useState<string>("");
+  const hasConnectedRepos = !!projectRepos?.length;
 
   const {
     register,
@@ -463,6 +334,12 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     setValue,
     formState: { errors },
   } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
+
+  // Once connected repos load, default to that tab so the common case (a repo is already set up)
+  // doesn't require an extra click.
+  if (hasConnectedRepos && source === "manual" && !selectedRepoId) {
+    setSource("connected");
+  }
 
   const mutation = useMutation({
     mutationFn: (values: NewCloudScanInput) => createCloudScan(projectId, values),
@@ -476,83 +353,91 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start cloud scan"),
   });
 
-  function selectRepo(repo: Repo, connectionId: string) {
-    setSelectedRepo(repo);
-    setValue("repo_url", repo.clone_url, { shouldValidate: true });
-    setValue("connection_id", connectionId);
-    setValue("repo_token", "");
-    if (repo.default_branch) setValue("branch", repo.default_branch);
+  function selectConnectedRepo(repo: ProjectRepo) {
+    setSelectedRepoId(repo.id);
+    setValue("project_repo_id", repo.id, { shouldValidate: true });
+    setValue("repo_url", undefined);
   }
 
-  function clearRepoSelection() {
-    setSelectedRepo(null);
-    setValue("repo_url", "");
-    setValue("connection_id", undefined);
-  }
-
-  const needsRepoSelection = source !== "manual" && !selectedRepo;
+  const selectedRepo = projectRepos?.find((r) => r.id === selectedRepoId);
+  const needsRepoSelection = source === "connected" && !selectedRepoId;
 
   return (
     <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
       <DialogHeader>
         <DialogTitle>Cloud scan</DialogTitle>
         <DialogDescription>
-          ZeroStrike clones the repository and scans it on the server. Import from a connected account
-          or provide a URL and token for private repos — a pasted token is used only for this clone and
-          never stored.
+          ZeroStrike clones the repository and scans it on the server. Use a repo already connected on
+          the Repositories tab, or provide a URL and token for a one-off scan.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
-        {(githubConnection || azureConnection) && (
+        {hasConnectedRepos && (
           <Tabs
             value={source}
             onValueChange={(value) => {
               setSource(value as typeof source);
-              clearRepoSelection();
+              setSelectedRepoId("");
+              setValue("project_repo_id", undefined);
+              setValue("repo_url", undefined);
               setValue("repo_token", "");
             }}
           >
             <TabsList>
+              <TabsTrigger value="connected">Use connected repo</TabsTrigger>
               <TabsTrigger value="manual">Manual URL</TabsTrigger>
-              {githubConnection && <TabsTrigger value="github">GitHub</TabsTrigger>}
-              {azureConnection && <TabsTrigger value="azure_devops">Azure DevOps</TabsTrigger>}
             </TabsList>
           </Tabs>
         )}
 
-        {source === "github" && githubConnection ? (
-          selectedRepo ? (
-            <SelectedRepoSummary repo={selectedRepo} onChange={clearRepoSelection} />
-          ) : (
-            <GithubRepoPicker onSelect={(r) => selectRepo(r, githubConnection.id)} />
-          )
-        ) : source === "azure_devops" && azureConnection ? (
-          selectedRepo ? (
-            <SelectedRepoSummary repo={selectedRepo} onChange={clearRepoSelection} />
-          ) : (
-            <AzureDevOpsRepoPicker onSelect={(r) => selectRepo(r, azureConnection.id)} />
-          )
+        {source === "connected" && hasConnectedRepos ? (
+          <div className="space-y-2">
+            <Label>Repository</Label>
+            <Select
+              value={selectedRepoId}
+              onValueChange={(value) => {
+                const repo = projectRepos?.find((r) => r.id === value);
+                if (repo) selectConnectedRepo(repo);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a connected repo…" />
+              </SelectTrigger>
+              <SelectContent>
+                {projectRepos?.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.label ? `${r.label} — ${r.repo_full_name}` : r.repo_full_name} ({r.selected_branch})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedRepo && (
+              <p className="text-xs text-muted-foreground">
+                Branch: <code>{selectedRepo.selected_branch}</code>. Change it on the Repositories tab.
+              </p>
+            )}
+          </div>
         ) : (
-          <div className="space-y-2">
-            <Label htmlFor="cloud-repo">Repository URL</Label>
-            <Input
-              id="cloud-repo"
-              placeholder="https://github.com/org/repo"
-              autoComplete="off"
-              {...register("repo_url")}
-            />
-            {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
-          </div>
-        )}
-        <div className="space-y-2">
-          <Label htmlFor="cloud-branch">Branch (optional)</Label>
-          <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch")} />
-        </div>
-        {source === "manual" && (
-          <div className="space-y-2">
-            <Label htmlFor="cloud-token">Access token (private repos only)</Label>
-            <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
-          </div>
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="cloud-repo">Repository URL</Label>
+              <Input
+                id="cloud-repo"
+                placeholder="https://github.com/org/repo"
+                autoComplete="off"
+                {...register("repo_url")}
+              />
+              {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cloud-branch">Branch (optional)</Label>
+              <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch")} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cloud-token">Access token (private repos only)</Label>
+              <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
+            </div>
+          </>
         )}
         <div className="space-y-2">
           <Label htmlFor="cloud-label">Label (optional)</Label>

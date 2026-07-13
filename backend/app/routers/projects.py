@@ -7,11 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.deps import get_current_user
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.project_repo import ProjectRepo
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
 from app.schemas.project_member import MemberInviteRequest, MemberResponse
-from app.services import audit_service, project_service
+from app.schemas.project_repo import ProjectRepoCreateRequest, ProjectRepoResponse, ProjectRepoUpdateRequest
+from app.services import audit_service, project_repo_service, project_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -28,6 +30,21 @@ def _to_project_response(project: Project, my_role: str) -> ProjectResponse:
         created_at=project.created_at,
         updated_at=project.updated_at,
         my_role=my_role,
+    )
+
+
+def _to_project_repo_response(repo: ProjectRepo) -> ProjectRepoResponse:
+    return ProjectRepoResponse(
+        id=str(repo.id),
+        project_id=repo.project_id,
+        provider=repo.provider,
+        organization=repo.organization,
+        ado_project=repo.ado_project,
+        repo_full_name=repo.repo_full_name,
+        clone_url=repo.clone_url,
+        selected_branch=repo.selected_branch,
+        label=repo.label,
+        created_at=repo.created_at,
     )
 
 
@@ -199,4 +216,54 @@ async def remove_member(project_id: str, member_id: str, user: User = Depends(ge
         target_type="user",
         target_id=member.user_id,
         metadata={"role": member.role},
+    )
+
+
+@router.get("/{project_id}/repos", response_model=list[ProjectRepoResponse])
+async def list_project_repos(project_id: str, user: User = Depends(get_current_user)):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    repos = await project_repo_service.list_repos(project_id)
+    return [_to_project_repo_response(r) for r in repos]
+
+
+@router.post("/{project_id}/repos", response_model=ProjectRepoResponse, status_code=status.HTTP_201_CREATED)
+async def add_project_repo(
+    project_id: str, payload: ProjectRepoCreateRequest, user: User = Depends(get_current_user)
+):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_owner_or_admin(project_id, user)
+    repo = await project_repo_service.add_repo(project_id, payload, user)
+    await audit_service.record(
+        "Project Repo Connected",
+        actor_user_id=str(user.id),
+        project_id=project_id,
+        target_type="project_repo",
+        target_id=str(repo.id),
+        metadata={"provider": repo.provider, "repo_full_name": repo.repo_full_name},
+    )
+    return _to_project_repo_response(repo)
+
+
+@router.patch("/{project_id}/repos/{repo_id}", response_model=ProjectRepoResponse)
+async def update_project_repo(
+    project_id: str, repo_id: str, payload: ProjectRepoUpdateRequest, user: User = Depends(get_current_user)
+):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_owner_or_admin(project_id, user)
+    repo = await project_repo_service.update_branch(project_id, repo_id, payload.selected_branch)
+    return _to_project_repo_response(repo)
+
+
+@router.delete("/{project_id}/repos/{repo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_project_repo(project_id: str, repo_id: str, user: User = Depends(get_current_user)):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_owner_or_admin(project_id, user)
+    await project_repo_service.remove_repo(project_id, repo_id)
+    await audit_service.record(
+        "Project Repo Removed",
+        actor_user_id=str(user.id),
+        project_id=project_id,
+        target_type="project_repo",
+        target_id=repo_id,
     )
