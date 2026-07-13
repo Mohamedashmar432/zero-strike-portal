@@ -23,6 +23,10 @@ class Scan(Document):
     repo_url: str | None = None
     # Transient: only set while status="queued" (cloud scans), cleared atomically at claim time.
     repo_token: str | None = None
+    # Transient, same lifecycle as repo_token. "basic" for a Project's connected Azure DevOps repo
+    # (PATs use Basic auth, not Bearer); "bearer" (default) covers manual/OAuth-resolved tokens and
+    # every existing caller, so this is fully backward compatible.
+    repo_token_auth_scheme: Literal["bearer", "basic"] = "bearer"
     ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
     created_by: str | None = None
     started_at: datetime | None = None

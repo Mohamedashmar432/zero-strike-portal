@@ -50,9 +50,10 @@ def test_drain_respects_capacity(client, monkeypatch):
 def test_drain_claims_fifo_and_clears_token(client, monkeypatch):
     captured = {}
 
-    async def fake_run(scan_id, repo_token=None):
+    async def fake_run(scan_id, repo_token=None, repo_token_auth_scheme="bearer"):
         captured["scan_id"] = scan_id
         captured["repo_token"] = repo_token
+        captured["repo_token_auth_scheme"] = repo_token_auth_scheme
 
     monkeypatch.setattr(cloud_scan_service, "run_cloud_scan", fake_run)
     monkeypatch.setattr(scan_queue_service.settings, "max_concurrent_cloud_scans", 1)
@@ -69,10 +70,44 @@ def test_drain_claims_fifo_and_clears_token(client, monkeypatch):
 
         assert captured["scan_id"] == str(older.id)
         assert captured["repo_token"] == "secret-older"
+        assert captured["repo_token_auth_scheme"] == "bearer"
 
         reloaded = await Scan.get(older.id)
         assert reloaded.status == "running"
         assert reloaded.repo_token is None  # cleared atomically at claim time
+        assert reloaded.repo_token_auth_scheme == "bearer"  # unset reverts to the model default
+
+    asyncio.run(run())
+
+
+def test_drain_threads_basic_auth_scheme_for_azure_devops(client, monkeypatch):
+    captured = {}
+
+    async def fake_run(scan_id, repo_token=None, repo_token_auth_scheme="bearer"):
+        captured["repo_token_auth_scheme"] = repo_token_auth_scheme
+
+    monkeypatch.setattr(cloud_scan_service, "run_cloud_scan", fake_run)
+    monkeypatch.setattr(scan_queue_service.settings, "max_concurrent_cloud_scans", 1)
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id="qproj",
+            scan_type="cloud",
+            triggered_by="cloud",
+            status="queued",
+            repo_url="https://dev.azure.com/example/project/_git/repo",
+            repo_token="ado-pat",
+            repo_token_auth_scheme="basic",
+            created_at=now,
+            updated_at=now,
+        )
+        await scan.insert()
+
+        await scan_queue_service.drain_queue()
+        await asyncio.sleep(0)
+
+        assert captured["repo_token_auth_scheme"] == "basic"
 
     asyncio.run(run())
 

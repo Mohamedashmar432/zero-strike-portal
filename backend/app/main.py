@@ -16,8 +16,10 @@ from app.routers import (
     audit_logs,
     auth,
     connections,
+    dashboard,
     downloads,
     projects,
+    repo_credentials,
     scanner_scans,
     scans,
     users,
@@ -64,10 +66,12 @@ def create_app() -> FastAPI:
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(audit_logs.router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")
+    app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(api_keys.router, prefix="/api/v1")
     app.include_router(scans.router, prefix="/api/v1")
     app.include_router(scanner_scans.router, prefix="/api/v1")
     app.include_router(connections.router, prefix="/api/v1")
+    app.include_router(repo_credentials.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
 

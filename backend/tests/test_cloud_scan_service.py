@@ -181,6 +181,53 @@ def test_missing_scanner_warns_at_startup(monkeypatch, caplog):
     assert any("SCANNER_BINARY_PATH" in r.message for r in caplog.records)
 
 
+def test_clone_uses_bearer_by_default(client, monkeypatch, tmp_path):
+    _patch_subprocess(monkeypatch, tmp_path)
+    captured_env = {}
+
+    def fake_run(cmd, env=None, **kwargs):
+        if cmd[0] == "git":
+            captured_env.update(env or {})
+            return _FakeCompleted(0, b"", b"")
+        return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
+
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id), repo_token="my-token")
+
+    asyncio.run(run())
+    assert captured_env["GIT_CONFIG_VALUE_0"] == "AUTHORIZATION: Bearer my-token"
+
+
+def test_clone_uses_basic_auth_for_azure_devops_scheme(client, monkeypatch, tmp_path):
+    """A ProjectRepo-resolved Azure DevOps PAT must clone with Basic auth, not Bearer — mixing the
+    two schemes is exactly the class of bug that prompted repo_token_auth_scheme to exist."""
+    _patch_subprocess(monkeypatch, tmp_path)
+    captured_env = {}
+
+    def fake_run(cmd, env=None, **kwargs):
+        if cmd[0] == "git":
+            captured_env.update(env or {})
+            return _FakeCompleted(0, b"", b"")
+        return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
+
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id), repo_token="ado-pat", repo_token_auth_scheme="basic")
+
+    asyncio.run(run())
+    import base64
+
+    expected = base64.b64encode(b":ado-pat").decode()
+    assert captured_env["GIT_CONFIG_VALUE_0"] == f"AUTHORIZATION: Basic {expected}"
+
+
 def test_workdir_cleaned_up_after_scan(client, monkeypatch, tmp_path):
     _patch_subprocess(monkeypatch, tmp_path)
 

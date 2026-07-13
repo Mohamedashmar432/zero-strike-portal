@@ -36,11 +36,12 @@ export function listScans(projectId: string, page = 1, pageSize = 20) {
 export function createCloudScan(
   projectId: string,
   input: {
-    repo_url: string;
+    repo_url?: string;
     branch?: string;
     scan_label?: string;
     repo_token?: string;
     connection_id?: string;
+    project_repo_id?: string;
   }
 ) {
   return apiFetch<Scan>(`/projects/${projectId}/scans`, {

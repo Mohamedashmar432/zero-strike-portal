@@ -17,11 +17,15 @@ class ScanCreateRequest(BaseModel):
     # Alternative to repo_token: resolve the clone credential from a connected GitHub/Azure DevOps
     # account (see connection_service.get_decrypted_token) instead of a hand-pasted token.
     connection_id: str | None = None
+    # Alternative to repo_url/repo_token/connection_id: resolve everything (repo_url, branch, and
+    # credential) from a repo already connected to the project (see ProjectRepo) — set by the
+    # "Use connected repo" picker.
+    project_repo_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_type_config(self):
-        if self.scan_type == "cloud" and not self.repo_url:
-            raise ValueError("repo_url is required for cloud scans")
+        if self.scan_type == "cloud" and not (self.repo_url or self.project_repo_id):
+            raise ValueError("repo_url or project_repo_id is required for cloud scans")
         if self.scan_type == "cicd" and not self.ci_provider:
             raise ValueError("ci_provider is required for CI/CD scans")
         if self.repo_token and self.connection_id:

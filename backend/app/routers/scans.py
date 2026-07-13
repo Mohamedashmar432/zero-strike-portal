@@ -14,6 +14,7 @@ from app.services import (
     audit_service,
     connection_service,
     pdf_report_service,
+    project_repo_service,
     project_service,
     scan_queue_service,
     scan_service,
@@ -96,9 +97,22 @@ async def create_scan(
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
+    repo_url = payload.repo_url
+    branch = payload.branch
     repo_token = payload.repo_token
-    if payload.connection_id:
+    repo_token_auth_scheme = "bearer"
+
+    if payload.project_repo_id:
+        project_repo = await project_repo_service.get_project_repo_or_404(project_id, payload.project_repo_id)
+        repo_url = project_repo.clone_url
+        branch = project_repo.selected_branch
+        repo_token = project_repo_service.decrypt_pat(project_repo)
+        repo_token_auth_scheme = "basic" if project_repo.provider == "azure_devops" else "bearer"
+    elif payload.connection_id:
         repo_token = await connection_service.get_decrypted_token(payload.connection_id, user)
+
+    if not repo_url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "repo_url or project_repo_id is required")
 
     now = datetime.now(timezone.utc)
     scan = Scan(
@@ -107,9 +121,10 @@ async def create_scan(
         triggered_by="cloud",
         status="queued",
         repo_token=repo_token,
+        repo_token_auth_scheme=repo_token_auth_scheme,
         scan_label=payload.scan_label,
-        repo_url=payload.repo_url,
-        branch=payload.branch,
+        repo_url=repo_url,
+        branch=branch,
         created_by=str(user.id),
         created_at=now,
         updated_at=now,

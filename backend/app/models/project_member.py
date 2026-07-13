@@ -16,4 +16,7 @@ class ProjectMember(Document):
 
     class Settings:
         name = "project_members"
-        indexes = [IndexModel([("project_id", 1), ("invited_email", 1)], unique=True)]
+        indexes = [
+            IndexModel([("project_id", 1), ("invited_email", 1)], unique=True),
+            IndexModel([("user_id", 1)]),
+        ]

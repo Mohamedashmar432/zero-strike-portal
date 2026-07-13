@@ -13,6 +13,7 @@ so the same code path works on Windows (local dev) and Linux (container).
 """
 
 import asyncio
+import base64
 import ipaddress
 import logging
 import os
@@ -109,14 +110,22 @@ async def _run(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[i
     return await asyncio.to_thread(_run_sync, cmd, timeout, env)
 
 
-async def _clone(repo_url: str, branch: str | None, workdir: str, repo_token: str | None) -> None:
+async def _clone(
+    repo_url: str, branch: str | None, workdir: str, repo_token: str | None, auth_scheme: str = "bearer"
+) -> None:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     if repo_token:
         # Inject the auth header via env config (not argv/URL) so the token never lands in `ps` or logs.
         env["GIT_CONFIG_COUNT"] = "1"
         env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-        env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Bearer {repo_token}"
+        if auth_scheme == "basic":
+            # Azure DevOps PATs use HTTP Basic (empty username, PAT as password) — Bearer here would
+            # silently 401 (see repo_token_auth_scheme on Scan for why this matters).
+            basic_token = base64.b64encode(f":{repo_token}".encode()).decode()
+            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Basic {basic_token}"
+        else:
+            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Bearer {repo_token}"
     cmd = ["git", "clone", "--depth", "1"]
     if branch:
         cmd += ["--branch", branch]
@@ -159,7 +168,7 @@ async def _fail(scan: Scan, message: str) -> None:
     await scan_queue_service.drain_queue()
 
 
-async def run_cloud_scan(scan_id: str, repo_token: str | None = None) -> None:
+async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token_auth_scheme: str = "bearer") -> None:
     """Clone + scan + ingest an already-claimed scan (status="running", set by scan_queue_service)."""
     scan = await Scan.get(scan_id)
     if not scan or scan.scan_type != "cloud" or not scan.repo_url:
@@ -168,7 +177,7 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None) -> None:
     workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
     try:
         validate_repo_url(scan.repo_url)
-        await _clone(scan.repo_url, scan.branch, workdir, repo_token)
+        await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme)
         await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
     except Exception as e:
         message = _sanitize(str(e), repo_token)

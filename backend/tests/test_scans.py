@@ -93,6 +93,85 @@ def test_create_cloud_scan_requires_repo_url(client):
     assert r.status_code == 422
 
 
+def _add_project_repo(client, headers, project_id, provider="github", branch="main"):
+    payload = {
+        "provider": provider,
+        "pat": "pat-value",
+        "organization": "org" if provider == "github" else "ado-org",
+        "repo_full_name": "org/repo",
+        "clone_url": "https://github.com/org/repo.git" if provider == "github" else "https://dev.azure.com/x",
+        "selected_branch": branch,
+    }
+    if provider == "azure_devops":
+        payload["ado_project"] = "ado-proj"
+    r = client.post(f"/api/v1/projects/{project_id}/repos", json=payload, headers=headers)
+    assert r.status_code == 201
+    return r.json()
+
+
+def test_create_cloud_scan_via_project_repo_id_resolves_url_branch_and_token(client, monkeypatch):
+    monkeypatch.setattr(scan_queue_service, "drain_queue", _noop)
+    owner = register_and_login(client, email="sowner-repoid1@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    project_repo = _add_project_repo(client, _headers(owner), project["id"], branch="release")
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/scans",
+        json={"scan_type": "cloud", "project_repo_id": project_repo["id"]},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["repo_url"] == project_repo["clone_url"]
+    assert body["branch"] == "release"
+
+    async def _check():
+        from app.models.scan import Scan
+
+        scan = await Scan.get(body["id"])
+        assert scan.repo_token == "pat-value"
+        assert scan.repo_token_auth_scheme == "bearer"
+
+    asyncio.run(_check())
+
+
+def test_create_cloud_scan_via_project_repo_id_uses_basic_scheme_for_azure_devops(client, monkeypatch):
+    monkeypatch.setattr(scan_queue_service, "drain_queue", _noop)
+    owner = register_and_login(client, email="sowner-repoid2@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    project_repo = _add_project_repo(client, _headers(owner), project["id"], provider="azure_devops")
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/scans",
+        json={"scan_type": "cloud", "project_repo_id": project_repo["id"]},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201
+
+    async def _check():
+        from app.models.scan import Scan
+
+        scan = await Scan.get(r.json()["id"])
+        assert scan.repo_token_auth_scheme == "basic"
+
+    asyncio.run(_check())
+
+
+def test_create_cloud_scan_with_project_repo_id_from_other_project_is_404(client, monkeypatch):
+    monkeypatch.setattr(scan_queue_service, "drain_queue", _noop)
+    owner = register_and_login(client, email="sowner-repoid3@zerostrike.dev")
+    project_a = _create_project(client, _headers(owner), name="A")
+    project_b = _create_project(client, _headers(owner), name="B")
+    repo_on_a = _add_project_repo(client, _headers(owner), project_a["id"])
+
+    r = client.post(
+        f"/api/v1/projects/{project_b['id']}/scans",
+        json={"scan_type": "cloud", "project_repo_id": repo_on_a["id"]},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 404
+
+
 # --- listing / reading scans (rows created via the scanner endpoint) ---
 
 
