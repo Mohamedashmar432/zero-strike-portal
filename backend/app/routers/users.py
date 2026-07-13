@@ -6,7 +6,8 @@ from app.core.deps import get_current_user, require_admin
 from app.models.user import User
 from app.schemas.auth import UserResponse
 from app.schemas.common import Page
-from app.schemas.user import UpdateProfileRequest, UpdateUserRequest
+from app.schemas.user import ChangePasswordRequest, UpdateProfileRequest, UpdateUserRequest
+from app.services import audit_service, auth_service
 
 router = APIRouter(tags=["users"])
 
@@ -31,11 +32,26 @@ async def get_my_profile(user: User = Depends(get_current_user)):
 
 @router.patch("/users/me", response_model=UserResponse)
 async def update_my_profile(payload: UpdateProfileRequest, user: User = Depends(get_current_user)):
+    changed = False
     if payload.name is not None:
         user.name = payload.name
+        changed = True
+    if payload.email is not None and payload.email != user.email:
+        existing = await User.find_one(User.email == payload.email)
+        if existing and str(existing.id) != str(user.id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
+        user.email = payload.email
+        changed = True
+    if changed:
         user.updated_at = datetime.now(timezone.utc)
         await user.save()
     return _to_user_response(user)
+
+
+@router.post("/users/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_my_password(payload: ChangePasswordRequest, user: User = Depends(get_current_user)):
+    await auth_service.change_password(user, payload.current_password, payload.new_password)
+    await audit_service.record("password_changed", actor_user_id=str(user.id))
 
 
 @router.get("/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_admin)])
@@ -46,8 +62,10 @@ async def get_user(user_id: str):
     return _to_user_response(user)
 
 
-@router.patch("/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_admin)])
-async def update_user(user_id: str, payload: UpdateUserRequest):
+@router.patch("/users/{user_id}", response_model=UserResponse)
+async def update_user(user_id: str, payload: UpdateUserRequest, admin: User = Depends(require_admin)):
+    if user_id == str(admin.id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot modify your own account through this endpoint")
     user = await User.get(user_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
@@ -60,8 +78,10 @@ async def update_user(user_id: str, payload: UpdateUserRequest):
     return _to_user_response(user)
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def delete_user(user_id: str):
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(user_id: str, admin: User = Depends(require_admin)):
+    if user_id == str(admin.id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot modify your own account through this endpoint")
     user = await User.get(user_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")

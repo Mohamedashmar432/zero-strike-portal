@@ -16,6 +16,7 @@ from app.routers import (
     audit_logs,
     auth,
     connections,
+    dashboard,
     downloads,
     projects,
     scanner_scans,
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(audit_logs.router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")
+    app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(api_keys.router, prefix="/api/v1")
     app.include_router(scans.router, prefix="/api/v1")
     app.include_router(scanner_scans.router, prefix="/api/v1")

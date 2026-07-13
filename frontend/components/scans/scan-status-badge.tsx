@@ -6,10 +6,10 @@ const scanStatusBadgeVariants = cva(
   {
     variants: {
       status: {
-        pending: "bg-slate-500/15 text-slate-400",
-        queued: "bg-amber-500/15 text-amber-400",
-        running: "bg-sky-500/15 text-sky-400",
-        completed: "bg-emerald-500/15 text-emerald-400",
+        pending: "bg-severity-info/15 text-severity-info",
+        queued: "bg-severity-medium/15 text-severity-medium",
+        running: "bg-status-progress/15 text-status-progress",
+        completed: "bg-status-success/15 text-status-success",
         failed: "bg-severity-critical/15 text-severity-critical",
       },
     },

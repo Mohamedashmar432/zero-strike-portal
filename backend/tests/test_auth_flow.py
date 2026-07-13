@@ -1,3 +1,6 @@
+from app.core.config import settings
+
+
 def register_and_login(client, email="user@zerostrike.dev", password="hunter2pass"):
     r = client.post("/api/v1/auth/register", json={"email": email, "password": password, "name": "User"})
     assert r.status_code == 201
@@ -43,3 +46,17 @@ def test_logout_revokes_refresh_token(client):
     assert r.status_code == 204
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
     assert r.status_code == 401
+
+
+def test_login_is_rate_limited_after_max_attempts(client, monkeypatch):
+    # authenticate() short-circuits before any bcrypt hashing when the user doesn't exist, so
+    # this loop is cheap even at a real (non-mocked) attempt count.
+    monkeypatch.setattr(settings, "rate_limit_login_max_attempts", 3)
+
+    email = "rate-limited-nonexistent@zerostrike.dev"
+    for _ in range(3):
+        r = client.post("/api/v1/auth/login", json={"email": email, "password": "whatever123"})
+        assert r.status_code == 401
+
+    r = client.post("/api/v1/auth/login", json={"email": email, "password": "whatever123"})
+    assert r.status_code == 429

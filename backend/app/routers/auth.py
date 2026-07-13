@@ -2,16 +2,21 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
+from app.core import rate_limit
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.auth import (
+    ForgotPasswordRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenPairResponse,
     UserResponse,
 )
+from app.schemas.common import MessageResponse
 from app.services import audit_service, auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -24,7 +29,12 @@ def _to_user_response(user: User) -> UserResponse:
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, request: Request):
+    rate_limit.enforce(
+        f"register:{request.client.host if request.client else 'unknown'}",
+        settings.rate_limit_register_max_attempts,
+        settings.rate_limit_register_window_seconds,
+    )
     user = await auth_service.register(payload.email, payload.password, payload.name)
     await audit_service.record("register", actor_user_id=str(user.id))
     return _to_user_response(user)
@@ -32,6 +42,11 @@ async def register(payload: RegisterRequest):
 
 @router.post("/login", response_model=TokenPairResponse)
 async def login(payload: LoginRequest, request: Request):
+    rate_limit.enforce(
+        f"login:{request.client.host if request.client else 'unknown'}:{payload.email}",
+        settings.rate_limit_login_max_attempts,
+        settings.rate_limit_login_window_seconds,
+    )
     user = await auth_service.authenticate(payload.email, payload.password)
     access_token, refresh_token, expires_in = await auth_service.issue_token_pair(
         user, user_agent=request.headers.get("user-agent"), ip=request.client.host if request.client else None
@@ -65,3 +80,22 @@ async def logout(payload: LogoutRequest):
 @router.get("/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
     return _to_user_response(user)
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(payload: ForgotPasswordRequest, request: Request):
+    rate_limit.enforce(
+        f"forgot-password:{request.client.host if request.client else 'unknown'}:{payload.email}",
+        settings.rate_limit_forgot_password_max_attempts,
+        settings.rate_limit_forgot_password_window_seconds,
+    )
+    await auth_service.request_password_reset(payload.email)
+    # Always the same message/status — must not reveal whether the email is registered.
+    return MessageResponse(message="If that email is registered, a reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(payload: ResetPasswordRequest):
+    user = await auth_service.reset_password(payload.token, payload.new_password)
+    await audit_service.record("password_reset", actor_user_id=str(user.id))
+    return MessageResponse(message="Password has been reset. Please sign in.")

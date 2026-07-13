@@ -6,3 +6,7 @@ class Page(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class MessageResponse(BaseModel):
+    message: str

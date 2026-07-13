@@ -8,6 +8,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { EmptyState } from "@/components/common/empty-state";
+import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +25,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError } from "@/lib/api/client";
 import { createProject, listProjects, type Project } from "@/lib/api/projects";
@@ -121,7 +123,7 @@ export default function ProjectsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
   const [view, setView] = useState<"list" | "grid">("list");
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["projects"],
     queryFn: () => listProjects(),
   });
@@ -131,123 +133,123 @@ export default function ProjectsPage() {
     setCreatedProject(null);
   }
 
+  const isEmpty = data?.items.length === 0;
+  const emptyState = (
+    <EmptyState
+      title="No projects yet"
+      description="Create one to start running SAST scans."
+    />
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Projects</h1>
-          <p className="text-sm text-muted-foreground">
-            Run ZeroStrike SAST scans against your codebases and review the findings.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-border p-0.5">
-            <Button
-              variant={view === "list" ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label="List view"
-              onClick={() => setView("list")}
-            >
-              <ListIcon />
-            </Button>
-            <Button
-              variant={view === "grid" ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label="Grid view"
-              onClick={() => setView("grid")}
-            >
-              <LayoutGrid />
-            </Button>
+      <PageHeader
+        title="Projects"
+        description="Run ZeroStrike SAST scans against your codebases and review the findings."
+        actions={
+          <>
+            <div className="flex rounded-lg border border-border p-0.5">
+              <Button
+                variant={view === "list" ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="List view"
+                onClick={() => setView("list")}
+              >
+                <ListIcon />
+              </Button>
+              <Button
+                variant={view === "grid" ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="Grid view"
+                onClick={() => setView("grid")}
+              >
+                <LayoutGrid />
+              </Button>
+            </div>
+            <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
+              <DialogTrigger render={<Button>New Project</Button>} />
+              <DialogContent>
+                {createdProject ? (
+                  <CreatedProjectNextSteps project={createdProject} onDismiss={closeDialog} />
+                ) : (
+                  <CreateProjectForm onCreated={setCreatedProject} />
+                )}
+              </DialogContent>
+            </Dialog>
+          </>
+        }
+      />
+      {view === "grid" ? (
+        <DataTableCard
+          bare
+          isLoading={isLoading}
+          isError={isError}
+          errorMessage="Failed to load projects."
+          isEmpty={!!isEmpty}
+          emptyState={emptyState}
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {data?.items.map((p) => (
+              <Card key={p.id}>
+                <CardContent className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
+                      {p.name}
+                    </Link>
+                    <Badge variant="secondary" className="font-mono uppercase">
+                      {p.my_role}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {p.scan_count} scan{p.scan_count === 1 ? "" : "s"} · {p.is_archived ? "Archived" : "Active"}
+                  </p>
+                  <ApiKeysQuickLink projectId={p.id} />
+                </CardContent>
+              </Card>
+            ))}
           </div>
-          <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
-            <DialogTrigger render={<Button>New Project</Button>} />
-            <DialogContent>
-              {createdProject ? (
-                <CreatedProjectNextSteps project={createdProject} onDismiss={closeDialog} />
-              ) : (
-                <CreateProjectForm onCreated={setCreatedProject} />
-              )}
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-      {isLoading ? (
-        <Card>
-          <CardContent className="space-y-2 p-4">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </CardContent>
-        </Card>
-      ) : error ? (
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-destructive">Failed to load projects.</p>
-          </CardContent>
-        </Card>
-      ) : data && data.items.length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            No projects yet. Create one to start running SAST scans.
-          </CardContent>
-        </Card>
-      ) : view === "grid" ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data?.items.map((p) => (
-            <Card key={p.id}>
-              <CardContent className="space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
-                    {p.name}
-                  </Link>
-                  <Badge variant="secondary" className="font-mono uppercase">
-                    {p.my_role}
-                  </Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {p.scan_count} scan{p.scan_count === 1 ? "" : "s"} · {p.is_archived ? "Archived" : "Active"}
-                </p>
-                <ApiKeysQuickLink projectId={p.id} />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        </DataTableCard>
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Scans</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead />
+        <DataTableCard
+          isLoading={isLoading}
+          isError={isError}
+          errorMessage="Failed to load projects."
+          isEmpty={!!isEmpty}
+          emptyState={emptyState}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Scans</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.items.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
+                      {p.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="font-mono uppercase">
+                      {p.my_role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{p.scan_count}</TableCell>
+                  <TableCell>{p.is_archived ? "Archived" : "Active"}</TableCell>
+                  <TableCell>
+                    <ApiKeysQuickLink projectId={p.id} />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.items.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>
-                      <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
-                        {p.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="font-mono uppercase">
-                        {p.my_role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{p.scan_count}</TableCell>
-                    <TableCell>{p.is_archived ? "Archived" : "Active"}</TableCell>
-                    <TableCell>
-                      <ApiKeysQuickLink projectId={p.id} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTableCard>
       )}
     </div>
   );

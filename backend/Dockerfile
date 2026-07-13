@@ -69,4 +69,11 @@ EXPOSE 8000
 # external traffic there; a hardcoded --port 8000 leaves the app unreachable even
 # though it starts up healthy. ${PORT:-8000} keeps 8000 as the default for
 # docker-compose/local runs that never set $PORT.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+#
+# --proxy-headers/--forwarded-allow-ips: this container is never directly internet-exposed
+# (only the caddy service publishes ports, per deploy/docker-compose.yml) — Caddy's
+# reverse_proxy sets X-Forwarded-For, so trusting it here is what makes request.client.host
+# reflect the real visitor IP instead of Caddy's internal container IP (needed for
+# per-IP rate limiting on /auth/*). In local dev (no proxy in front), there's no
+# X-Forwarded-For header, so uvicorn falls back to the direct-connection peer as before.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

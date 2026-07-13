@@ -4,24 +4,26 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SeverityBadge } from "@/components/severity/severity-badge";
-import { listProjects } from "@/lib/api/projects";
+import { SeverityDistributionChart } from "@/components/dashboard/severity-distribution-chart";
+import { PageHeader } from "@/components/layout/page-header";
+import { getDashboardStats } from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => listProjects(1, 100),
+    queryKey: ["dashboard", "stats"],
+    queryFn: getDashboardStats,
   });
 
   const stats = [
-    { label: "Projects", value: data?.total ?? 0 },
-    { label: "Scans", value: data?.items.reduce((sum, p) => sum + p.scan_count, 0) ?? 0 },
-    { label: "Critical Findings", value: 0, severity: "critical" as const },
-    { label: "High Findings", value: 0, severity: "high" as const },
+    { label: "Projects", value: data?.project_count ?? 0 },
+    { label: "Scans", value: data?.scan_count ?? 0 },
+    { label: "Critical Findings", value: data?.findings_by_severity.critical ?? 0, severity: "critical" as const },
+    { label: "High Findings", value: data?.findings_by_severity.high ?? 0, severity: "high" as const },
   ];
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
+      <PageHeader title="Dashboard" />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
@@ -39,9 +41,18 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
-      <p className="text-sm text-muted-foreground">
-        Recent SAST scans and latest reports will appear here once you run your first scan.
-      </p>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-normal text-muted-foreground">Severity Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <Skeleton className="h-[220px] w-full" />
+          ) : (
+            data && <SeverityDistributionChart data={data.findings_by_severity} />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -9,12 +8,17 @@ import { ApiError } from "@/lib/api/client";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { EmptyState } from "@/components/common/empty-state";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listFindings, type FindingKind, type Severity } from "@/lib/api/findings";
+import { getProject } from "@/lib/api/projects";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
 import { getScan } from "@/lib/api/scans";
 
@@ -48,6 +52,11 @@ export default function ScanDetailPage() {
     }
   }
 
+  const { data: project } = useQuery({
+    queryKey: ["projects", projectId],
+    queryFn: () => getProject(projectId),
+  });
+
   const { data: scan, isLoading: scanLoading } = useQuery({
     queryKey: ["scans", scanId],
     queryFn: () => getScan(scanId),
@@ -80,12 +89,13 @@ export default function ScanDetailPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <Link
-          href={`/projects/${projectId}?tab=scans`}
-          className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-        >
-          ← Back to scans
-        </Link>
+        <Breadcrumbs
+          items={[
+            { label: "Projects", href: "/projects" },
+            { label: project?.name ?? projectId, href: `/projects/${projectId}?tab=scans` },
+            { label: scan.scan_label || "Scan" },
+          ]}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold">{scan.scan_label || "Scan"}</h1>
           <ScanTypeBadge scanType={scan.scan_type} />
@@ -99,19 +109,21 @@ export default function ScanDetailPage() {
       </div>
 
       {scan.status === "failed" && (
-        <Card className="border-severity-critical/40">
-          <CardContent className="pt-4 text-sm text-severity-critical">
-            {scan.error_message || "Scan failed."}
-          </CardContent>
-        </Card>
+        <Alert variant="destructive">
+          <AlertTitle>Scan failed</AlertTitle>
+          <AlertDescription>{scan.error_message || "Scan failed."}</AlertDescription>
+        </Alert>
       )}
 
       {!completed && scan.status !== "failed" && (
-        <Card>
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            {scan.status === "running" ? "Scan in progress…" : "Waiting for the scanner to report…"}
-          </CardContent>
-        </Card>
+        <Alert>
+          <AlertTitle>{scan.status === "running" ? "Scan in progress" : "Waiting for the scanner"}</AlertTitle>
+          <AlertDescription>
+            {scan.status === "running"
+              ? "The scan is running on the server. This page updates automatically — no need to refresh."
+              : "Waiting for the scanner to report…"}
+          </AlertDescription>
+        </Alert>
       )}
 
       {completed && (
@@ -182,48 +194,52 @@ export default function ScanDetailPage() {
             ))}
           </div>
 
-          <Card>
-            <CardContent className="p-0">
-              {findingsLoading ? (
-                <div className="space-y-2 p-4">
-                  <Skeleton className="h-8 w-full" />
-                </div>
-              ) : findings && findings.items.length === 0 ? (
-                <div className="p-10 text-center text-sm text-muted-foreground">
-                  No findings{severity || kind ? " match this filter" : ""}.
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Severity</TableHead>
-                      <TableHead>Rule</TableHead>
-                      <TableHead>Message</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Kind</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {findings?.items.map((f) => (
-                      <TableRow key={f.id}>
-                        <TableCell>{f.severity && <SeverityBadge severity={f.severity} />}</TableCell>
-                        <TableCell className="font-mono text-xs">{f.rule_id ?? "—"}</TableCell>
-                        <TableCell className="max-w-md">{f.message}</TableCell>
-                        <TableCell className="font-mono text-xs">{fileLine(f.location.file, f.location.start_line)}</TableCell>
-                        <TableCell>
-                          {f.kind && (
-                            <Badge variant="secondary" className="font-mono uppercase">
-                              {f.kind}
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <DataTableCard
+            isLoading={findingsLoading}
+            isError={false}
+            isEmpty={!!findings && findings.items.length === 0}
+            emptyState={
+              <EmptyState
+                title={`No findings${severity || kind ? " match this filter" : ""}.`}
+              />
+            }
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Rule</TableHead>
+                  <TableHead>Message</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Kind</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {findings?.items.map((f) => (
+                  <TableRow key={f.id}>
+                    <TableCell>{f.severity && <SeverityBadge severity={f.severity} />}</TableCell>
+                    <TableCell className="font-mono text-xs">{f.rule_id ?? "—"}</TableCell>
+                    <TableCell className="max-w-md truncate" title={f.message}>
+                      {f.message}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-xs truncate font-mono text-xs"
+                      title={fileLine(f.location.file, f.location.start_line)}
+                    >
+                      {fileLine(f.location.file, f.location.start_line)}
+                    </TableCell>
+                    <TableCell>
+                      {f.kind && (
+                        <Badge variant="secondary" className="font-mono uppercase">
+                          {f.kind}
+                        </Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </DataTableCard>
           {findings && findings.total > findings.items.length && (
             <p className="text-center text-xs text-muted-foreground">
               Showing {findings.items.length} of {findings.total} findings.
