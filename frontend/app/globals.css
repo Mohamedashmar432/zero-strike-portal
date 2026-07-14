@@ -84,7 +84,7 @@
   --chart-5: oklch(0.269 0 0);
   --radius: 2px;
   /* sidebar is a fixed dark brand surface in both color schemes, not tied to .dark */
-  --sidebar: #1a110a;
+  --sidebar: #000000;
   --sidebar-foreground: #ffffff;
   --sidebar-primary: #ffb690;
   --sidebar-primary-foreground: #582200;
@@ -110,7 +110,7 @@
 }
 
 .dark {
-  --background: #14100d;
+  --background: #171717;
   --foreground: #f5ede7;
   --card: #241a13;
   --card-foreground: #f5ede7;
@@ -134,7 +134,7 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   /* sidebar stays the same fixed dark brand surface as light mode */
-  --sidebar: #1a110a;
+  --sidebar: #000000;
   --sidebar-foreground: #ffffff;
   --sidebar-primary: #ffb690;
   --sidebar-primary-foreground: #582200;
