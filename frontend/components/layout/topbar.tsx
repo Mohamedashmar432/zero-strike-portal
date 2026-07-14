@@ -30,7 +30,7 @@ export function Topbar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search projects or vulnerabilities…"
-            className="rounded-none pl-9"
+            className="rounded-sm pl-9"
           />
         </div>
       </form>
@@ -43,7 +43,7 @@ export function Topbar() {
           onClick={() => toast.info("No new notifications")}
         >
           <Bell />
-          <span className="absolute top-1.5 right-1.5 size-1.5 rounded-none bg-destructive" />
+          <span className="absolute top-1.5 right-1.5 size-1.5 rounded-sm bg-destructive" />
         </Button>
         <Button
           variant="ghost"

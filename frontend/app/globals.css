@@ -82,7 +82,7 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0rem;
+  --radius: 2px;
   /* sidebar is a fixed dark brand surface in both color schemes, not tied to .dark */
   --sidebar: #1a110a;
   --sidebar-foreground: #ffffff;

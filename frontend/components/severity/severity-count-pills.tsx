@@ -33,7 +33,7 @@ export function SeverityCountPills({ counts, showLabel = true }: { counts: Sever
           key={severity}
           title={severity}
           className={cn(
-            "inline-flex min-w-[2.25rem] items-center justify-center rounded-none px-2 py-0.5 font-mono text-xs font-semibold",
+            "inline-flex min-w-[2.25rem] items-center justify-center rounded-sm px-2 py-0.5 font-mono text-xs font-semibold",
             SEVERITY_PILL_CLASS[severity]
           )}
         >

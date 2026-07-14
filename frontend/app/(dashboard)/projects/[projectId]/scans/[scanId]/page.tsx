@@ -413,7 +413,7 @@ export default function ScanDetailPage() {
                         <span className="truncate">{row.label}</span>
                         <span className="font-semibold">{row.score.toFixed(1)}</span>
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-none bg-muted">
+                      <div className="h-1.5 w-full overflow-hidden rounded-sm bg-muted">
                         <div
                           className={cn(
                             "h-full",
