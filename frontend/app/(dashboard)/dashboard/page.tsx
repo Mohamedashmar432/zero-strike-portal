@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FolderKanban, Plus } from "lucide-react";
+import { ChevronDown, FolderKanban, Plus } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -97,8 +97,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Dashboard"
-        description="Overview of your organization's scans, projects, and findings."
+        title="Dashboard Overview"
         actions={
           <Button nativeButton={false} render={<Link href="/projects" />}>
             <Plus />
@@ -215,7 +214,7 @@ export default function DashboardPage() {
         >
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="bg-muted/40">
                 <TableHead>Project</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
@@ -247,16 +246,16 @@ export default function DashboardPage() {
                       <ScanStatusBadge status={scan.status} />
                     </TableCell>
                     <TableCell>
-                      <SeverityCountPills counts={scan.findings_by_severity} />
+                      <SeverityCountPills counts={scan.findings_by_severity} showLabel={false} />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(scan.created_at).toLocaleString()}
                     </TableCell>
                     <TableCell>
-                      <ChevronRight
+                      <ChevronDown
                         className={cn(
                           "size-4 text-muted-foreground transition-transform",
-                          expandedScans.has(scan.scan_id) && "rotate-90"
+                          expandedScans.has(scan.scan_id) && "rotate-180"
                         )}
                       />
                     </TableCell>

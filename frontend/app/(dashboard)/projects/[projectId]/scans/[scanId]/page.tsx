@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, Download, Search, Sparkles, Wand2 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
@@ -46,6 +46,26 @@ const trendChartConfig: ChartConfig = {
 
 function fileLine(file: string, line: number | null) {
   return line ? `${file}:${line}` : file;
+}
+
+// No AI provider is configured anywhere in this app yet (see Settings > AI Provider /
+// Auto-fix) — these buttons stay visible per the design, but honestly say so instead
+// of pretending to call a model that doesn't exist.
+function notifyComingSoon(feature: string) {
+  toast.info(`${feature} isn't available yet`, {
+    description: "Configure an AI provider in Settings → AI Provider to enable this.",
+  });
+}
+
+function timeAgo(dateStr: string) {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 function FindingItem({
@@ -117,6 +137,16 @@ function FindingItem({
                 </pre>
               </div>
             )}
+            <div className="flex flex-col gap-2 border-t border-border pt-4">
+              <Button variant="outline" size="sm" onClick={() => notifyComingSoon("AI analysis")}>
+                <Sparkles />
+                Analyze with AI
+              </Button>
+              <Button size="sm" onClick={() => notifyComingSoon("Auto-fix")}>
+                <Wand2 />
+                Apply Auto-Fix
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -283,9 +313,20 @@ export default function ScanDetailPage() {
           </p>
         </div>
         {completed && (
-          <Button variant="outline" disabled={downloadingPdf} onClick={handleDownloadPdf}>
-            {downloadingPdf ? "Preparing…" : "Download PDF"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" disabled={downloadingPdf} onClick={handleDownloadPdf}>
+              <Download />
+              {downloadingPdf ? "Preparing…" : "Generate Report"}
+            </Button>
+            <Button variant="outline" onClick={() => notifyComingSoon("AI Analysis")}>
+              <Sparkles />
+              AI Analysis
+            </Button>
+            <Button onClick={() => notifyComingSoon("Auto AI Fix")}>
+              <Wand2 />
+              Auto AI Fix
+            </Button>
+          </div>
         )}
       </div>
 
@@ -444,6 +485,12 @@ export default function ScanDetailPage() {
               Showing {findings.items.length} of {findings.total} findings.
             </p>
           )}
+          <footer className="border-t border-border pt-6 text-center text-xs text-muted-foreground">
+            ZeroStrike Security Platform Scan Engine
+            {report?.scanner_version || scan.scanner_version ? ` v${report?.scanner_version ?? scan.scanner_version}` : ""}
+            {" · "}
+            Last scan completed {timeAgo(scan.completed_at ?? scan.created_at)}.
+          </footer>
         </>
       )}
     </div>

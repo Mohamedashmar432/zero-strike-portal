@@ -20,7 +20,10 @@ export const SEVERITY_PILL_CLASS: Record<Severity, string> = {
   info: "bg-severity-info/15 text-severity-info",
 };
 
-export function SeverityCountPills({ counts }: { counts: SeverityCounts }) {
+// showLabel=false matches the mockup's Active Projects table, which shows bare
+// severity-colored numbers with no C/H/M/L suffix (the suffix only appears on the
+// standalone Pinned Project cards, which aren't inside a fixed severity-ordered column).
+export function SeverityCountPills({ counts, showLabel = true }: { counts: SeverityCounts; showLabel?: boolean }) {
   const nonZero = SEVERITY_ORDER.filter((severity) => counts[severity] > 0);
   if (nonZero.length === 0) return <span className="text-xs text-muted-foreground">No findings</span>;
   return (
@@ -28,12 +31,14 @@ export function SeverityCountPills({ counts }: { counts: SeverityCounts }) {
       {nonZero.map((severity) => (
         <span
           key={severity}
+          title={severity}
           className={cn(
             "inline-flex min-w-[2.25rem] items-center justify-center rounded-full px-2 py-0.5 font-mono text-xs font-semibold",
             SEVERITY_PILL_CLASS[severity]
           )}
         >
-          {counts[severity]} {SEVERITY_LETTER[severity]}
+          {counts[severity]}
+          {showLabel ? ` ${SEVERITY_LETTER[severity]}` : ""}
         </span>
       ))}
     </div>

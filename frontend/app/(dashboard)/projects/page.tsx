@@ -2,10 +2,10 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, GitBranch, KeyRound, LayoutGrid, List as ListIcon, Search } from "lucide-react";
+import { ChevronDown, GitBranch, KeyRound, LayoutGrid, List as ListIcon, Search } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Fragment, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Fragment, Suspense, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -138,11 +138,12 @@ function RepoQuickLink({ projectId }: { projectId: string }) {
   );
 }
 
-export default function ProjectsPage() {
+function ProjectsPageContent() {
+  const searchParams = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
   const [view, setView] = useState<"list" | "grid">("list");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data, isLoading, isError } = useQuery({
@@ -271,7 +272,7 @@ export default function ProjectsPage() {
                     onClick={() => toggleExpanded(p.id)}
                     className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                   >
-                    <ChevronRight className={cn("size-3.5 transition-transform", expanded.has(p.id) && "rotate-90")} />
+                    <ChevronDown className={cn("size-3.5 transition-transform", expanded.has(p.id) && "rotate-180")} />
                     Repositories
                   </button>
                   {expanded.has(p.id) && (
@@ -324,8 +325,8 @@ export default function ProjectsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <ChevronRight
-                        className={cn("size-4 text-muted-foreground transition-transform", expanded.has(p.id) && "rotate-90")}
+                      <ChevronDown
+                        className={cn("size-4 text-muted-foreground transition-transform", expanded.has(p.id) && "rotate-180")}
                       />
                     </TableCell>
                   </TableRow>
@@ -346,5 +347,13 @@ export default function ProjectsPage() {
         </DataTableCard>
       )}
     </div>
+  );
+}
+
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectsPageContent />
+    </Suspense>
   );
 }
