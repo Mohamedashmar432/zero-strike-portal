@@ -18,9 +18,15 @@ const PROVIDERS: { value: Provider; label: string }[] = [
   { value: "azure_devops", label: "Azure DevOps" },
 ];
 
-export function CredentialForm({ onCreated }: { onCreated: (credential: RepoCredential) => void }) {
+export function CredentialForm({
+  provider: fixedProvider,
+  onCreated,
+}: {
+  provider?: Provider;
+  onCreated: (credential: RepoCredential) => void;
+}) {
   const queryClient = useQueryClient();
-  const [provider, setProvider] = useState<Provider>("github");
+  const [provider, setProvider] = useState<Provider>(fixedProvider ?? "github");
   const {
     register,
     handleSubmit,
@@ -28,7 +34,7 @@ export function CredentialForm({ onCreated }: { onCreated: (credential: RepoCred
     formState: { errors },
   } = useForm<RepoCredentialInput>({
     resolver: zodResolver(repoCredentialSchema),
-    defaultValues: { provider: "github" },
+    defaultValues: { provider: fixedProvider ?? "github" },
   });
 
   const create = useMutation({
@@ -44,28 +50,30 @@ export function CredentialForm({ onCreated }: { onCreated: (credential: RepoCred
 
   return (
     <form onSubmit={handleSubmit((values) => create.mutate(values))} className="space-y-4">
-      <div className="space-y-2">
-        <Label>Provider</Label>
-        <Select
-          value={provider}
-          onValueChange={(value) => {
-            const next = value as Provider;
-            setProvider(next);
-            setValue("provider", next);
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PROVIDERS.map((p) => (
-              <SelectItem key={p.value} value={p.value}>
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {!fixedProvider && (
+        <div className="space-y-2">
+          <Label>Provider</Label>
+          <Select
+            value={provider}
+            onValueChange={(value) => {
+              const next = value as Provider;
+              setProvider(next);
+              setValue("provider", next);
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PROVIDERS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="space-y-2">
         <Label htmlFor="cred-org">{provider === "azure_devops" ? "Organization" : "Owner / organization"}</Label>
         <Input id="cred-org" autoComplete="off" {...register("organization")} />
@@ -85,7 +93,12 @@ export function CredentialForm({ onCreated }: { onCreated: (credential: RepoCred
       </div>
       <div className="space-y-2">
         <Label htmlFor="cred-label">Label (optional)</Label>
-        <Input id="cred-label" placeholder="e.g. Personal GitHub" autoComplete="off" {...register("label")} />
+        <Input
+          id="cred-label"
+          placeholder={provider === "azure_devops" ? "e.g. Work Azure DevOps" : "e.g. Personal GitHub"}
+          autoComplete="off"
+          {...register("label")}
+        />
       </div>
       <Button type="submit" disabled={create.isPending}>
         {create.isPending ? "Validating…" : "Save & validate"}

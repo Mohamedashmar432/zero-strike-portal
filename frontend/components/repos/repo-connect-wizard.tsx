@@ -1,10 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CredentialForm } from "@/components/repos/credential-form";
+import { ProviderPicker } from "@/components/repos/provider-picker";
 import { RepoPickerList } from "@/components/repos/repo-picker-list";
 import { SelectedRepoSummary } from "@/components/repos/selected-repo-summary";
 import { Button } from "@/components/ui/button";
@@ -18,8 +20,11 @@ import {
   listCredentialBranches,
   listCredentialRepos,
   listRepoCredentials,
+  type Provider,
   type Repo,
 } from "@/lib/api/repo-credentials";
+
+const PROVIDER_LABEL: Record<Provider, string> = { github: "GitHub", azure_devops: "Azure DevOps" };
 
 // Shared by /projects/[projectId]/repos/new (standalone) and /projects/new (embedded
 // right after project creation) — same credential -> repo -> branch -> label flow either way.
@@ -36,6 +41,7 @@ export function RepoConnectWizard({
 }) {
   const queryClient = useQueryClient();
 
+  const [provider, setProvider] = useState<Provider | null>(null);
   const [addingCredential, setAddingCredential] = useState(false);
   const [credentialId, setCredentialId] = useState<string | null>(null);
   const [repoQuery, setRepoQuery] = useState("");
@@ -47,7 +53,7 @@ export function RepoConnectWizard({
     queryKey: ["repo-credentials"],
     queryFn: listRepoCredentials,
   });
-  const credential = credentials?.find((c) => c.id === credentialId);
+  const providerCredentials = credentials?.filter((c) => c.provider === provider);
 
   const {
     data: repos,
@@ -59,8 +65,7 @@ export function RepoConnectWizard({
     enabled: !!credentialId,
   });
 
-  const repoIdForBranches =
-    selectedRepo && credential ? (credential.provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
+  const repoIdForBranches = selectedRepo ? (provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
 
   const { data: branches, isLoading: branchesLoading } = useQuery({
     queryKey: ["repo-credentials", credentialId, "branches", repoIdForBranches],
@@ -85,17 +90,20 @@ export function RepoConnectWizard({
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to connect repository"),
   });
 
-  const step = !credentialId ? 1 : !selectedRepo ? 2 : !selectedBranch ? 3 : 4;
+  const step = !provider ? 1 : !credentialId ? 2 : !selectedRepo ? 3 : !selectedBranch ? 4 : 5;
 
   return (
     <Card className="mx-auto max-w-xl">
       <CardHeader>
-        <CardTitle className="text-sm font-medium text-muted-foreground">Step {step} of 4</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">Step {step} of 5</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!credentialId ? (
+        {!provider ? (
+          <ProviderPicker onSelect={setProvider} />
+        ) : !credentialId ? (
           addingCredential ? (
             <CredentialForm
+              provider={provider}
               onCreated={(created) => {
                 setAddingCredential(false);
                 setCredentialId(created.id);
@@ -103,22 +111,33 @@ export function RepoConnectWizard({
             />
           ) : (
             <div className="space-y-2">
-              <Label>Credential</Label>
-              {credentials?.length ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setProvider(null);
+                  setAddingCredential(false);
+                }}
+                className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-3.5" />
+                Change provider
+              </button>
+              <Label>{PROVIDER_LABEL[provider]} credential</Label>
+              {providerCredentials?.length ? (
                 <Select value={credentialId ?? undefined} onValueChange={(value) => setCredentialId(value ?? null)}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a saved credential…" />
+                    <SelectValue placeholder={`Choose a saved ${PROVIDER_LABEL[provider]} credential…`} />
                   </SelectTrigger>
                   <SelectContent>
-                    {credentials.map((c) => (
+                    {providerCredentials.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.label || c.organization} ({c.provider === "azure_devops" ? "Azure DevOps" : "GitHub"})
+                        {c.label || c.organization}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               ) : (
-                <p className="text-sm text-muted-foreground">No saved credentials yet.</p>
+                <p className="text-sm text-muted-foreground">No saved {PROVIDER_LABEL[provider]} credentials yet.</p>
               )}
               <Button type="button" variant="outline" size="sm" onClick={() => setAddingCredential(true)}>
                 + Add new credential
