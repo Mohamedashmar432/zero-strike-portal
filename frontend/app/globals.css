@@ -86,12 +86,12 @@
   /* sidebar is a fixed dark brand surface in both color schemes, not tied to .dark */
   --sidebar: #000000;
   --sidebar-foreground: #ffffff;
-  --sidebar-primary: #ffb690;
-  --sidebar-primary-foreground: #582200;
+  --sidebar-primary: #f97316;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #ffffff1a;
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #ffffff1a;
-  --sidebar-ring: #ffb690;
+  --sidebar-ring: #f97316;
 
   --severity-critical: #ef4444;
   --severity-high: #f97316;
@@ -136,12 +136,12 @@
   /* sidebar stays the same fixed dark brand surface as light mode */
   --sidebar: #000000;
   --sidebar-foreground: #ffffff;
-  --sidebar-primary: #ffb690;
-  --sidebar-primary-foreground: #582200;
+  --sidebar-primary: #f97316;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #ffffff1a;
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #ffffff1a;
-  --sidebar-ring: #ffb690;
+  --sidebar-ring: #f97316;
 }
 
 @layer base {
