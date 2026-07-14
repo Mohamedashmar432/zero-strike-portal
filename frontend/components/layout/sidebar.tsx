@@ -25,7 +25,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-sidebar py-6 text-sidebar-foreground md:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar py-6 text-sidebar-foreground md:flex">
       <div className="mb-8 px-6">
         <h1 className="text-xl font-bold tracking-tight">
           <span className="text-sidebar-primary">Zero</span>Strike
