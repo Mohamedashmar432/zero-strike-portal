@@ -31,6 +31,10 @@ export default function IntegrationsPage() {
 
   return (
     <div className="max-w-md space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">Integrations</h2>
+        <p className="text-sm text-muted-foreground">Saved GitHub and Azure DevOps credentials.</p>
+      </div>
       <p className="text-sm text-muted-foreground">
         Save a GitHub or Azure DevOps Personal Access Token here, then use it to connect repos on any
         project&apos;s Repositories tab. Each project connection keeps its own copy of the credential, so

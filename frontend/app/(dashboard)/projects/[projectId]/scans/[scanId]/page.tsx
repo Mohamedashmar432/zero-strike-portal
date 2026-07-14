@@ -97,7 +97,7 @@ export default function ScanDetailPage() {
           ]}
         />
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold">{scan.scan_label || "Scan"}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{scan.scan_label || "Scan"}</h1>
           <ScanTypeBadge scanType={scan.scan_type} />
           <ScanStatusBadge status={scan.status} />
         </div>

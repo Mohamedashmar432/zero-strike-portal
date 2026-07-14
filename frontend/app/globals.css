@@ -59,38 +59,39 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #f7f9fb;
+  --foreground: #191c1e;
+  --card: #ffffff;
+  --card-foreground: #191c1e;
+  --popover: #ffffff;
+  --popover-foreground: #191c1e;
+  --primary: #9d4300;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f6;
+  --secondary-foreground: #191c1e;
+  --muted: #eceef0;
+  --muted-foreground: #8c7164;
+  --accent: #ffdbca;
+  --accent-foreground: #582200;
+  --destructive: #ba1a1a;
+  --border: #e0c0b1;
+  --input: #e0c0b1;
+  --ring: #9d4300;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.75rem;
+  /* sidebar is a fixed dark brand surface in both color schemes, not tied to .dark */
+  --sidebar: #1a110a;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffb690;
+  --sidebar-primary-foreground: #582200;
+  --sidebar-accent: #ffffff1a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #ffffff1a;
+  --sidebar-ring: #ffb690;
 
   --severity-critical: #ef4444;
   --severity-high: #f97316;
@@ -109,37 +110,38 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --background: #14100d;
+  --foreground: #f5ede7;
+  --card: #241a13;
+  --card-foreground: #f5ede7;
+  --popover: #241a13;
+  --popover-foreground: #f5ede7;
+  --primary: #ffb690;
+  --primary-foreground: #582200;
+  --secondary: #2e241c;
+  --secondary-foreground: #f5ede7;
+  --muted: #2e241c;
+  --muted-foreground: #c9ada0;
+  --accent: #3a2a1c;
+  --accent-foreground: #ffdbca;
+  --destructive: #ffb4ab;
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: #ffb690;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* sidebar stays the same fixed dark brand surface as light mode */
+  --sidebar: #1a110a;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffb690;
+  --sidebar-primary-foreground: #582200;
+  --sidebar-accent: #ffffff1a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #ffffff1a;
+  --sidebar-ring: #ffb690;
 }
 
 @layer base {

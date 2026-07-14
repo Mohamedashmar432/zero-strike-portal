@@ -10,14 +10,8 @@ import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember } from "@/lib/api/project-members";
-import { addProjectRepo, listProjectRepos, removeProjectRepo } from "@/lib/api/project-repos";
+import { listProjectRepos, removeProjectRepo } from "@/lib/api/project-repos";
 import { getProject, updateProject } from "@/lib/api/projects";
-import {
-  listCredentialBranches,
-  listCredentialRepos,
-  listRepoCredentials,
-  type Repo,
-} from "@/lib/api/repo-credentials";
 import { listScans } from "@/lib/api/scans";
 import {
   createApiKeySchema,
@@ -29,25 +23,12 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { PageHeader } from "@/components/layout/page-header";
-import { CredentialForm } from "@/components/repos/credential-form";
-import { RepoPickerList } from "@/components/repos/repo-picker-list";
-import { SelectedRepoSummary } from "@/components/repos/selected-repo-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -305,185 +286,6 @@ function ScansTab({ projectId }: { projectId: string }) {
   );
 }
 
-function AddRepoDialog({ projectId }: { projectId: string }) {
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [addingCredential, setAddingCredential] = useState(false);
-  const [credentialId, setCredentialId] = useState<string | null>(null);
-  const [repoQuery, setRepoQuery] = useState("");
-  const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
-  const [label, setLabel] = useState("");
-
-  const { data: credentials } = useQuery({
-    queryKey: ["repo-credentials"],
-    queryFn: listRepoCredentials,
-    enabled: open,
-  });
-  const credential = credentials?.find((c) => c.id === credentialId);
-
-  const {
-    data: repos,
-    isLoading: reposLoading,
-    isError: reposError,
-  } = useQuery({
-    queryKey: ["repo-credentials", credentialId, "repos", repoQuery],
-    queryFn: () => listCredentialRepos(credentialId!, repoQuery),
-    enabled: !!credentialId,
-  });
-
-  const repoIdForBranches =
-    selectedRepo && credential ? (credential.provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
-
-  const { data: branches, isLoading: branchesLoading } = useQuery({
-    queryKey: ["repo-credentials", credentialId, "branches", repoIdForBranches],
-    queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
-    enabled: !!credentialId && !!repoIdForBranches,
-  });
-
-  function reset() {
-    setAddingCredential(false);
-    setCredentialId(null);
-    setRepoQuery("");
-    setSelectedRepo(null);
-    setSelectedBranch(null);
-    setLabel("");
-  }
-
-  const add = useMutation({
-    mutationFn: () =>
-      addProjectRepo(projectId, {
-        credential_id: credentialId!,
-        repo_full_name: selectedRepo!.full_name,
-        clone_url: selectedRepo!.clone_url,
-        selected_branch: selectedBranch!,
-        label: label || undefined,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
-      toast.success("Repository connected");
-      setOpen(false);
-      reset();
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to connect repository"),
-  });
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) reset();
-      }}
-    >
-      <DialogTrigger render={<Button variant="outline">Add repository</Button>} />
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Connect a repository</DialogTitle>
-          <DialogDescription>
-            Pick a saved credential, then choose a repo and branch to scan for this project.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          {!credentialId ? (
-            addingCredential ? (
-              <CredentialForm
-                onCreated={(created) => {
-                  setAddingCredential(false);
-                  setCredentialId(created.id);
-                }}
-              />
-            ) : (
-              <div className="space-y-2">
-                <Label>Credential</Label>
-                {credentials?.length ? (
-                  <Select value={credentialId ?? undefined} onValueChange={(value) => setCredentialId(value ?? null)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose a saved credential…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {credentials.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.label || c.organization} ({c.provider === "azure_devops" ? "Azure DevOps" : "GitHub"})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No saved credentials yet.</p>
-                )}
-                <Button type="button" variant="outline" size="sm" onClick={() => setAddingCredential(true)}>
-                  + Add new credential
-                </Button>
-              </div>
-            )
-          ) : !selectedRepo ? (
-            <div className="space-y-2">
-              <Input
-                placeholder="Search repos…"
-                autoComplete="off"
-                value={repoQuery}
-                onChange={(e) => setRepoQuery(e.target.value)}
-              />
-              <RepoPickerList repos={repos} isLoading={reposLoading} isError={reposError} onSelect={setSelectedRepo} />
-            </div>
-          ) : !selectedBranch ? (
-            <div className="space-y-2">
-              <SelectedRepoSummary repo={selectedRepo} onChange={() => setSelectedRepo(null)} />
-              <Label>Branch</Label>
-              <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-1">
-                {branchesLoading ? (
-                  <p className="p-2 text-sm text-muted-foreground">Loading…</p>
-                ) : branches?.length ? (
-                  branches.map((b) => (
-                    <button
-                      key={b.name}
-                      type="button"
-                      className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                      onClick={() => setSelectedBranch(b.name)}
-                    >
-                      {b.name}
-                    </button>
-                  ))
-                ) : (
-                  <p className="p-2 text-sm text-muted-foreground">No branches found.</p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                <span className="truncate font-mono">
-                  {selectedRepo.full_name} @ {selectedBranch}
-                </span>
-                <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedBranch(null)}>
-                  Change
-                </Button>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="repo-label">Label (optional)</Label>
-                <Input
-                  id="repo-label"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-        {selectedBranch && (
-          <DialogFooter>
-            <Button onClick={() => add.mutate()} disabled={add.isPending}>
-              {add.isPending ? "Connecting…" : "Connect repository"}
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function RepositoriesTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -507,7 +309,9 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
           Connect a repo here so cloud scans can reuse it without re-entering a URL or token each time. A
           project can hold multiple repos.
         </p>
-        <AddRepoDialog projectId={projectId} />
+        <Button variant="outline" nativeButton={false} render={<Link href={`/projects/${projectId}/repos/new`} />}>
+          Add repository
+        </Button>
       </div>
       <DataTableCard
         isLoading={isLoading}

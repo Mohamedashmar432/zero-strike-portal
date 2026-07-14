@@ -15,10 +15,11 @@ export function SettingsNav() {
           key={link.href}
           href={link.href}
           className={cn(
-            "block rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-            pathname?.startsWith(link.href) && "bg-accent text-foreground"
+            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+            pathname?.startsWith(link.href) && "bg-accent font-medium text-accent-foreground"
           )}
         >
+          <link.icon className="size-[18px]" />
           {link.label}
         </Link>
       ))}

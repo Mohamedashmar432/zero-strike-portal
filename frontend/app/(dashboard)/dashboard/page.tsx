@@ -46,18 +46,20 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" />
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <PageHeader title="Dashboard" description="Overview of your organization's scans, projects, and findings." />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
         {stats.map((stat) => (
-          <Card key={stat.label}>
+          <Card key={stat.label} className="shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-normal text-muted-foreground">{stat.label}</CardTitle>
+              <CardTitle className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {stat.label}
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
               {isLoading ? (
-                <Skeleton className="h-8 w-12" />
+                <Skeleton className="h-9 w-12" />
               ) : (
-                <span className="font-mono text-2xl font-semibold">{stat.value}</span>
+                <span className="text-3xl font-semibold tracking-tight">{stat.value}</span>
               )}
               {stat.severity && <SeverityBadge severity={stat.severity} />}
             </CardContent>

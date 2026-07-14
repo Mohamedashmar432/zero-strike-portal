@@ -25,28 +25,30 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden w-56 shrink-0 border-r border-border bg-card/40 md:flex md:flex-col">
-      <div className="px-4 py-4">
-        <span className="font-mono text-sm font-semibold tracking-tight">
-          zero<span className="text-brand">strike</span>
-        </span>
+    <aside className="hidden w-64 shrink-0 flex-col bg-sidebar py-6 text-sidebar-foreground md:flex">
+      <div className="mb-8 px-6">
+        <h1 className="text-xl font-bold tracking-tight">
+          <span className="text-sidebar-primary">Zero</span>Strike
+        </h1>
+        <p className="mt-0.5 text-xs text-sidebar-foreground/60">Security Platform</p>
       </div>
-      <nav className="flex-1 space-y-1 px-2">
+      <nav className="flex-1 space-y-1 px-3">
         {mainLinks.map((link) => (
           <Link
             key={link.href}
             href={link.href}
             className={cn(
-              "block rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-              pathname?.startsWith(link.href) && "bg-accent text-foreground"
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+              pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
             )}
           >
+            <link.icon className="size-[18px]" />
             {link.label}
           </Link>
         ))}
         {user?.role === "admin" && (
           <>
-            <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest text-sidebar-foreground/40 uppercase">
               Admin
             </div>
             {adminLinks.map((link) => (
@@ -54,16 +56,17 @@ export function Sidebar() {
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "block rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                  pathname?.startsWith(link.href) && "bg-accent text-foreground"
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                  pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
                 )}
               >
+                <link.icon className="size-[18px]" />
                 {link.label}
               </Link>
             ))}
           </>
         )}
-        <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest text-sidebar-foreground/40 uppercase">
           Settings
         </div>
         {settingsLinks.map((link) => (
@@ -71,25 +74,26 @@ export function Sidebar() {
             key={link.href}
             href={link.href}
             className={cn(
-              "block rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-              pathname?.startsWith(link.href) && "bg-accent text-foreground"
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+              pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
             )}
           >
+            <link.icon className="size-[18px]" />
             {link.label}
           </Link>
         ))}
       </nav>
-      <div className="border-t border-border p-2">
+      <div className="mt-4 border-t border-sidebar-border p-3">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent">
+              <button className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-sidebar-accent">
                 <Avatar size="sm">
                   <AvatarFallback>{getInitials(user?.name ?? user?.email ?? "?")}</AvatarFallback>
                 </Avatar>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">{user?.name ?? "…"}</span>
-                  <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
+                  <span className="truncate text-sm font-medium text-sidebar-foreground">{user?.name ?? "…"}</span>
+                  <span className="truncate text-xs text-sidebar-foreground/50">{user?.email}</span>
                 </span>
               </button>
             }

@@ -54,6 +54,10 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-md space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">Profile</h2>
+        <p className="text-sm text-muted-foreground">Your account details and password.</p>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
