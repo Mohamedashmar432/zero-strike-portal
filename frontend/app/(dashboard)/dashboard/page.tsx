@@ -1,14 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FolderKanban, Plus } from "lucide-react";
+import { ChevronRight, FolderKanban, Plus } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
+import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
+import { projectRiskStatus, SeverityCountPills, SEVERITY_PILL_CLASS } from "@/components/severity/severity-count-pills";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,48 +19,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { getDashboardStats, type RecentScanItem, type SeverityCounts } from "@/lib/api/dashboard";
 import { listProjects, type Project } from "@/lib/api/projects";
-
-const SEVERITY_ORDER: (keyof SeverityCounts)[] = ["critical", "high", "medium", "low", "info"];
-const SEVERITY_LETTER: Record<keyof SeverityCounts, string> = {
-  critical: "C",
-  high: "H",
-  medium: "M",
-  low: "L",
-  info: "I",
-};
-const SEVERITY_PILL_CLASS: Record<keyof SeverityCounts, string> = {
-  critical: "bg-severity-critical/15 text-severity-critical",
-  high: "bg-severity-high/15 text-severity-high",
-  medium: "bg-severity-medium/15 text-severity-medium",
-  low: "bg-severity-low/15 text-severity-low",
-  info: "bg-severity-info/15 text-severity-info",
-};
-
-function SeverityCountPills({ counts }: { counts: SeverityCounts }) {
-  const nonZero = SEVERITY_ORDER.filter((severity) => counts[severity] > 0);
-  if (nonZero.length === 0) return <span className="text-xs text-muted-foreground">No findings</span>;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {nonZero.map((severity) => (
-        <span
-          key={severity}
-          className={cn(
-            "inline-flex min-w-[2.25rem] items-center justify-center rounded-full px-2 py-0.5 font-mono text-xs font-semibold",
-            SEVERITY_PILL_CLASS[severity]
-          )}
-        >
-          {counts[severity]} {SEVERITY_LETTER[severity]}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function projectRiskStatus(counts: SeverityCounts) {
-  if (counts.critical > 0) return { label: "At Risk", className: SEVERITY_PILL_CLASS.critical };
-  if (counts.high > 0) return { label: "Action Needed", className: SEVERITY_PILL_CLASS.high };
-  return { label: "Stable", className: "bg-status-success/15 text-status-success" };
-}
 
 function severityScore(counts: SeverityCounts) {
   return counts.critical * 1000 + counts.high * 100 + counts.medium * 10 + counts.low + counts.info * 0.1;
@@ -78,6 +38,16 @@ export default function DashboardPage() {
     queryFn: () => listProjects(),
   });
   const [sortBy, setSortBy] = useState<SortBy>("recent");
+  const [expandedScans, setExpandedScans] = useState<Set<string>>(new Set());
+
+  function toggleExpanded(scanId: string) {
+    setExpandedScans((prev) => {
+      const next = new Set(prev);
+      if (next.has(scanId)) next.delete(scanId);
+      else next.add(scanId);
+      return next;
+    });
+  }
 
   const stats = [
     { label: "Total Scans", value: data?.scan_count ?? 0, caption: "Across all projects" },
@@ -251,32 +221,57 @@ export default function DashboardPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Findings</TableHead>
                 <TableHead>When</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedScans.map((scan: RecentScanItem) => (
-                <TableRow key={scan.scan_id}>
-                  <TableCell>
-                    <Link
-                      href={`/projects/${scan.project_id}/scans/${scan.scan_id}`}
-                      className="font-medium underline-offset-4 hover:underline"
-                    >
-                      {scan.project_name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <ScanTypeBadge scanType={scan.scan_type} />
-                  </TableCell>
-                  <TableCell>
-                    <ScanStatusBadge status={scan.status} />
-                  </TableCell>
-                  <TableCell>
-                    <SeverityCountPills counts={scan.findings_by_severity} />
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {new Date(scan.created_at).toLocaleString()}
-                  </TableCell>
-                </TableRow>
+                <Fragment key={scan.scan_id}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onClick={() => toggleExpanded(scan.scan_id)}
+                  >
+                    <TableCell>
+                      <Link
+                        href={`/projects/${scan.project_id}/scans/${scan.scan_id}`}
+                        className="font-medium underline-offset-4 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {scan.project_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <ScanTypeBadge scanType={scan.scan_type} />
+                    </TableCell>
+                    <TableCell>
+                      <ScanStatusBadge status={scan.status} />
+                    </TableCell>
+                    <TableCell>
+                      <SeverityCountPills counts={scan.findings_by_severity} />
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Date(scan.created_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <ChevronRight
+                        className={cn(
+                          "size-4 text-muted-foreground transition-transform",
+                          expandedScans.has(scan.scan_id) && "rotate-90"
+                        )}
+                      />
+                    </TableCell>
+                  </TableRow>
+                  {expandedScans.has(scan.scan_id) && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="bg-muted/20 p-4">
+                        <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                          Repositories
+                        </p>
+                        <ProjectRepoBreakdown projectId={scan.project_id} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

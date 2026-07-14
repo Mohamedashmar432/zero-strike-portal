@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember } from "@/lib/api/project-members";
 import { listProjectRepos, removeProjectRepo } from "@/lib/api/project-repos";
 import { getProject, updateProject } from "@/lib/api/projects";
+import { getReport } from "@/lib/api/reports";
 import { listScans } from "@/lib/api/scans";
 import {
   createApiKeySchema,
@@ -35,6 +36,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NewScanDialog } from "@/components/scans/new-scan-dialog";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
+import { SeverityCountPills } from "@/components/severity/severity-count-pills";
+import type { SeverityCounts } from "@/lib/api/dashboard";
+
+const EMPTY_SEVERITY_COUNTS: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 
 function canManage(role: string | undefined) {
   return role === "owner" || role === "admin";
@@ -226,6 +231,15 @@ function ScansTab({ projectId }: { projectId: string }) {
       q.state.data?.items.some((s) => s.status === "pending" || s.status === "running") ? 3000 : false,
   });
 
+  const reportQueries = useQueries({
+    queries: (data?.items ?? []).map((s) => ({
+      queryKey: ["scans", s.id, "report"],
+      queryFn: () => getReport(s.id),
+      enabled: s.status === "completed",
+      retry: false,
+    })),
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
@@ -252,33 +266,47 @@ function ScansTab({ projectId }: { projectId: string }) {
               <TableHead>Type</TableHead>
               <TableHead>Label</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Findings</TableHead>
               <TableHead>Created</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell>
-                  <ScanTypeBadge scanType={s.scan_type} />
-                </TableCell>
-                <TableCell>{s.scan_label || "—"}</TableCell>
-                <TableCell>
-                  <ScanStatusBadge status={s.status} />
-                </TableCell>
-                <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
-                <TableCell>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    nativeButton={false}
-                    render={<Link href={`/projects/${projectId}/scans/${s.id}`} />}
-                  >
-                    View
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {data?.items.map((s, i) => {
+              const stats = reportQueries[i]?.data?.stats.by_severity;
+              const counts: SeverityCounts = stats
+                ? {
+                    critical: stats.critical ?? 0,
+                    high: stats.high ?? 0,
+                    medium: stats.medium ?? 0,
+                    low: stats.low ?? 0,
+                    info: stats.info ?? 0,
+                  }
+                : EMPTY_SEVERITY_COUNTS;
+              return (
+                <TableRow key={s.id}>
+                  <TableCell>
+                    <ScanTypeBadge scanType={s.scan_type} />
+                  </TableCell>
+                  <TableCell>{s.scan_label || "—"}</TableCell>
+                  <TableCell>
+                    <ScanStatusBadge status={s.status} />
+                  </TableCell>
+                  <TableCell>{s.status === "completed" ? <SeverityCountPills counts={counts} /> : "—"}</TableCell>
+                  <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      nativeButton={false}
+                      render={<Link href={`/projects/${projectId}/scans/${s.id}`} />}
+                    >
+                      View
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </DataTableCard>
