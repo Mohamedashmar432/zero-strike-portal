@@ -24,7 +24,7 @@ type ScanStatusBadgeProps = VariantProps<typeof scanStatusBadgeVariants> & {
 export function ScanStatusBadge({ status = "pending", className }: ScanStatusBadgeProps) {
   return (
     <span className={cn(scanStatusBadgeVariants({ status }), className)}>
-      {status === "running" && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
+      {status === "running" && <span className="size-1.5 animate-pulse rounded-none bg-current" />}
       {status}
     </span>
   );

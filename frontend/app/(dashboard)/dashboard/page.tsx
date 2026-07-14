@@ -122,7 +122,7 @@ export default function DashboardPage() {
                 </span>
               )}
               {stat.pillClassName ? (
-                <span className={cn("inline-block rounded-full px-2 py-0.5 text-xs font-medium", stat.pillClassName)}>
+                <span className={cn("inline-block rounded-none px-2 py-0.5 text-xs font-medium", stat.pillClassName)}>
                   {stat.caption}
                 </span>
               ) : (
@@ -163,7 +163,7 @@ export default function DashboardPage() {
                   <CardContent className="flex h-full flex-col gap-3">
                     <div className="flex items-start justify-between gap-2">
                       <FolderKanban className="size-5 text-primary" />
-                      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", risk.className)}>
+                      <span className={cn("rounded-none px-2 py-0.5 text-xs font-medium", risk.className)}>
                         {risk.label}
                       </span>
                     </div>

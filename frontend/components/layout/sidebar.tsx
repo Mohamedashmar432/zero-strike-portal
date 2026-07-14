@@ -10,9 +10,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Settings } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
-import { adminLinks, mainLinks, settingsLinks } from "./nav-links";
+import { adminLinks, mainLinks } from "./nav-links";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -66,22 +67,16 @@ export function Sidebar() {
             ))}
           </>
         )}
-        <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest text-sidebar-foreground/40 uppercase">
+        <Link
+          href="/settings/profile"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            pathname?.startsWith("/settings") && "bg-sidebar-accent font-semibold text-sidebar-foreground"
+          )}
+        >
+          <Settings className="size-[18px]" />
           Settings
-        </div>
-        {settingsLinks.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
-              pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
-            )}
-          >
-            <link.icon className="size-[18px]" />
-            {link.label}
-          </Link>
-        ))}
+        </Link>
       </nav>
       <div className="mt-4 border-t border-sidebar-border p-3">
         <DropdownMenu>

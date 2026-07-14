@@ -94,7 +94,7 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
             <div className="flex flex-wrap items-center gap-4">
               <SeverityCountPills counts={counts} />
               {scan ? (
-                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", risk.className)}>
+                <span className={cn("rounded-none px-2 py-0.5 text-xs font-medium", risk.className)}>
                   {risk.label}
                 </span>
               ) : (

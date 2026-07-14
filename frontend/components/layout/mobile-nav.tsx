@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,7 +16,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
-import { adminLinks, mainLinks, settingsLinks } from "./nav-links";
+import { adminLinks, mainLinks } from "./nav-links";
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -91,22 +91,16 @@ export function MobileNav() {
               ))}
             </>
           )}
-          <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <Link
+            href="/settings/profile"
+            className={cn(
+              "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+              pathname?.startsWith("/settings") && "bg-accent text-foreground"
+            )}
+          >
+            <Settings className="size-[18px]" />
             Settings
-          </div>
-          {settingsLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                pathname?.startsWith(link.href) && "bg-accent text-foreground"
-              )}
-            >
-              <link.icon className="size-[18px]" />
-              {link.label}
-            </Link>
-          ))}
+          </Link>
         </nav>
         <div className="border-t border-border p-2">
           <DropdownMenu>
