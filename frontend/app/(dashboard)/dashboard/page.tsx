@@ -7,7 +7,6 @@ import { useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
-import { SeverityDistributionChart } from "@/components/dashboard/severity-distribution-chart";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { Button } from "@/components/ui/button";
@@ -220,19 +219,6 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">Severity Distribution</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <Skeleton className="h-[220px] w-full" />
-          ) : (
-            data && <SeverityDistributionChart data={data.findings_by_severity} />
-          )}
-        </CardContent>
-      </Card>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
