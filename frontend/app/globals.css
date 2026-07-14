@@ -110,23 +110,25 @@
 }
 
 .dark {
-  --background: #171717;
-  --foreground: #f5ede7;
-  --card: #241a13;
-  --card-foreground: #f5ede7;
-  --popover: #241a13;
-  --popover-foreground: #f5ede7;
+  --background: #000000;
+  --foreground: #f5f5f5;
+  --card: #171717;
+  --card-foreground: #f5f5f5;
+  --popover: #171717;
+  --popover-foreground: #f5f5f5;
   --primary: #ffb690;
   --primary-foreground: #582200;
-  --secondary: #2e241c;
-  --secondary-foreground: #f5ede7;
-  --muted: #2e241c;
-  --muted-foreground: #c9ada0;
-  --accent: #3a2a1c;
-  --accent-foreground: #ffdbca;
+  --secondary: #1f1f1f;
+  --secondary-foreground: #f5f5f5;
+  --muted: #1f1f1f;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --accent-foreground: #f5f5f5;
   --destructive: #ffb4ab;
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
+  /* light-orange outline on every bordered surface, and the line that separates
+     the topbar from the page content below it (both just use --border) */
+  --border: #ffb6904d;
+  --input: #ffb69059;
   --ring: #ffb690;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
