@@ -1,13 +1,10 @@
 "use client";
 
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, GitBranch, KeyRound, LayoutGrid, List as ListIcon, Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronDown, GitBranch, KeyRound, LayoutGrid, List as ListIcon, Plus, Search } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
@@ -16,99 +13,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { ApiError } from "@/lib/api/client";
-import { createProject, listProjects, type Project } from "@/lib/api/projects";
-import { createProjectSchema, type CreateProjectInput } from "@/lib/validation/project.schema";
+import { listProjects } from "@/lib/api/projects";
 
 type StatusFilter = "all" | "active" | "archived";
-
-function CreatedProjectNextSteps({ project, onDismiss }: { project: Project; onDismiss: () => void }) {
-  const router = useRouter();
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>&quot;{project.name}&quot; is ready</DialogTitle>
-        <DialogDescription>
-          Next: generate a project token so the ZeroStrike SAST scanner can authenticate and upload
-          results for this project.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button variant="ghost" onClick={onDismiss}>
-          I&apos;ll do this later
-        </Button>
-        <Button
-          onClick={() => {
-            router.push(`/projects/${project.id}?tab=keys`);
-            onDismiss();
-          }}
-        >
-          Set up project token
-        </Button>
-      </DialogFooter>
-    </>
-  );
-}
-
-function CreateProjectForm({ onCreated }: { onCreated: (project: Project) => void }) {
-  const queryClient = useQueryClient();
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<CreateProjectInput>({ resolver: zodResolver(createProjectSchema) });
-
-  const mutation = useMutation({
-    mutationFn: createProject,
-    onSuccess: (project) => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      toast.success("Project created");
-      onCreated(project);
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create project"),
-  });
-
-  return (
-    <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
-      <DialogHeader>
-        <DialogTitle>New project</DialogTitle>
-        <DialogDescription>
-          A project groups the SAST scans, members, and scanner project tokens for one codebase.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">Name</Label>
-          <Input id="name" {...register("name")} />
-          {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="description">Description</Label>
-          <Input id="description" {...register("description")} />
-        </div>
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Creating…" : "Create project"}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
 
 function ApiKeysQuickLink({ projectId }: { projectId: string }) {
   return (
@@ -140,8 +50,6 @@ function RepoQuickLink({ projectId }: { projectId: string }) {
 
 function ProjectsPageContent() {
   const searchParams = useSearchParams();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [createdProject, setCreatedProject] = useState<Project | null>(null);
   const [view, setView] = useState<"list" | "grid">("list");
   const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -158,11 +66,6 @@ function ProjectsPageContent() {
       else next.add(id);
       return next;
     });
-  }
-
-  function closeDialog() {
-    setDialogOpen(false);
-    setCreatedProject(null);
   }
 
   const filtered = useMemo(() => {
@@ -210,16 +113,10 @@ function ProjectsPageContent() {
                 <LayoutGrid />
               </Button>
             </div>
-            <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
-              <DialogTrigger render={<Button>New Project</Button>} />
-              <DialogContent>
-                {createdProject ? (
-                  <CreatedProjectNextSteps project={createdProject} onDismiss={closeDialog} />
-                ) : (
-                  <CreateProjectForm onCreated={setCreatedProject} />
-                )}
-              </DialogContent>
-            </Dialog>
+            <Button nativeButton={false} render={<Link href="/projects/new" />}>
+              <Plus />
+              New Project
+            </Button>
           </>
         }
       />

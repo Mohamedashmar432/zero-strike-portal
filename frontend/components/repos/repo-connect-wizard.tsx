@@ -1,0 +1,190 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useState } from "react";
+import { toast } from "sonner";
+import { CredentialForm } from "@/components/repos/credential-form";
+import { RepoPickerList } from "@/components/repos/repo-picker-list";
+import { SelectedRepoSummary } from "@/components/repos/selected-repo-summary";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ApiError } from "@/lib/api/client";
+import { addProjectRepo, type ProjectRepo } from "@/lib/api/project-repos";
+import {
+  listCredentialBranches,
+  listCredentialRepos,
+  listRepoCredentials,
+  type Repo,
+} from "@/lib/api/repo-credentials";
+
+// Shared by /projects/[projectId]/repos/new (standalone) and /projects/new (embedded
+// right after project creation) — same credential -> repo -> branch -> label flow either way.
+export function RepoConnectWizard({
+  projectId,
+  onConnected,
+  cancelHref,
+  cancelLabel = "Cancel",
+}: {
+  projectId: string;
+  onConnected: (repo: ProjectRepo) => void;
+  cancelHref: string;
+  cancelLabel?: string;
+}) {
+  const queryClient = useQueryClient();
+
+  const [addingCredential, setAddingCredential] = useState(false);
+  const [credentialId, setCredentialId] = useState<string | null>(null);
+  const [repoQuery, setRepoQuery] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [label, setLabel] = useState("");
+
+  const { data: credentials } = useQuery({
+    queryKey: ["repo-credentials"],
+    queryFn: listRepoCredentials,
+  });
+  const credential = credentials?.find((c) => c.id === credentialId);
+
+  const {
+    data: repos,
+    isLoading: reposLoading,
+    isError: reposError,
+  } = useQuery({
+    queryKey: ["repo-credentials", credentialId, "repos", repoQuery],
+    queryFn: () => listCredentialRepos(credentialId!, repoQuery),
+    enabled: !!credentialId,
+  });
+
+  const repoIdForBranches =
+    selectedRepo && credential ? (credential.provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
+
+  const { data: branches, isLoading: branchesLoading } = useQuery({
+    queryKey: ["repo-credentials", credentialId, "branches", repoIdForBranches],
+    queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
+    enabled: !!credentialId && !!repoIdForBranches,
+  });
+
+  const add = useMutation({
+    mutationFn: () =>
+      addProjectRepo(projectId, {
+        credential_id: credentialId!,
+        repo_full_name: selectedRepo!.full_name,
+        clone_url: selectedRepo!.clone_url,
+        selected_branch: selectedBranch!,
+        label: label || undefined,
+      }),
+    onSuccess: (repo) => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+      toast.success("Repository connected");
+      onConnected(repo);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to connect repository"),
+  });
+
+  const step = !credentialId ? 1 : !selectedRepo ? 2 : !selectedBranch ? 3 : 4;
+
+  return (
+    <Card className="mx-auto max-w-xl">
+      <CardHeader>
+        <CardTitle className="text-sm font-medium text-muted-foreground">Step {step} of 4</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!credentialId ? (
+          addingCredential ? (
+            <CredentialForm
+              onCreated={(created) => {
+                setAddingCredential(false);
+                setCredentialId(created.id);
+              }}
+            />
+          ) : (
+            <div className="space-y-2">
+              <Label>Credential</Label>
+              {credentials?.length ? (
+                <Select value={credentialId ?? undefined} onValueChange={(value) => setCredentialId(value ?? null)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose a saved credential…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {credentials.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.label || c.organization} ({c.provider === "azure_devops" ? "Azure DevOps" : "GitHub"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="text-sm text-muted-foreground">No saved credentials yet.</p>
+              )}
+              <Button type="button" variant="outline" size="sm" onClick={() => setAddingCredential(true)}>
+                + Add new credential
+              </Button>
+            </div>
+          )
+        ) : !selectedRepo ? (
+          <div className="space-y-2">
+            <Input
+              placeholder="Search repos…"
+              autoComplete="off"
+              value={repoQuery}
+              onChange={(e) => setRepoQuery(e.target.value)}
+            />
+            <RepoPickerList repos={repos} isLoading={reposLoading} isError={reposError} onSelect={setSelectedRepo} />
+          </div>
+        ) : !selectedBranch ? (
+          <div className="space-y-2">
+            <SelectedRepoSummary repo={selectedRepo} onChange={() => setSelectedRepo(null)} />
+            <Label>Branch</Label>
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-1">
+              {branchesLoading ? (
+                <p className="p-2 text-sm text-muted-foreground">Loading…</p>
+              ) : branches?.length ? (
+                branches.map((b) => (
+                  <button
+                    key={b.name}
+                    type="button"
+                    className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                    onClick={() => setSelectedBranch(b.name)}
+                  >
+                    {b.name}
+                  </button>
+                ))
+              ) : (
+                <p className="p-2 text-sm text-muted-foreground">No branches found.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
+              <span className="truncate font-mono">
+                {selectedRepo.full_name} @ {selectedBranch}
+              </span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedBranch(null)}>
+                Change
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="repo-label">Label (optional)</Label>
+              <Input id="repo-label" value={label} onChange={(e) => setLabel(e.target.value)} autoComplete="off" />
+            </div>
+          </div>
+        )}
+        <div className="flex items-center justify-between border-t border-border pt-4">
+          <Button variant="ghost" nativeButton={false} render={<Link href={cancelHref} />}>
+            {cancelLabel}
+          </Button>
+          {selectedBranch && (
+            <Button onClick={() => add.mutate()} disabled={add.isPending}>
+              {add.isPending ? "Connecting…" : "Connect repository"}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

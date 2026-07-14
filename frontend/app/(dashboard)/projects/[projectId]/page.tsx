@@ -33,7 +33,6 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { NewScanDialog } from "@/components/scans/new-scan-dialog";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { SeverityCountPills } from "@/components/severity/severity-count-pills";
@@ -247,7 +246,9 @@ function ScansTab({ projectId }: { projectId: string }) {
           Local and CI/CD scans appear here once the scanner runs and uploads. Cloud scans run on the
           server — open one to watch progress and review findings.
         </p>
-        <NewScanDialog projectId={projectId} />
+        <Button variant="outline" nativeButton={false} render={<Link href={`/projects/${projectId}/scans/new`} />}>
+          New scan
+        </Button>
       </div>
       <DataTableCard
         isLoading={isLoading}
