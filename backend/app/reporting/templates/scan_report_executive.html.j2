@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1a1a2e; background: #fff; }
+
+.cover {
+  page-break-after: always;
+  background: linear-gradient(150deg, #0d1b2a 0%, #1b2838 50%, #0f3460 100%);
+  color: #fff;
+  min-height: 100vh;
+  padding: 72px 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.cover-eyebrow { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #7ec8e3; margin-bottom: 12px; }
+.cover-title { font-size: 44px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1; margin-bottom: 8px; }
+.cover-subtitle { font-size: 16px; color: #a8dadc; font-weight: 400; margin-bottom: 48px; }
+
+.cover-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 40px; margin-bottom: 40px; }
+.meta-item label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ec8e3; display: block; margin-bottom: 4px; }
+.meta-item span { font-size: 15px; font-weight: 600; }
+
+.cover-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 40px; }
+.stat-box { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 14px 10px; text-align: center; }
+.stat-box .num { font-size: 28px; font-weight: 800; display: block; }
+.stat-box .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #a8dadc; margin-top: 4px; display: block; }
+.stat-total .num { color: #fff; }
+.stat-crit .num  { color: #ff4d6d; }
+.stat-high .num  { color: #ff9a3c; }
+.stat-med .num   { color: #ffd166; }
+.stat-low .num   { color: #06d6a0; }
+.stat-info .num  { color: #8ab4ff; }
+
+.risk-banner { display: inline-flex; align-items: center; gap: 12px; padding: 12px 24px; border-radius: 6px; font-weight: 700; font-size: 14px; }
+.risk-CRITICAL { background: #e63946; color: #fff; }
+.risk-HIGH     { background: #f4a261; color: #1a1a2e; }
+.risk-MEDIUM   { background: #e9c46a; color: #1a1a2e; }
+.risk-LOW      { background: #2a9d8f; color: #fff; }
+.risk-NONE     { background: #2a9d8f; color: #fff; }
+
+.page { padding: 48px 56px; }
+.page-break { page-break-before: always; }
+
+h2 { font-size: 20px; font-weight: 700; color: #0f3460; border-bottom: 3px solid #e63946; padding-bottom: 8px; margin-bottom: 20px; margin-top: 40px; }
+h3 { font-size: 14px; font-weight: 700; color: #16213e; margin-bottom: 8px; margin-top: 20px; }
+p  { line-height: 1.7; margin-bottom: 10px; color: #333; }
+
+.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 28px; }
+.summary-card { border-radius: 8px; padding: 16px 10px; text-align: center; }
+.summary-card .count { font-size: 30px; font-weight: 800; display: block; }
+.summary-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; display: block; }
+.card-critical { background: #fde8ea; color: #e63946; }
+.card-high     { background: #fdf0e4; color: #e76f51; }
+.card-medium   { background: #fdf8e4; color: #e9a825; }
+.card-low      { background: #e4f5f3; color: #2a9d8f; }
+.card-info     { background: #eef2ff; color: #6366f1; }
+
+table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
+th { background: #0f3460; color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
+tr:nth-child(even) td { background: #f8f9fa; }
+
+.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.badge-CRITICAL { background: #fde8ea; color: #e63946; }
+.badge-HIGH     { background: #fdf0e4; color: #e76f51; }
+.badge-MEDIUM   { background: #fdf8e4; color: #e9a825; }
+.badge-LOW      { background: #e4f5f3; color: #2a9d8f; }
+.badge-INFO     { background: #eef2ff; color: #6366f1; }
+.pass-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #e4f5f3; color: #2a9d8f; }
+.fail-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #fde8ea; color: #e63946; }
+
+.finding-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 20px; margin-bottom: 16px; page-break-inside: avoid; }
+.finding-card.sev-CRITICAL { border-left: 4px solid #e63946; }
+.finding-card.sev-HIGH     { border-left: 4px solid #e76f51; }
+.finding-card.sev-MEDIUM   { border-left: 4px solid #e9a825; }
+.finding-card.sev-LOW      { border-left: 4px solid #2a9d8f; }
+.finding-card.sev-INFO     { border-left: 4px solid #6366f1; }
+.finding-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.finding-title  { font-weight: 700; font-size: 14px; color: #1a1a2e; flex: 1; margin-right: 12px; }
+.finding-meta   { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; margin-bottom: 10px; }
+.finding-meta span   { color: #666; }
+.finding-meta strong { color: #1a1a2e; }
+.finding-loc { grid-column: 1 / -1; font-family: 'Courier New', monospace; font-size: 11px; background: #f0f4ff; padding: 4px 8px; border-radius: 4px; color: #2c3e6b; }
+.rec { background: #f0f7ff; border-left: 3px solid #0f3460; padding: 10px 14px; border-radius: 0 6px 6px 0; font-size: 12px; line-height: 1.6; color: #333; margin-top: 10px; }
+pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 14px 16px; border-radius: 6px; overflow-x: auto; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
+
+.owasp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
+.owasp-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+.owasp-card.fail-card { border-left: 4px solid #e63946; background: #fff8f8; }
+.owasp-card.pass-card { border-left: 4px solid #2a9d8f; background: #f8fffd; }
+.owasp-name { font-weight: 700; font-size: 12px; color: #1a1a2e; }
+.owasp-code { font-size: 11px; color: #666; margin-top: 2px; }
+.owasp-right { text-align: right; }
+.owasp-count { font-size: 13px; font-weight: 700; color: #e63946; }
+
+.conclusion { background: linear-gradient(135deg, #1a1a2e, #0f3460); color: #fff; border-radius: 10px; padding: 28px 32px; margin-top: 32px; }
+.conclusion p { color: #a8dadc; margin-bottom: 8px; }
+
+@page { margin: 0; size: A4; }
+@media print {
+  .cover                { min-height: 297mm; page-break-after: always; }
+  .page-break           { page-break-before: always; }
+  .finding-card         { page-break-inside: avoid; }
+  pre.code-block        { page-break-inside: avoid; white-space: pre-wrap; word-break: break-all; overflow-wrap: break-word; max-width: 100%; }
+  h2                    { page-break-after: avoid; }
+  h3                    { page-break-after: avoid; }
+  .owasp-grid           { display: block; }
+  .owasp-card           { display: flex; page-break-inside: avoid; margin-bottom: 8px; }
+  td, th                { word-break: break-word; overflow-wrap: break-word; }
+  table                 { table-layout: fixed; width: 100%; }
+  .finding-meta         { display: block; }
+  .finding-meta > div   { margin-bottom: 3px; }
+  .finding-loc          { display: block; margin-top: 4px; word-break: break-all; }
+  .cover-stats          { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .stat-box             { padding: 10px 6px; }
+  .stat-box .num        { font-size: 22px; }
+  .summary-grid         { grid-template-columns: repeat(5, 1fr); }
+  .conclusion           { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div>
+    <div class="cover-eyebrow">ZeroStrike Security Assessment Report</div>
+    <div class="cover-title">Security<br>Assessment</div>
+    <div class="cover-subtitle">Static Application Security Testing</div>
+
+    <div class="cover-meta">
+      <div class="meta-item"><label>Project</label><span>{{ project_name }}</span></div>
+      <div class="meta-item"><label>Repository</label><span>{{ scan.repo_url or report.root_path or "—" }}</span></div>
+      <div class="meta-item"><label>Branch</label><span>{{ report.branch or scan.branch or "—" }}</span></div>
+      <div class="meta-item"><label>Scan Date</label><span>{{ report.started_at.strftime('%Y-%m-%d') if report.started_at else "—" }}</span></div>
+      <div class="meta-item"><label>AI Provider</label><span>Not tracked</span></div>
+      <div class="meta-item"><label>Scan ID</label><span style="font-size:11px;font-family:monospace;">{{ (scan.id | string)[:8] }}</span></div>
+    </div>
+
+    <div class="cover-scanners">
+      <label style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#7ec8e3;display:block;margin-bottom:10px;">Scanners Executed</label>
+      {% for s in scanners_used %}
+      <span class="scanner-pill" style="display:inline-block;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;padding:5px 14px;font-size:12px;margin-right:8px;margin-bottom:6px;">{{ s }}</span>
+      {% endfor %}
+    </div>
+
+    <div class="cover-stats">
+      <div class="stat-box stat-total"><span class="num">{{ total_findings }}</span><span class="lbl">Total</span></div>
+      <div class="stat-box stat-crit"><span class="num">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="lbl">Critical</span></div>
+      <div class="stat-box stat-high"><span class="num">{{ report.stats.by_severity.get('high', 0) }}</span><span class="lbl">High</span></div>
+      <div class="stat-box stat-med"><span class="num">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="lbl">Medium</span></div>
+      <div class="stat-box stat-low"><span class="num">{{ report.stats.by_severity.get('low', 0) }}</span><span class="lbl">Low</span></div>
+      <div class="stat-box stat-info"><span class="num">{{ report.stats.by_severity.get('info', 0) }}</span><span class="lbl">Info</span></div>
+    </div>
+  </div>
+
+  <div class="risk-banner risk-{{ overall_risk }}">
+    Overall Risk: {{ overall_risk }}
+  </div>
+</div>
+
+<div class="page page-break">
+
+<h2>1. Executive Summary</h2>
+<p>{{ executive_summary }}</p>
+
+<div class="summary-grid">
+  <div class="summary-card card-critical"><span class="count">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="label">Critical</span></div>
+  <div class="summary-card card-high"><span class="count">{{ report.stats.by_severity.get('high', 0) }}</span><span class="label">High</span></div>
+  <div class="summary-card card-medium"><span class="count">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="label">Medium</span></div>
+  <div class="summary-card card-low"><span class="count">{{ report.stats.by_severity.get('low', 0) }}</span><span class="label">Low</span></div>
+  <div class="summary-card card-info"><span class="count">{{ report.stats.by_severity.get('info', 0) }}</span><span class="label">Info</span></div>
+</div>
+
+<h2>2. Technology Stack</h2>
+<p>Technology stack detection was not performed.</p>
+
+<h2>3. Findings by Kind</h2>
+<table>
+  <tr><th>Kind</th><th>Findings</th></tr>
+  {% for kind, label in [('sast','Static Analysis (SAST)'), ('secret','Secrets'), ('sca','Dependencies (SCA)'), ('config','Configuration')] %}
+  {% if report.stats.by_kind.get(kind) %}
+  <tr><td><strong>{{ label }}</strong></td><td>{{ report.stats.by_kind.get(kind) }}</td></tr>
+  {% endif %}
+  {% endfor %}
+</table>
+
+</div>
+
+<div class="page page-break">
+
+<h2>4. OWASP Top 10 Compliance</h2>
+
+{% set ns = namespace(total_fail=0) %}
+<div class="owasp-grid">
+{% for code, name in owasp_all %}
+  {% set cat_findings = [] %}
+  {% for f in findings %}
+    {% if f.owasp and code in f.owasp %}
+      {% set _ = cat_findings.append(f) %}
+    {% endif %}
+  {% endfor %}
+  {% set fail = cat_findings | length > 0 %}
+  {% if fail %}{% set ns.total_fail = ns.total_fail + 1 %}{% endif %}
+  <div class="owasp-card {{ 'fail-card' if fail else 'pass-card' }}">
+    <div>
+      <div class="owasp-name">{{ name }}</div>
+      <div class="owasp-code">{{ code }}</div>
+    </div>
+    <div class="owasp-right">
+      {% if fail %}
+        <div><span class="fail-badge">FAIL</span></div>
+        <div class="owasp-count">{{ cat_findings | length }} finding{{ 's' if cat_findings | length != 1 else '' }}</div>
+        {% set sevs = cat_findings | map(attribute='severity') | list %}
+        {% if 'critical' in sevs %}<div style="margin-top:4px;"><span class="badge badge-CRITICAL">CRITICAL</span></div>
+        {% elif 'high' in sevs %}<div style="margin-top:4px;"><span class="badge badge-HIGH">HIGH</span></div>
+        {% elif 'medium' in sevs %}<div style="margin-top:4px;"><span class="badge badge-MEDIUM">MEDIUM</span></div>
+        {% else %}<div style="margin-top:4px;"><span class="badge badge-LOW">LOW</span></div>{% endif %}
+      {% else %}
+        <div><span class="pass-badge">PASS</span></div>
+        <div style="font-size:11px;color:#2a9d8f;margin-top:4px;">No findings</div>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+
+<p style="margin-top:12px;color:#333;">
+  <strong>OWASP Summary:</strong>
+  {{ ns.total_fail }} of 10 categories have findings.
+  {% if ns.total_fail == 0 %}No OWASP Top 10 violations detected.
+  {% elif ns.total_fail <= 3 %}Low OWASP exposure — address findings by priority.
+  {% elif ns.total_fail <= 6 %}Moderate OWASP exposure — security review recommended.
+  {% else %}High OWASP exposure — security remediation required before release.{% endif %}
+</p>
+
+</div>
+
+<div class="page page-break">
+
+{% set section_num = namespace(n=5) %}
+{% for severity in ['critical', 'high', 'medium', 'low', 'info'] %}
+{% set sev_findings = findings | selectattr('severity', 'eq', severity) | list %}
+{% if sev_findings %}
+<h2>{{ section_num.n }}. {{ severity | title }} Findings ({{ sev_findings | length }})</h2>
+{% set section_num.n = section_num.n + 1 %}
+{% for f in sev_findings %}
+<div class="finding-card sev-{{ f.severity | upper }}">
+  <div class="finding-header">
+    <div class="finding-title">{{ f.rule_name or f.rule_id or "Untitled finding" }}</div>
+    <span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span>
+  </div>
+  <div class="finding-meta">
+    <div><span>Kind: </span><strong>{{ f.kind or "—" }}</strong></div>
+    <div><span>Priority: </span><strong>{{ f.priority_score if f.priority_score is not none else "—" }}/10</strong></div>
+    {% if f.cwe %}<div><span>CWE: </span><strong>{{ f.cwe | join(", ") }}</strong></div>{% endif %}
+    {% if f.owasp %}<div style="grid-column:1/-1"><span>OWASP: </span><strong>{{ f.owasp | join(", ") }}</strong></div>{% endif %}
+    {% if f.location.file %}
+    <div class="finding-loc">{{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
+    {% endif %}
+  </div>
+  <p style="font-size:12px;margin-bottom:8px;">{{ f.message }}</p>
+  {% if f.evidence and f.evidence[0].snippet %}
+  <pre class="code-block">{{ f.evidence[0].snippet | e }}</pre>
+  {% endif %}
+  {% if f.remediation %}<div class="rec"><strong>Recommendation:</strong> {{ f.remediation }}</div>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+{% set secret_findings = findings | selectattr('kind', 'eq', 'secret') | list %}
+<h2>{{ section_num.n }}. Secrets &amp; Sensitive Data Exposure</h2>
+{% set section_num.n = section_num.n + 1 %}
+{% if secret_findings %}
+<p style="color:#e63946;font-weight:700;margin-bottom:12px;">{{ secret_findings | length }} secret(s) / sensitive value(s) detected. Rotate all exposed credentials immediately.</p>
+<table>
+  <tr><th>Rule</th><th>File</th><th>Line</th><th>Severity</th></tr>
+  {% for f in secret_findings %}
+  <tr>
+    <td>{{ f.rule_name or f.rule_id or "—" }}</td>
+    <td style="font-family:monospace;font-size:11px;word-break:break-all;">{{ f.location.file }}</td>
+    <td>{{ f.location.start_line or "N/A" }}</td>
+    <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p style="color:#2a9d8f;">No hardcoded secrets or credentials detected.</p>
+{% endif %}
+
+{% set dep_findings = findings | selectattr('kind', 'eq', 'sca') | list %}
+<h2>{{ section_num.n }}. Dependency Risks</h2>
+{% set section_num.n = section_num.n + 1 %}
+{% if dep_findings %}
+<table>
+  <tr><th>Vulnerability</th><th>Severity</th><th>Manifest File</th></tr>
+  {% for f in dep_findings %}
+  <tr>
+    <td>{{ f.rule_name or f.rule_id or "—" }}</td>
+    <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
+    <td style="font-family:monospace;font-size:11px;">{{ f.dependency.manifest if f.dependency else f.location.file }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p style="color:#2a9d8f;">No known vulnerable dependencies detected.</p>
+{% endif %}
+
+{% if cwe_summary %}
+<h2>{{ section_num.n }}. CWE Mapping</h2>
+{% set section_num.n = section_num.n + 1 %}
+<table>
+  <tr><th>CWE</th><th>Count</th><th>Max Severity</th></tr>
+  {% for row in cwe_summary %}
+  <tr>
+    <td><strong>{{ row.cwe }}</strong></td>
+    <td>{{ row.count }}</td>
+    <td><span class="badge badge-{{ row.max_severity | upper }}">{{ row.max_severity | upper }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>{{ section_num.n }}. Remediation Plan</h2>
+{% set rem_findings = findings | sort(attribute='priority_score', reverse=True) %}
+{% if rem_findings %}
+<p>Findings are ordered by priority score (highest first).</p>
+<table>
+  <tr><th>#</th><th>Finding</th><th>Priority</th><th>OWASP</th><th>Action</th></tr>
+  {% for f in rem_findings %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td>{{ (f.rule_name or f.rule_id or "Untitled finding") | truncate(55) }}</td>
+    <td><strong>{{ f.priority_score if f.priority_score is not none else "—" }}/10</strong></td>
+    <td style="font-size:11px;">{{ (f.owasp | join(", ")) | truncate(20) if f.owasp else "—" }}</td>
+    <td style="font-size:11px;">{{ (f.remediation or "—") | truncate(100) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>No remediation actions required.</p>
+{% endif %}
+
+<div class="conclusion">
+  <p>This report was generated by the ZeroStrike Portal's SAST scan engine. All findings should be reviewed by a qualified security engineer before remediation. This report reflects a point-in-time snapshot and does not replace a full manual penetration test.</p>
+  <p style="margin-top:12px;font-size:11px;color:#6c7a8d;">
+    Scan ID: {{ scan.id }} &nbsp;|&nbsp; Generated: {{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') if report.generated_at else "—" }}
+  </p>
+</div>
+
+</div>
+</body>
+</html>
