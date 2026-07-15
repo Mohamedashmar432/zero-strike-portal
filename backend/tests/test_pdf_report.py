@@ -136,3 +136,50 @@ def test_scan_report_pdf_uses_executive_template_when_project_overrides(client):
     r = client.get(f"/api/v1/scans/{scan_id}/report/pdf", headers=_headers(owner))
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
+
+
+def test_executive_template_remediation_plan_handles_findings_with_no_priority_score():
+    # Findings ingested before priority_score/priority_tier existed have both fields as
+    # None (see Finding model) — the remediation-plan section must not crash when
+    # ranking a mix of scored and unscored findings.
+    from datetime import datetime, timezone
+
+    from app.models.finding import Finding, LocationEmbedded
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services import pdf_report_service
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(project_id="p1", scan_type="cloud", created_at=now, updated_at=now)
+    report = Report(
+        scan_id="s1",
+        project_id="p1",
+        stats=ScanStatsEmbedded(by_severity={"high": 1, "medium": 1}, by_kind={"sast": 2}),
+        json_uploaded_at=now,
+    )
+    findings = [
+        Finding(
+            scan_id="s1",
+            project_id="p1",
+            rule_id="LEGACY-1",
+            severity="high",
+            message="Pre-existing finding from before priority scoring shipped",
+            location=LocationEmbedded(file="a.py"),
+            priority_score=None,
+            priority_tier=None,
+        ),
+        Finding(
+            scan_id="s1",
+            project_id="p1",
+            rule_id="NEW-1",
+            severity="medium",
+            message="Freshly ingested finding",
+            location=LocationEmbedded(file="b.py"),
+            priority_score=6.0,
+            priority_tier="high",
+        ),
+    ]
+
+    html = pdf_report_service.render_scan_report_html(scan, report, findings, "executive")
+    assert "LEGACY-1" in html
+    assert "NEW-1" in html

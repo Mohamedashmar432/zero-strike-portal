@@ -86,6 +86,13 @@ def _cwe_summary(findings: list[Finding]) -> list[dict]:
     return summary
 
 
+def _by_priority_desc(findings: list[Finding]) -> list[Finding]:
+    # Jinja's `sort(attribute=...)` has no None-safe key option, and `priority_score` is
+    # None for findings ingested before this field existed (see Finding model) — sorting
+    # a mix of None/float in Jinja raises TypeError, so this is done in Python instead.
+    return sorted(findings, key=lambda f: f.priority_score if f.priority_score is not None else -1.0, reverse=True)
+
+
 def render_scan_report_html(
     scan: Scan,
     report: Report,
@@ -111,6 +118,7 @@ def render_scan_report_html(
             scanners_used=_scanners_used(report.stats.by_kind),
             executive_summary=_executive_summary(report, len(findings)),
             cwe_summary=_cwe_summary(findings),
+            remediation_findings=_by_priority_desc(findings),
         )
     return jinja_template.render(**context)
 

@@ -326,7 +326,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 {% endif %}
 
 <h2>{{ section_num.n }}. Remediation Plan</h2>
-{% set rem_findings = findings | sort(attribute='priority_score', reverse=True) %}
+{% set rem_findings = remediation_findings %}
 {% if rem_findings %}
 <p>Findings are ordered by priority score (highest first).</p>
 <table>
