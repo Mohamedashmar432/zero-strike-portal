@@ -21,6 +21,11 @@ class Scan(Document):
     branch: str | None = None
     scan_label: str | None = None
     repo_url: str | None = None
+    # Set at creation for cloud scans started from a connected repo (see ProjectRepo).
+    # None for local/CI scans and for cloud scans started from a hand-pasted repo_url —
+    # historical scans predating this field are also None; aggregations fall back to
+    # matching on repo_url for those.
+    project_repo_id: str | None = None
     # Transient: only set while status="queued" (cloud scans), cleared atomically at claim time.
     repo_token: str | None = None
     # Transient, same lifecycle as repo_token. "basic" for a Project's connected Azure DevOps repo
@@ -43,4 +48,5 @@ class Scan(Document):
             IndexModel([("status", 1), ("created_at", 1)]),  # oldest-queued claim query
             IndexModel([("project_id", 1), ("created_at", -1)]),
             IndexModel([("project_id", 1), ("scan_type", 1)]),
+            IndexModel([("project_repo_id", 1), ("created_at", 1)]),
         ]

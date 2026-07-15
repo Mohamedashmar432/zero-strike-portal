@@ -197,6 +197,79 @@ def test_update_branch_and_remove_repo(client):
     assert client.get(f"/api/v1/projects/{project['id']}/repos", headers=_headers(owner)).json() == []
 
 
+def test_reauth_repo_replaces_token_without_touching_other_repos(client, monkeypatch):
+    from app.services.repo_pat import github
+
+    async def _fake_list_repos(pat, query=None, page=1):
+        return [{"id": "1", "name": "repo", "full_name": "octocat/repo", "clone_url": "u", "private": False, "default_branch": "main"}]
+
+    monkeypatch.setattr(github, "list_repos", _fake_list_repos)
+
+    owner = register_and_login(client, email="prepo7@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    repo = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "pat": "ghp_old",
+            "organization": "octocat",
+            "repo_full_name": "octocat/repo",
+            "clone_url": "https://github.com/octocat/repo.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    ).json()
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos/{repo['id']}/reauth",
+        json={"pat": "ghp_new"},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 200
+
+    async def _check():
+        from app.models.project_repo import ProjectRepo
+
+        reloaded = await ProjectRepo.get(repo["id"])
+        assert security.decrypt_secret(reloaded.pat_encrypted) == "ghp_new"
+
+    asyncio.run(_check())
+
+
+def test_reauth_repo_rejects_invalid_pat(client, monkeypatch):
+    from app.services.repo_pat import RepoPatError, github
+
+    async def _fake_list_repos_ok(pat, query=None, page=1):
+        return [{"id": "1", "name": "repo", "full_name": "octocat/repo", "clone_url": "u", "private": False, "default_branch": "main"}]
+
+    monkeypatch.setattr(github, "list_repos", _fake_list_repos_ok)
+    owner = register_and_login(client, email="prepo8@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    repo = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "pat": "ghp_old",
+            "organization": "octocat",
+            "repo_full_name": "octocat/repo",
+            "clone_url": "https://github.com/octocat/repo.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    ).json()
+
+    async def _fake_list_repos_bad(pat, query=None, page=1):
+        raise RepoPatError("bad token")
+
+    monkeypatch.setattr(github, "list_repos", _fake_list_repos_bad)
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos/{repo['id']}/reauth",
+        json={"pat": "ghp_bad"},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 400
+
+
 def test_collaborator_cannot_add_repo(client):
     owner = register_and_login(client, email="prepo6a@zerostrike.dev")
     collaborator = register_and_login(client, email="prepo6b@zerostrike.dev")

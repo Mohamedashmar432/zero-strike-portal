@@ -27,3 +27,10 @@ export function inviteMember(projectId: string, email: string) {
 export function removeMember(projectId: string, memberId: string) {
   return apiFetch<void>(`/projects/${projectId}/members/${memberId}`, { method: "DELETE" });
 }
+
+export function updateMemberRole(projectId: string, memberId: string, role: "owner" | "collaborator") {
+  return apiFetch<ProjectMember>(`/projects/${projectId}/members/${memberId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  });
+}

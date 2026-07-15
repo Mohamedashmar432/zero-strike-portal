@@ -31,6 +31,10 @@ class ProjectRepoUpdateRequest(BaseModel):
     selected_branch: str
 
 
+class ProjectRepoReauthRequest(BaseModel):
+    pat: str
+
+
 class ProjectRepoResponse(BaseModel):
     id: str
     project_id: str

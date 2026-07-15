@@ -15,13 +15,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
 import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
+import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
 function portalOrigin(): string {
   const env = process.env.NEXT_PUBLIC_PORTAL_ORIGIN;
@@ -351,8 +352,12 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     queryKey: ["projects", projectId, "repos"],
     queryFn: () => listProjectRepos(projectId),
   });
-  const [source, setSource] = useState<"connected" | "manual">("manual");
+  // "Connected" (list of repos already synced via a saved credential) is always the
+  // starting point — "manual" (paste a URL + one-off token) is an opt-in fallback, not
+  // the default, so the common case never requires an extra click to get there.
+  const [source, setSource] = useState<"connected" | "manual">("connected");
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
+  const [connectingNewRepo, setConnectingNewRepo] = useState(false);
   const hasConnectedRepos = !!projectRepos?.length;
 
   const {
@@ -361,12 +366,6 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     setValue,
     formState: { errors },
   } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
-
-  // Once connected repos load, default to that tab so the common case (a repo is already set up)
-  // doesn't require an extra click.
-  if (hasConnectedRepos && source === "manual" && !selectedRepoId) {
-    setSource("connected");
-  }
 
   const mutation = useMutation({
     mutationFn: (values: NewCloudScanInput) => createCloudScan(projectId, values),
@@ -388,37 +387,71 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
 
   const needsRepoSelection = source === "connected" && !selectedRepoId;
 
+  if (connectingNewRepo) {
+    return (
+      <RepoConnectWizard
+        projectId={projectId}
+        onCancel={() => setConnectingNewRepo(false)}
+        onConnected={(repo) => {
+          queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+          setConnectingNewRepo(false);
+          setSource("connected");
+          selectConnectedRepo(repo);
+        }}
+      />
+    );
+  }
+
+  function switchToManual() {
+    setSource("manual");
+    setSelectedRepoId("");
+    setValue("project_repo_id", undefined);
+  }
+
+  function switchToConnected() {
+    setSource("connected");
+    setValue("repo_url", undefined);
+    setValue("repo_token", "");
+  }
+
   return (
     <form onSubmit={handleSubmit((values) => mutation.mutate(values))} className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        ZeroStrike clones the repository and scans it on the server. Use a repo already connected on the
-        Repositories tab, or provide a URL and token for a one-off scan.
+        ZeroStrike clones the repository and scans it on the server.
       </p>
-      {hasConnectedRepos && (
-        <Tabs
-          value={source}
-          onValueChange={(value) => {
-            setSource(value as typeof source);
-            setSelectedRepoId("");
-            setValue("project_repo_id", undefined);
-            setValue("repo_url", undefined);
-            setValue("repo_token", "");
-          }}
-        >
-          <TabsList>
-            <TabsTrigger value="connected">Use connected repo</TabsTrigger>
-            <TabsTrigger value="manual">Manual URL</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
 
-      {source === "connected" && hasConnectedRepos ? (
+      {source === "connected" ? (
         <div className="space-y-2">
           <Label>Repository & branch</Label>
-          <ConnectedRepoList repos={projectRepos ?? []} selectedId={selectedRepoId} onSelect={selectConnectedRepo} />
-          <p className="text-xs text-muted-foreground">
-            Need a different branch? Change it on the Repositories tab.
-          </p>
+          {!projectRepos ? (
+            <Skeleton className="h-24 w-full" />
+          ) : hasConnectedRepos ? (
+            <>
+              <ConnectedRepoList repos={projectRepos} selectedId={selectedRepoId} onSelect={selectConnectedRepo} />
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Need a different branch? Change it on the Repositories tab.
+                </p>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setConnectingNewRepo(true)}>
+                  + Connect a new repo
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-center">
+              <p className="text-sm text-muted-foreground">No repositories connected to this project yet.</p>
+              <Button type="button" className="mt-3" onClick={() => setConnectingNewRepo(true)}>
+                Connect a repository
+              </Button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={switchToManual}
+            className="text-xs font-medium text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Or scan a repo by URL instead (one-off, not saved)
+          </button>
         </div>
       ) : (
         <>
@@ -440,6 +473,13 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
             <Label htmlFor="cloud-token">Access token (private repos only)</Label>
             <Input id="cloud-token" type="password" autoComplete="off" {...register("repo_token")} />
           </div>
+          <button
+            type="button"
+            onClick={switchToConnected}
+            className="text-xs font-medium text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Use a connected repo instead
+          </button>
         </>
       )}
       <div className="space-y-2">

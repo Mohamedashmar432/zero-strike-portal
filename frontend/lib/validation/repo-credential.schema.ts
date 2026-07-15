@@ -13,3 +13,8 @@ export const repoCredentialSchema = z
     path: ["ado_project"],
   });
 export type RepoCredentialInput = z.infer<typeof repoCredentialSchema>;
+
+export const reauthRepoSchema = z.object({
+  pat: z.string().min(1, "Token is required"),
+});
+export type ReauthRepoInput = z.infer<typeof reauthRepoSchema>;

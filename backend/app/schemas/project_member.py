@@ -8,6 +8,10 @@ class MemberInviteRequest(BaseModel):
     email: EmailStr
 
 
+class MemberRoleUpdateRequest(BaseModel):
+    role: Literal["owner", "collaborator"]
+
+
 class MemberResponse(BaseModel):
     id: str
     project_id: str

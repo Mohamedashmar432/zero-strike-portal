@@ -6,13 +6,14 @@ import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
+import { StatCard } from "@/components/common/stat-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { projectRiskStatus, SeverityCountPills, SEVERITY_PILL_CLASS } from "@/components/severity/severity-count-pills";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -107,29 +108,7 @@ export default function DashboardPage() {
       />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
         {stats.map((stat) => (
-          <Card key={stat.label}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {stat.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1.5">
-              {isLoading ? (
-                <Skeleton className="h-9 w-12" />
-              ) : (
-                <span className={cn("block text-3xl font-semibold tracking-tight", stat.valueClassName)}>
-                  {stat.value}
-                </span>
-              )}
-              {stat.pillClassName ? (
-                <span className={cn("inline-block rounded-sm px-2 py-0.5 text-xs font-medium", stat.pillClassName)}>
-                  {stat.caption}
-                </span>
-              ) : (
-                <p className="text-xs text-muted-foreground">{stat.caption}</p>
-              )}
-            </CardContent>
-          </Card>
+          <StatCard key={stat.label} isLoading={isLoading} {...stat} />
         ))}
       </div>
 

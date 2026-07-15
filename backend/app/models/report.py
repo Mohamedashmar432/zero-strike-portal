@@ -15,6 +15,9 @@ class ScanStatsEmbedded(BaseModel):
     by_language: dict[str, int] = Field(default_factory=dict)
     by_category: dict[str, int] = Field(default_factory=dict)
     by_kind: dict[str, int] = Field(default_factory=dict)
+    # All 10 OWASP Top 10 codes always present (0-filled), not just categories seen in
+    # this scan's findings — see app.core.owasp.OWASP_CODES_ORDERED.
+    by_owasp: dict[str, int] = Field(default_factory=dict)
 
 
 class DiagnosticEmbedded(BaseModel):

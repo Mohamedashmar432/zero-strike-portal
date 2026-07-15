@@ -13,7 +13,8 @@ from app.models.user import User
 from app.services.repo_pat import RepoPatError, azure_devops, github
 
 
-async def _list_repos_for_validation(provider: str, pat: str, organization: str, ado_project: str | None) -> None:
+async def validate_pat(provider: str, pat: str, organization: str, ado_project: str | None) -> None:
+    """Raises RepoPatError if the token can't actually list repos for this provider/org."""
     if provider == "github":
         await github.list_repos(pat)
     else:
@@ -29,7 +30,7 @@ async def create_credential(
     label: str | None,
 ) -> RepoCredential:
     try:
-        await _list_repos_for_validation(provider, pat, organization, ado_project)
+        await validate_pat(provider, pat, organization, ado_project)
     except RepoPatError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 

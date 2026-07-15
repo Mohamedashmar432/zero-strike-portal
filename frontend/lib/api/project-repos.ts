@@ -44,3 +44,10 @@ export function updateProjectRepoBranch(projectId: string, repoId: string, selec
 export function removeProjectRepo(projectId: string, repoId: string) {
   return apiFetch<void>(`/projects/${projectId}/repos/${repoId}`, { method: "DELETE" });
 }
+
+export function reauthProjectRepo(projectId: string, repoId: string, pat: string) {
+  return apiFetch<ProjectRepo>(`/projects/${projectId}/repos/${repoId}/reauth`, {
+    method: "POST",
+    body: JSON.stringify({ pat }),
+  });
+}

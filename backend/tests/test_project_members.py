@@ -82,7 +82,10 @@ def test_duplicate_invite_is_conflict(client):
     assert r.status_code == 409
 
 
-def test_collaborator_cannot_invite(client):
+def test_collaborator_can_invite(client):
+    # Any project member can invite — only removing *others* and role changes are
+    # owner/admin-gated (see test_member_can_remove_self_but_not_owner and
+    # test_only_owner_or_admin_can_change_role below).
     owner = register_and_login(client, email="mowner5@zerostrike.dev")
     collab = register_and_login(client, email="collabm5@zerostrike.dev")
     project = _create_project(client, _headers(owner))
@@ -96,6 +99,19 @@ def test_collaborator_cannot_invite(client):
         f"/api/v1/projects/{project['id']}/members",
         json={"email": "someoneelse5@zerostrike.dev"},
         headers=_headers(collab),
+    )
+    assert r.status_code == 201
+
+
+def test_non_member_cannot_invite(client):
+    owner = register_and_login(client, email="mowner5b@zerostrike.dev")
+    outsider = register_and_login(client, email="outsider5b@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/members",
+        json={"email": "someoneelse5b@zerostrike.dev"},
+        headers=_headers(outsider),
     )
     assert r.status_code == 403
 
@@ -139,5 +155,59 @@ def test_non_member_cannot_remove_others(client):
 
     r = client.delete(
         f"/api/v1/projects/{project['id']}/members/{invite['id']}", headers=_headers(outsider)
+    )
+    assert r.status_code == 403
+
+
+def test_owner_can_promote_collaborator_to_owner(client):
+    owner = register_and_login(client, email="mowner8@zerostrike.dev")
+    register_and_login(client, email="collabm8@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    invite = client.post(
+        f"/api/v1/projects/{project['id']}/members",
+        json={"email": "collabm8@zerostrike.dev"},
+        headers=_headers(owner),
+    ).json()
+
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}/members/{invite['id']}",
+        json={"role": "owner"},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 200
+    assert r.json()["role"] == "owner"
+
+
+def test_cannot_demote_the_last_owner(client):
+    owner = register_and_login(client, email="mowner9@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    owner_member_id = next(
+        m["id"]
+        for m in client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()
+        if m["role"] == "owner"
+    )
+
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}/members/{owner_member_id}",
+        json={"role": "collaborator"},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 409
+
+
+def test_collaborator_cannot_change_roles(client):
+    owner = register_and_login(client, email="mowner10@zerostrike.dev")
+    collab = register_and_login(client, email="collabm10@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    invite = client.post(
+        f"/api/v1/projects/{project['id']}/members",
+        json={"email": "collabm10@zerostrike.dev"},
+        headers=_headers(owner),
+    ).json()
+
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}/members/{invite['id']}",
+        json={"role": "owner"},
+        headers=_headers(collab),
     )
     assert r.status_code == 403

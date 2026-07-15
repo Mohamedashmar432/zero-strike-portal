@@ -1,52 +1,32 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, GitBranch, KeyRound, LayoutGrid, List as ListIcon, Plus, Search } from "lucide-react";
+import { ChevronDown, LayoutGrid, List as ListIcon, Plus } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
+import { FilterBar } from "@/components/common/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
-import { Badge } from "@/components/ui/badge";
+import { ScanStatusSummaryPills } from "@/components/scans/scan-status-summary-pills";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { listProjects } from "@/lib/api/projects";
+import { getProjectsStats, listProjects, type ProjectStatsItem } from "@/lib/api/projects";
 
 type StatusFilter = "all" | "active" | "archived";
 
-function ApiKeysQuickLink({ projectId }: { projectId: string }) {
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      nativeButton={false}
-      render={<Link href={`/projects/${projectId}?tab=keys`} />}
-    >
-      <KeyRound />
-      Project Tokens
-    </Button>
-  );
-}
-
-function RepoQuickLink({ projectId }: { projectId: string }) {
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      nativeButton={false}
-      render={<Link href={`/projects/${projectId}?tab=repos`} />}
-    >
-      <GitBranch />
-      Repositories
-    </Button>
-  );
-}
+const EMPTY_STATS: ProjectStatsItem = {
+  project_id: "",
+  total_findings: 0,
+  findings_by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+  scan_status_counts: { pending: 0, queued: 0, running: 0, completed: 0, failed: 0 },
+  risk_repo_count: 0,
+  total_repo_count: 0,
+};
 
 function ProjectsPageContent() {
   const searchParams = useSearchParams();
@@ -58,6 +38,13 @@ function ProjectsPageContent() {
     queryKey: ["projects"],
     queryFn: () => listProjects(),
   });
+  const { data: stats } = useQuery({
+    queryKey: ["projects", "stats"],
+    queryFn: () => getProjectsStats(),
+  });
+  function statsFor(projectId: string): ProjectStatsItem {
+    return stats?.items[projectId] ?? EMPTY_STATS;
+  }
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -121,48 +108,48 @@ function ProjectsPageContent() {
         }
       />
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1 sm:max-w-xs">
-          <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search projects…"
-            className="pl-8"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-          <SelectTrigger size="sm" className="w-full sm:w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="archived">Archived</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search projects…"
+        facets={[
+          {
+            type: "select",
+            value: statusFilter,
+            onChange: (v) => setStatusFilter(v as StatusFilter),
+            options: [
+              { value: "all", label: "All statuses" },
+              { value: "active", label: "Active" },
+              { value: "archived", label: "Archived" },
+            ],
+          },
+        ]}
+      />
 
       {view === "grid" ? (
         <DataTableCard bare isLoading={isLoading} isError={isError} errorMessage="Failed to load projects." isEmpty={isEmpty} emptyState={emptyState}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((p) => (
+            {filtered.map((p) => {
+              const s = statsFor(p.id);
+              return (
               <Card key={p.id}>
                 <CardContent className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
                       {p.name}
                     </Link>
-                    <Badge variant="secondary" className="font-mono uppercase">
-                      {p.my_role}
-                    </Badge>
+                    {s.risk_repo_count > 0 && (
+                      <span className="rounded-sm bg-severity-critical/15 px-2 py-0.5 text-xs font-medium text-severity-critical">
+                        {s.risk_repo_count} at risk
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {p.scan_count} scan{p.scan_count === 1 ? "" : "s"} · {p.is_archived ? "Archived" : "Active"}
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    <RepoQuickLink projectId={p.id} />
-                    <ApiKeysQuickLink projectId={p.id} />
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{s.total_findings} findings</span>
+                    <ScanStatusSummaryPills counts={s.scan_status_counts} />
                   </div>
                   <button
                     type="button"
@@ -179,7 +166,8 @@ function ProjectsPageContent() {
                   )}
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         </DataTableCard>
       ) : (
@@ -188,15 +176,17 @@ function ProjectsPageContent() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Scans</TableHead>
+                <TableHead>Findings</TableHead>
+                <TableHead>Scan Status</TableHead>
+                <TableHead>At-Risk Repos</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead />
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((p) => (
+              {filtered.map((p) => {
+                const s = statsFor(p.id);
+                return (
                 <Fragment key={p.id}>
                   <TableRow className="cursor-pointer" onClick={() => toggleExpanded(p.id)}>
                     <TableCell>
@@ -208,19 +198,20 @@ function ProjectsPageContent() {
                         {p.name}
                       </Link>
                     </TableCell>
+                    <TableCell>{s.total_findings}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="font-mono uppercase">
-                        {p.my_role}
-                      </Badge>
+                      <ScanStatusSummaryPills counts={s.scan_status_counts} />
                     </TableCell>
-                    <TableCell>{p.scan_count}</TableCell>
+                    <TableCell>
+                      {s.risk_repo_count > 0 ? (
+                        <span className="font-mono font-semibold text-severity-critical">
+                          {s.risk_repo_count} / {s.total_repo_count}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{s.total_repo_count}</span>
+                      )}
+                    </TableCell>
                     <TableCell>{p.is_archived ? "Archived" : "Active"}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
-                        <RepoQuickLink projectId={p.id} />
-                        <ApiKeysQuickLink projectId={p.id} />
-                      </div>
-                    </TableCell>
                     <TableCell>
                       <ChevronDown
                         className={cn("size-4 text-muted-foreground transition-transform", expanded.has(p.id) && "rotate-180")}
@@ -238,7 +229,8 @@ function ProjectsPageContent() {
                     </TableRow>
                   )}
                 </Fragment>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </DataTableCard>

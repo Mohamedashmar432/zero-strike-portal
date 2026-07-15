@@ -69,19 +69,39 @@ NEXT_PUBLIC_PORTAL_ORIGIN=http://localhost:8000
 
 ## 5. Install & run
 
-```
-# backend, in one terminal
-cd backend
-python -m venv .venv && ./.venv/Scripts/pip install -e ".[dev]"
-./.venv/Scripts/uvicorn app.main:app --reload
+Use two separate terminals — both servers run in the foreground and stay attached
+to their terminal (Ctrl+C to stop).
 
-# frontend, in another terminal
+**Terminal 1 — backend:**
+```
+cd backend
+python -m venv .venv
+./.venv/Scripts/pip install -e ".[dev]"
+./.venv/Scripts/uvicorn app.main:app --reload
+```
+The venv only needs creating/installing once; on later runs just re-run the
+`uvicorn` line. After "Application startup complete", it's serving on :8000 — but
+expect a several-second pause at "Waiting for application startup" first time it
+boots: that's `lifespan` opening the connection to your Atlas cluster over the
+network, not a hang.
+
+**Terminal 2 — frontend:**
+```
 cd frontend
 npm install
 npm run dev
 ```
+Serves on :3000 once you see "Ready".
 
-Backend on :8000, frontend on :3000. Open http://localhost:3000.
+Open http://localhost:3000.
+
+If either port is already taken (a previous server still running in another
+window), `npm run dev` auto-picks the next free port and prints it — use that URL
+instead, or find and stop the stale process:
+```
+netstat -ano | findstr :8000     # or :3000 — last column is the PID
+taskkill /PID <pid> /F
+```
 
 ## 6. Seed test users
 

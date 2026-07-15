@@ -12,6 +12,7 @@ from app.models.project_repo import ProjectRepo
 from app.models.user import User
 from app.schemas.project_repo import ProjectRepoCreateRequest
 from app.services import repo_credential_service
+from app.services.repo_pat import RepoPatError
 
 
 async def add_repo(project_id: str, payload: ProjectRepoCreateRequest, user: User) -> ProjectRepo:
@@ -75,3 +76,19 @@ async def update_branch(project_id: str, repo_id: str, branch: str) -> ProjectRe
 
 def decrypt_pat(repo: ProjectRepo) -> str:
     return security.decrypt_secret(repo.pat_encrypted)
+
+
+async def reauth_repo(project_id: str, repo_id: str, new_pat: str) -> ProjectRepo:
+    """Replace this repo's stored token in place. Scoped to this one repo only — never
+    touches the RepoCredential it may have originally been connected from (see
+    ProjectRepo's docstring: a connected repo's credential is intentionally decoupled
+    from any saved credential)."""
+    repo = await get_project_repo_or_404(project_id, repo_id)
+    try:
+        await repo_credential_service.validate_pat(repo.provider, new_pat, repo.organization, repo.ado_project)
+    except RepoPatError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    repo.pat_encrypted = security.encrypt_secret(new_pat)
+    repo.updated_at = datetime.now(timezone.utc)
+    await repo.save()
+    return repo

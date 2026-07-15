@@ -33,11 +33,15 @@ export function RepoConnectWizard({
   onConnected,
   cancelHref,
   cancelLabel = "Cancel",
+  onCancel,
 }: {
   projectId: string;
   onConnected: (repo: ProjectRepo) => void;
-  cancelHref: string;
+  // Exactly one of cancelHref (navigates away, standalone-page usage) or onCancel
+  // (pops back to a caller-managed step, inline-embedded usage) should be given.
+  cancelHref?: string;
   cancelLabel?: string;
+  onCancel?: () => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -194,9 +198,15 @@ export function RepoConnectWizard({
           </div>
         )}
         <div className="flex items-center justify-between border-t border-border pt-4">
-          <Button variant="ghost" nativeButton={false} render={<Link href={cancelHref} />}>
-            {cancelLabel}
-          </Button>
+          {onCancel ? (
+            <Button variant="ghost" type="button" onClick={onCancel}>
+              {cancelLabel}
+            </Button>
+          ) : (
+            <Button variant="ghost" nativeButton={false} render={<Link href={cancelHref!} />}>
+              {cancelLabel}
+            </Button>
+          )}
           {selectedBranch && (
             <Button onClick={() => add.mutate()} disabled={add.isPending}>
               {add.isPending ? "Connecting…" : "Connect repository"}

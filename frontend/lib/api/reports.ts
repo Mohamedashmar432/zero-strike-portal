@@ -10,6 +10,7 @@ export type ReportStats = {
   by_language: Record<string, number>;
   by_category: Record<string, number>;
   by_kind: Record<string, number>;
+  by_owasp: Record<string, number>;
 };
 
 export type Report = {

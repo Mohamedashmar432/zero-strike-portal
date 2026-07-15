@@ -46,6 +46,7 @@ class ScanResponse(BaseModel):
     branch: str | None
     scan_label: str | None
     repo_url: str | None
+    project_repo_id: str | None
     ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None
     created_by: str | None
     started_at: datetime | None

@@ -18,6 +18,7 @@ export type Scan = {
   branch: string | null;
   scan_label: string | null;
   repo_url: string | null;
+  project_repo_id: string | null;
   ci_provider: CiProvider | null;
   created_by: string | null;
   started_at: string | null;
