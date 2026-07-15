@@ -1,6 +1,7 @@
 import { apiFetch } from "./client";
 import type { ScanStatus } from "./scans";
 import type { Page } from "./users";
+import type { PriorityTier } from "@/lib/priority";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 export type FindingKind = "sast" | "secret" | "sca" | "config";
@@ -17,6 +18,7 @@ export type Finding = {
   id: string;
   scan_id: string;
   project_id: string;
+  project_repo_id: string | null;
   finding_id: string | null;
   fingerprint: string | null;
   rule_id: string | null;
@@ -24,6 +26,8 @@ export type Finding = {
   category: string | null;
   severity: Severity | null;
   confidence: string | null;
+  priority_score: number | null;
+  priority_tier: PriorityTier | null;
   message: string;
   location: FindingLocation;
   language: string | null;
@@ -61,11 +65,20 @@ export type { ScanStatus };
 
 export function listFindings(
   scanId: string,
-  opts: { severity?: Severity; kind?: FindingKind; page?: number; pageSize?: number } = {}
+  opts: {
+    severity?: Severity;
+    kind?: FindingKind;
+    owasp?: string;
+    priority?: PriorityTier;
+    page?: number;
+    pageSize?: number;
+  } = {}
 ) {
   const params = new URLSearchParams();
   if (opts.severity) params.set("severity", opts.severity);
   if (opts.kind) params.set("kind", opts.kind);
+  if (opts.owasp) params.set("owasp", opts.owasp);
+  if (opts.priority) params.set("priority", opts.priority);
   params.set("page", String(opts.page ?? 1));
   params.set("page_size", String(opts.pageSize ?? 50));
   return apiFetch<Page<Finding>>(`/scans/${scanId}/findings?${params.toString()}`);
