@@ -222,6 +222,23 @@ def test_scan_report_and_findings_readable(client):
     assert critical["items"][0]["rule_id"] == "ZS-PY-001"
 
 
+def test_findings_expose_and_filter_by_priority(client):
+    owner = register_and_login(client, email="sowner12@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    findings = client.get(f"/api/v1/scans/{scan_id}/findings", headers=_headers(owner)).json()
+    by_rule = {f["rule_id"]: f for f in findings["items"]}
+    assert by_rule["ZS-PY-001"]["priority_score"] == 10.0
+    assert by_rule["ZS-PY-001"]["priority_tier"] == "critical"
+
+    critical_priority = client.get(
+        f"/api/v1/scans/{scan_id}/findings?priority=critical", headers=_headers(owner)
+    ).json()
+    assert critical_priority["total"] == 1
+    assert critical_priority["items"][0]["rule_id"] == "ZS-PY-001"
+
+
 def test_delete_project_cascades_scans_findings_reports(client):
     owner = register_and_login(client, email="sowner11@zerostrike.dev")
     project = _create_project(client, _headers(owner))

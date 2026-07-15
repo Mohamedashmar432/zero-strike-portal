@@ -171,6 +171,7 @@ class FindingResponse(BaseModel):
     id: str
     scan_id: str
     project_id: str
+    project_repo_id: str | None
     finding_id: str | None
     fingerprint: str | None
     rule_id: str | None
@@ -178,6 +179,8 @@ class FindingResponse(BaseModel):
     category: str | None
     severity: str | None
     confidence: str | None
+    priority_score: float | None
+    priority_tier: str | None
     message: str
     location: LocationEmbedded
     language: str | None

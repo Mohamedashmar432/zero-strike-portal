@@ -28,6 +28,7 @@ def _to_finding_response(f: Finding) -> FindingResponse:
         id=str(f.id),
         scan_id=f.scan_id,
         project_id=f.project_id,
+        project_repo_id=f.project_repo_id,
         finding_id=f.finding_id,
         fingerprint=f.fingerprint,
         rule_id=f.rule_id,
@@ -35,6 +36,8 @@ def _to_finding_response(f: Finding) -> FindingResponse:
         category=f.category,
         severity=f.severity,
         confidence=f.confidence,
+        priority_score=f.priority_score,
+        priority_tier=f.priority_tier,
         message=f.message,
         location=f.location,
         language=f.language,
@@ -68,6 +71,7 @@ def _to_response(scan: Scan) -> ScanResponse:
         branch=scan.branch,
         scan_label=scan.scan_label,
         repo_url=scan.repo_url,
+        project_repo_id=scan.project_repo_id,
         ci_provider=scan.ci_provider,
         created_by=scan.created_by,
         started_at=scan.started_at,
@@ -124,6 +128,7 @@ async def create_scan(
         repo_token_auth_scheme=repo_token_auth_scheme,
         scan_label=payload.scan_label,
         repo_url=repo_url,
+        project_repo_id=payload.project_repo_id,
         branch=branch,
         created_by=str(user.id),
         created_at=now,
@@ -222,6 +227,8 @@ async def list_scan_findings(
     scan_id: str,
     severity: str | None = Query(None),
     kind: str | None = Query(None),
+    owasp: str | None = Query(None),
+    priority: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     user: User = Depends(get_current_user),
@@ -234,6 +241,10 @@ async def list_scan_findings(
         criteria.append(Finding.severity == severity)
     if kind:
         criteria.append(Finding.kind == kind)
+    if owasp:
+        criteria.append(Finding.owasp == owasp)
+    if priority:
+        criteria.append(Finding.priority_tier == priority)
 
     query = Finding.find(*criteria)
     total = await query.count()
