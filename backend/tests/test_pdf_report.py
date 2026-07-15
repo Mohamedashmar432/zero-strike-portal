@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from tests.test_auth_flow import register_and_login
@@ -74,3 +75,64 @@ def test_scan_report_pdf_forbidden_for_non_member(client):
 
     r = client.get(f"/api/v1/scans/{scan_id}/report/pdf", headers=_headers(outsider))
     assert r.status_code == 403
+
+
+def test_render_scan_report_html_standard_is_unaffected_by_the_new_param(client):
+    async def run():
+        from app.models.finding import Finding
+        from app.models.report import Report
+        from app.models.scan import Scan
+        from app.services import pdf_report_service
+
+        owner_tokens = register_and_login(client, email="pdfowner5@zerostrike.dev")
+        project = _create_project(client, _headers(owner_tokens))
+        scan_id = _create_scan(
+            client, _headers(owner_tokens), project["id"], report_bytes=_FIXTURE.read_bytes()
+        )
+        scan = await Scan.get(scan_id)
+        report = await Report.find_one(Report.scan_id == scan_id)
+        findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+
+        html = pdf_report_service.render_scan_report_html(scan, report, findings, "standard")
+        assert "ZeroStrike Scan Report" in html
+
+    asyncio.run(run())
+
+
+def test_render_scan_report_html_executive_includes_overall_risk_and_canonical_owasp_titles(client):
+    async def run():
+        from app.models.finding import Finding
+        from app.models.report import Report
+        from app.models.scan import Scan
+        from app.services import pdf_report_service
+
+        owner_tokens = register_and_login(client, email="pdfowner6@zerostrike.dev")
+        project = _create_project(client, _headers(owner_tokens))
+        scan_id = _create_scan(
+            client, _headers(owner_tokens), project["id"], report_bytes=_FIXTURE.read_bytes()
+        )
+        scan = await Scan.get(scan_id)
+        report = await Report.find_one(Report.scan_id == scan_id)
+        findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+
+        html = pdf_report_service.render_scan_report_html(
+            scan, report, findings, "executive", project_name="Demo"
+        )
+        assert "Overall Risk: CRITICAL" in html
+        assert "Broken Access Control" in html
+        assert "10.0/10" in html
+
+    asyncio.run(run())
+
+
+def test_scan_report_pdf_uses_executive_template_when_project_overrides(client):
+    owner = register_and_login(client, email="pdfowner7@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    client.patch(
+        f"/api/v1/projects/{project['id']}", json={"report_template": "executive"}, headers=_headers(owner)
+    )
+    scan_id = _create_scan(client, _headers(owner), project["id"], report_bytes=_FIXTURE.read_bytes())
+
+    r = client.get(f"/api/v1/scans/{scan_id}/report/pdf", headers=_headers(owner))
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"

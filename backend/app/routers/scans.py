@@ -16,6 +16,7 @@ from app.services import (
     pdf_report_service,
     project_repo_service,
     project_service,
+    report_template_service,
     scan_queue_service,
     scan_service,
 )
@@ -213,8 +214,10 @@ async def get_scan_report_pdf(scan_id: str, user: User = Depends(get_current_use
     if not report:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No report for this scan yet")
 
+    project = await project_service.get_project_or_404(scan.project_id)
+    template = await report_template_service.get_effective_template(project)
     findings = await Finding.find(Finding.scan_id == scan_id).to_list()
-    pdf_bytes = await pdf_report_service.render_scan_report_pdf(scan, report, findings)
+    pdf_bytes = await pdf_report_service.render_scan_report_pdf(scan, report, findings, template, project.name)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
