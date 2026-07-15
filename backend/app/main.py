@@ -20,6 +20,7 @@ from app.routers import (
     downloads,
     projects,
     repo_credentials,
+    report_templates,
     scanner_scans,
     scans,
     users,
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(repo_credentials.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
+    app.include_router(report_templates.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):
