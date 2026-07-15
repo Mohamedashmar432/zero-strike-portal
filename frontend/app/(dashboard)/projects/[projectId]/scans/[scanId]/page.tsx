@@ -477,7 +477,9 @@ export default function ScanDetailPage() {
             isError={false}
             isEmpty={!!findings && visibleFindings.length === 0}
             emptyState={
-              <EmptyState title={`No findings${severity || kind || search ? " match this filter" : ""}.`} />
+              <EmptyState
+                title={`No findings${severity || kind || owaspFilter || priority || search ? " match this filter" : ""}.`}
+              />
             }
           >
             <div className="space-y-2">
