@@ -40,7 +40,7 @@ export default function ReportTemplatesSettingsPage() {
       ) : (
         <ReportTemplatePicker
           value={data.default_report_template}
-          onChange={(v) => mutation.mutate(v as "standard" | "executive")}
+          onChange={(v: ReportTemplateValue) => mutation.mutate(v as "standard" | "executive")}
         />
       )}
     </div>
