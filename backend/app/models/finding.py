@@ -53,6 +53,10 @@ class TaintContextEmbedded(BaseModel):
 class Finding(Document):
     scan_id: str
     project_id: str
+    # Denormalized from the owning Scan at ingestion time (see report_ingestion_service) so
+    # per-repo aggregations (risk-repo-count, OWASP-by-repo) never need to join `scans`.
+    # None for findings ingested before this field existed.
+    project_repo_id: str | None = None
     finding_id: str | None = None
     fingerprint: str | None = None
     rule_id: str | None = None
@@ -60,6 +64,11 @@ class Finding(Document):
     category: str | None = None
     severity: Literal["critical", "high", "medium", "low", "info"] | None = None
     confidence: str | None = None
+    # Computed at ingestion time from severity + OWASP relevance + confidence — see
+    # app.core.priority.compute_priority. None for findings ingested before this field
+    # existed; self-heals on the next (re-)scan since ingestion always replaces findings.
+    priority_score: float | None = None
+    priority_tier: Literal["critical", "high", "medium", "low"] | None = None
     message: str
     location: LocationEmbedded
     language: str | None = None
@@ -82,6 +91,7 @@ class Finding(Document):
         indexes = [
             IndexModel([("scan_id", 1)]),
             IndexModel([("project_id", 1), ("severity", 1), ("created_at", -1)]),
+            IndexModel([("project_id", 1), ("project_repo_id", 1), ("severity", 1)]),
             IndexModel([("fingerprint", 1), ("project_id", 1)]),
             IndexModel([("rule_id", 1)]),
             IndexModel([("language", 1)]),
