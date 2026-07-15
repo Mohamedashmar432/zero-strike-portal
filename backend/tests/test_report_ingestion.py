@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.scan import Scan
-from app.schemas.report import GoFindingIn, GoLocationIn, GoReportIn
+from app.schemas.report import GoFindingIn, GoLocationIn, GoReportIn, GoStatsIn
 from app.services import report_ingestion_service as ingest_svc
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
@@ -55,6 +55,27 @@ def test_finding_field_mapping_by_kind(client):
     assert config.config.key == "DEBUG"
 
 
+def test_map_finding_computes_priority_score_and_tier():
+    report = _load()
+    by_kind = {f.kind: ingest_svc._map_finding("s1", "p1", f) for f in report.findings}
+
+    sast = by_kind["sast"]  # critical, high confidence, OWASP-tagged
+    assert sast.priority_score == 10.0
+    assert sast.priority_tier == "critical"
+
+    secret = by_kind["secret"]  # high, high confidence, no OWASP tag
+    assert secret.priority_score == 6.5
+    assert secret.priority_tier == "high"
+
+    sca = by_kind["sca"]  # medium, high confidence, OWASP-tagged
+    assert sca.priority_score == 6.0
+    assert sca.priority_tier == "high"
+
+    config = by_kind["config"]  # low, medium confidence, OWASP-tagged
+    assert config.priority_score == 3.5
+    assert config.priority_tier == "low"
+
+
 def test_duration_ns_to_ms_and_stats():
     report = _load()
     assert report.duration_ns == 4_200_000_000
@@ -83,6 +104,45 @@ def test_missing_message_falls_back_to_rule_name(client):
     f = GoFindingIn(rule_name="Some Rule", location=GoLocationIn(file="a.py"))
     mapped = ingest_svc._map_finding("s1", "p1", f)
     assert mapped.message == "Some Rule"
+
+
+def test_normalize_finding_path_strips_root_prefix():
+    assert (
+        ingest_svc.normalize_finding_path("/tmp/zs-clones/abc/src/app.py", "/tmp/zs-clones/abc")
+        == "src/app.py"
+    )
+    # Windows-style separators, still under the same root.
+    assert (
+        ingest_svc.normalize_finding_path(r"C:\scans\abc\src\app.py", r"C:\scans\abc")
+        == "src/app.py"
+    )
+
+
+def test_normalize_finding_path_leaves_relative_paths_untouched():
+    # CLI/CI-uploaded reports: root_path may be "." or unrelated to the file path.
+    assert ingest_svc.normalize_finding_path("app/db.py", ".") == "app/db.py"
+    assert ingest_svc.normalize_finding_path("app/db.py", None) == "app/db.py"
+
+
+def test_map_finding_stamps_project_repo_id_and_normalizes_path():
+    f = GoFindingIn(message="x", location=GoLocationIn(file="/tmp/zs-clones/abc/app/db.py"))
+    mapped = ingest_svc._map_finding("s1", "p1", f, project_repo_id="repo-1", root_path="/tmp/zs-clones/abc")
+    assert mapped.project_repo_id == "repo-1"
+    assert mapped.location.file == "app/db.py"
+
+
+def test_stats_tallies_by_owasp_across_all_ten_codes():
+    findings = [
+        ingest_svc._map_finding("s1", "p1", GoFindingIn(message="x", location=GoLocationIn(file="a.py"), owasp=["A05:2025"])),
+        ingest_svc._map_finding("s1", "p1", GoFindingIn(message="x", location=GoLocationIn(file="b.py"), owasp=["A05:2025", "A03:2025"])),
+        ingest_svc._map_finding("s1", "p1", GoFindingIn(message="x", location=GoLocationIn(file="c.py"), owasp=["not-a-real-code"])),
+    ]
+    stats = ingest_svc._stats(GoStatsIn(), findings)
+    assert stats.by_owasp["A05:2025"] == 2
+    assert stats.by_owasp["A03:2025"] == 1
+    assert stats.by_owasp["A01:2025"] == 0
+    assert len(stats.by_owasp) == 10
+    assert "not-a-real-code" not in stats.by_owasp
 
 
 def test_ingest_writes_findings_report_and_completes_scan(client):

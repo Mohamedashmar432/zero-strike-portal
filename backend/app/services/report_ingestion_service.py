@@ -6,6 +6,8 @@ service — the single place the Go PascalCase report becomes portal data.
 
 from datetime import datetime, timezone
 
+from app.core.owasp import OWASP_CODES_ORDERED
+from app.core.priority import compute_priority
 from app.models.finding import (
     ConfigEmbedded,
     DependencyEmbedded,
@@ -29,9 +31,30 @@ _SEVERITIES = {"critical", "high", "medium", "low", "info"}
 _KINDS = {"sast", "secret", "sca", "config"}
 
 
-def _location(loc: GoLocationIn) -> LocationEmbedded:
+def normalize_finding_path(file: str, root_path: str | None) -> str:
+    """Strip the scan's absolute root/clone-workdir prefix so `file` is repo-relative.
+
+    Cloud scans invoke the scanner with an absolute temp clone dir as its root-path
+    argument, and the scanner echoes that same prefix back verbatim in every finding's
+    file path (it does no relativizing of its own) — `root_path` here is that identical
+    string, taken straight from the report's own RootPath field, so a plain prefix-strip
+    is reliable with no cross-OS path-library handling needed. CLI/CI-uploaded reports
+    usually pass an already-relative root (e.g. "."), which this leaves untouched.
+    """
+    if not file or not root_path:
+        return file
+    norm_file = file.replace("\\", "/")
+    norm_root = root_path.replace("\\", "/").rstrip("/")
+    if norm_file == norm_root:
+        return ""
+    if norm_file.startswith(norm_root + "/"):
+        return norm_file[len(norm_root) + 1 :]
+    return file
+
+
+def _location(loc: GoLocationIn, root_path: str | None = None) -> LocationEmbedded:
     return LocationEmbedded(
-        file=loc.file or "",
+        file=normalize_finding_path(loc.file or "", root_path),
         start_line=loc.start_line,
         end_line=loc.end_line,
         start_col=loc.start_col,
@@ -39,19 +62,30 @@ def _location(loc: GoLocationIn) -> LocationEmbedded:
     )
 
 
-def _map_finding(scan_id: str, project_id: str, f: GoFindingIn) -> Finding:
+def _map_finding(
+    scan_id: str,
+    project_id: str,
+    f: GoFindingIn,
+    project_repo_id: str | None = None,
+    root_path: str | None = None,
+) -> Finding:
+    severity = f.severity if f.severity in _SEVERITIES else None
+    priority_score, priority_tier = compute_priority(severity, f.owasp, f.confidence)
     return Finding(
         scan_id=scan_id,
         project_id=project_id,
+        project_repo_id=project_repo_id,
         finding_id=f.finding_id,
         fingerprint=f.fingerprint,
         rule_id=f.rule_id,
         rule_name=f.rule_name,
         category=f.category,
-        severity=f.severity if f.severity in _SEVERITIES else None,
+        severity=severity,
         confidence=f.confidence,
+        priority_score=priority_score,
+        priority_tier=priority_tier,
         message=f.message or f.rule_name or "(no message)",
-        location=_location(f.location),
+        location=_location(f.location, root_path),
         language=f.language or None,
         evidence=[
             EvidenceEmbedded(snippet=e.snippet, start_line=e.start_line, end_line=e.end_line)
@@ -93,7 +127,7 @@ def _map_finding(scan_id: str, project_id: str, f: GoFindingIn) -> Finding:
                 source_var=f.taint_context.source_var,
                 source_expr=f.taint_context.source_expr,
                 sink=f.taint_context.sink,
-                path=[_location(p) for p in f.taint_context.path],
+                path=[_location(p, root_path) for p in f.taint_context.path],
             )
             if f.taint_context
             else None
@@ -101,7 +135,12 @@ def _map_finding(scan_id: str, project_id: str, f: GoFindingIn) -> Finding:
     )
 
 
-def _stats(s: GoStatsIn) -> ScanStatsEmbedded:
+def _stats(s: GoStatsIn, findings: list[Finding] | None = None) -> ScanStatsEmbedded:
+    by_owasp = dict.fromkeys(OWASP_CODES_ORDERED, 0)
+    for finding in findings or []:
+        for code in finding.owasp:
+            if code in by_owasp:
+                by_owasp[code] += 1
     return ScanStatsEmbedded(
         files_scanned=s.files_scanned,
         files_skipped=s.files_skipped,
@@ -112,6 +151,7 @@ def _stats(s: GoStatsIn) -> ScanStatsEmbedded:
         by_language=s.by_language,
         by_category=s.by_category,
         by_kind=s.by_kind,
+        by_owasp=by_owasp,
     )
 
 
@@ -136,7 +176,10 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     await Finding.find(Finding.scan_id == scan_id).delete()
     await Report.find(Report.scan_id == scan_id).delete()
 
-    findings = [_map_finding(scan_id, project_id, f) for f in report.findings]
+    findings = [
+        _map_finding(scan_id, project_id, f, scan.project_repo_id, report.root_path)
+        for f in report.findings
+    ]
     if findings:
         await Finding.insert_many(findings)
 
@@ -153,7 +196,7 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         git_commit=report.git_commit,
         branch=report.branch,
         hostname=report.hostname,
-        stats=_stats(report.stats),
+        stats=_stats(report.stats, findings),
         diagnostics=[_diagnostic(d) for d in report.diagnostics],
         raw_json=raw_json,
         json_uploaded_at=now,
