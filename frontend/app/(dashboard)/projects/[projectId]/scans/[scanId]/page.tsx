@@ -1,48 +1,46 @@
 "use client";
 
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { ChevronRight, Download, Search, Sparkles, Wand2 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Download, RefreshCw, Sparkles, Wand2 } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
+import { CodeSnippet } from "@/components/findings/code-snippet";
+import { OwaspChart } from "@/components/common/owasp-chart";
+import { FilterBar } from "@/components/common/filter-bar";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
+import { StatCard } from "@/components/common/stat-card";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
+import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
 import { listFindings, type Finding, type FindingKind, type Severity } from "@/lib/api/findings";
 import { getProject } from "@/lib/api/projects";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
-import { getScan, listScans } from "@/lib/api/scans";
+import { createCloudScan, getScan, type Scan } from "@/lib/api/scans";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const KINDS: FindingKind[] = ["sast", "secret", "sca", "config"];
-
-// Not a real CVSS score — a conventional severity-tier approximation, shown so the
-// findings list has the "score" column the design calls for without fabricating
-// false precision.
-const SEVERITY_SCORE: Record<Severity, number> = { critical: 9.5, high: 7.5, medium: 5, low: 2.5, info: 1 };
-const SEVERITY_SCORE_CLASS: Record<Severity, string> = {
-  critical: "text-severity-critical",
-  high: "text-severity-high",
-  medium: "text-severity-medium",
-  low: "text-severity-low",
-  info: "text-severity-info",
-};
-
-const trendChartConfig: ChartConfig = {
-  total: { label: "Findings", color: "var(--primary)" },
-};
+const ALL = "__all__";
 
 function fileLine(file: string, line: number | null) {
   return line ? `${file}:${line}` : file;
@@ -68,6 +66,74 @@ function timeAgo(dateStr: string) {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+// Re-scanning a manual (non-connected) repo needs the token re-entered — the original
+// token is transient and cleared once the scan is claimed, never persisted anywhere.
+function RescanDialog({
+  projectId,
+  scan,
+  open,
+  onClose,
+}: {
+  projectId: string;
+  scan: Scan;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [token, setToken] = useState("");
+
+  const rescan = useMutation({
+    mutationFn: () =>
+      createCloudScan(projectId, {
+        repo_url: scan.repo_url ?? undefined,
+        branch: scan.branch ?? undefined,
+        repo_token: token || undefined,
+        scan_label: scan.scan_label ?? undefined,
+      }),
+    onSuccess: (createdScan) => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      toast.success("Re-scan started");
+      onClose();
+      router.push(`/projects/${projectId}/scans/${createdScan.id}`);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start re-scan"),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Re-scan repository</DialogTitle>
+          <DialogDescription>
+            Re-clones <code>{scan.repo_url}</code>
+            {scan.branch ? ` (${scan.branch})` : ""} and scans it again. Provide an access token if this is a
+            private repo — the original token wasn&apos;t saved.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label htmlFor="rescan-token">Access token (private repos only)</Label>
+          <Input
+            id="rescan-token"
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={rescan.isPending} onClick={() => rescan.mutate()}>
+            {rescan.isPending ? "Starting…" : "Start re-scan"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function FindingItem({
   finding,
   expanded,
@@ -77,7 +143,6 @@ function FindingItem({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const snippet = finding.evidence[0]?.snippet;
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       <button
@@ -101,21 +166,23 @@ function FindingItem({
             <p className="font-medium">{finding.category ?? "—"}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Score</p>
-            <p className={cn("font-mono font-bold", finding.severity && SEVERITY_SCORE_CLASS[finding.severity])}>
-              {finding.severity ? SEVERITY_SCORE[finding.severity].toFixed(1) : "—"}
+            <p className="text-muted-foreground">Priority</p>
+            <p className={cn("font-mono font-bold", finding.priority_tier && PRIORITY_CLASS[finding.priority_tier])}>
+              {finding.priority_score != null ? finding.priority_score.toFixed(1) : "—"}
+              {finding.priority_tier ? ` (${PRIORITY_LABELS[finding.priority_tier]})` : ""}
             </p>
           </div>
         </div>
       </button>
       {expanded && (
         <div className="grid grid-cols-1 border-t border-border lg:grid-cols-12">
-          <div className="overflow-x-auto bg-[#1e1c1b] p-4 text-[#d4ccc8] lg:col-span-8">
-            {snippet ? (
-              <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap">{snippet}</pre>
-            ) : (
-              <p className="text-xs text-muted-foreground">No code snippet available for this finding.</p>
-            )}
+          <div className="lg:col-span-8">
+            <CodeSnippet
+              snippet={finding.evidence[0]?.snippet}
+              snippetStartLine={finding.evidence[0]?.start_line ?? null}
+              highlightStart={finding.location.start_line}
+              highlightEnd={finding.location.end_line ?? finding.location.start_line}
+            />
           </div>
           <div className="space-y-4 border-t border-border bg-muted/30 p-4 lg:col-span-4 lg:border-t-0 lg:border-l">
             <div>
@@ -156,11 +223,16 @@ function FindingItem({
 
 export default function ScanDetailPage() {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const [severity, setSeverity] = useState<Severity>();
   const [kind, setKind] = useState<FindingKind>();
+  const [owaspFilter, setOwaspFilter] = useState<string>();
+  const [priority, setPriority] = useState<PriorityTier>();
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [rescanDialogOpen, setRescanDialogOpen] = useState(false);
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -202,6 +274,20 @@ export default function ScanDetailPage() {
     },
   });
 
+  // Direct one-click re-scan when the scan came from a connected repo (credential is
+  // stored, nothing to re-enter). Manual repo_url scans go through RescanDialog instead,
+  // since their token is transient and was never persisted.
+  const rescan = useMutation({
+    mutationFn: () =>
+      createCloudScan(projectId, { project_repo_id: scan!.project_repo_id!, scan_label: scan!.scan_label ?? undefined }),
+    onSuccess: (createdScan) => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      toast.success("Re-scan started");
+      router.push(`/projects/${projectId}/scans/${createdScan.id}`);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start re-scan"),
+  });
+
   const completed = scan?.status === "completed";
 
   const { data: report } = useQuery({
@@ -212,70 +298,13 @@ export default function ScanDetailPage() {
   });
 
   const { data: findings, isLoading: findingsLoading } = useQuery({
-    queryKey: ["scans", scanId, "findings", severity ?? "", kind ?? ""],
-    queryFn: () => listFindings(scanId, { severity, kind }),
+    queryKey: ["scans", scanId, "findings", severity ?? "", kind ?? "", owaspFilter ?? "", priority ?? ""],
+    queryFn: () => listFindings(scanId, { severity, kind, owasp: owaspFilter, priority }),
     enabled: completed,
     retry: false,
   });
 
-  // Unfiltered/uncapped-ish fetch used only to build the Risk Profile below — kept
-  // separate from the (severity/kind-filtered, paginated) query that feeds the list.
-  const { data: allFindings } = useQuery({
-    queryKey: ["scans", scanId, "findings", "risk-profile"],
-    queryFn: () => listFindings(scanId, { pageSize: 200 }),
-    enabled: completed,
-    retry: false,
-  });
-
-  const { data: recentScans } = useQuery({
-    queryKey: ["projects", projectId, "scans", "trend"],
-    queryFn: () => listScans(projectId, 1, 6),
-  });
-
-  const trendReportQueries = useQueries({
-    queries: (recentScans?.items ?? []).map((s) => ({
-      queryKey: ["scans", s.id, "report"],
-      queryFn: () => getReport(s.id),
-      enabled: s.status === "completed",
-      retry: false,
-    })),
-  });
-
-  const trendData = useMemo(() => {
-    const scans = recentScans?.items ?? [];
-    return scans
-      .map((s, i) => ({
-        label: s.scan_label || new Date(s.created_at).toLocaleDateString(undefined, { month: "numeric", day: "numeric" }),
-        total: trendReportQueries[i]?.data?.stats.total_findings ?? 0,
-      }))
-      .reverse();
-  }, [recentScans, trendReportQueries]);
-
-  // Grouped by each finding's real OWASP tags where the scanner populated them;
-  // falls back to the report's general category breakdown (counts only, so the
-  // bar height there is a rough visual scale, not a severity-weighted score).
-  const riskProfile = useMemo(() => {
-    const items = allFindings?.items ?? [];
-    const byTag = new Map<string, number[]>();
-    for (const f of items) {
-      const weight = f.severity ? SEVERITY_SCORE[f.severity] : 0;
-      for (const tag of f.owasp) {
-        if (!byTag.has(tag)) byTag.set(tag, []);
-        byTag.get(tag)!.push(weight);
-      }
-    }
-    let rows = Array.from(byTag.entries()).map(([label, weights]) => ({
-      label,
-      score: weights.reduce((a, b) => a + b, 0) / weights.length,
-    }));
-    if (rows.length === 0 && report) {
-      rows = Object.entries(report.stats.by_category).map(([label, count]) => ({
-        label,
-        score: Math.min(10, count * 2),
-      }));
-    }
-    return rows.sort((a, b) => b.score - a.score).slice(0, 4);
-  }, [allFindings, report]);
+  const owaspData = useMemo(() => owaspChartData(report?.stats.by_owasp), [report]);
 
   const visibleFindings = useMemo(() => {
     const items = findings?.items ?? [];
@@ -312,23 +341,44 @@ export default function ScanDetailPage() {
             {scan.branch ? ` (${scan.branch})` : ""}
           </p>
         </div>
-        {completed && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" disabled={downloadingPdf} onClick={handleDownloadPdf}>
-              <Download />
-              {downloadingPdf ? "Preparing…" : "Generate Report"}
+        <div className="flex flex-wrap items-center gap-2">
+          {scan.scan_type === "cloud" && (scan.project_repo_id || scan.repo_url) && (
+            <Button
+              variant="outline"
+              disabled={rescan.isPending}
+              onClick={() => (scan.project_repo_id ? rescan.mutate() : setRescanDialogOpen(true))}
+            >
+              <RefreshCw />
+              {rescan.isPending ? "Starting…" : "Re-scan"}
             </Button>
-            <Button variant="outline" onClick={() => notifyComingSoon("AI Analysis")}>
-              <Sparkles />
-              AI Analysis
-            </Button>
-            <Button onClick={() => notifyComingSoon("Auto AI Fix")}>
-              <Wand2 />
-              Auto AI Fix
-            </Button>
-          </div>
-        )}
+          )}
+          {completed && (
+            <>
+              <Button variant="outline" disabled={downloadingPdf} onClick={handleDownloadPdf}>
+                <Download />
+                {downloadingPdf ? "Preparing…" : "Generate Report"}
+              </Button>
+              <Button variant="outline" onClick={() => notifyComingSoon("AI Analysis")}>
+                <Sparkles />
+                AI Analysis
+              </Button>
+              <Button onClick={() => notifyComingSoon("Auto AI Fix")}>
+                <Wand2 />
+                Auto AI Fix
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
+      {scan.scan_type === "cloud" && scan.repo_url && !scan.project_repo_id && (
+        <RescanDialog
+          projectId={projectId}
+          scan={scan}
+          open={rescanDialogOpen}
+          onClose={() => setRescanDialogOpen(false)}
+        />
+      )}
 
       {scan.status === "failed" && (
         <Alert variant="destructive">
@@ -364,106 +414,62 @@ export default function ScanDetailPage() {
                 value: report?.duration_ms != null ? `${(report.duration_ms / 1000).toFixed(1)}s` : "—",
               },
             ].map((stat) => (
-              <Card key={stat.label}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    {stat.label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className={cn("text-2xl font-semibold tracking-tight", stat.valueClassName)}>
-                    {stat.value}
-                  </span>
-                </CardContent>
-              </Card>
+              <StatCard key={stat.label} size="sm" {...stat} />
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-sm font-normal text-muted-foreground">Scan Trend</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {trendData.every((d) => d.total === 0) && trendData.length <= 1 ? (
-                  <EmptyState title="Not enough scan history yet" description="Run more scans to see a trend." />
-                ) : (
-                  <ChartContainer config={trendChartConfig} className="h-[220px] w-full">
-                    <BarChart data={trendData}>
-                      <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                      <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Bar dataKey="total" fill="var(--color-total)" radius={4} />
-                    </BarChart>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-normal text-muted-foreground">Risk Profile</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {riskProfile.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No categorized findings for this scan.</p>
-                ) : (
-                  riskProfile.map((row) => (
-                    <div key={row.label} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="truncate">{row.label}</span>
-                        <span className="font-semibold">{row.score.toFixed(1)}</span>
-                      </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-sm bg-muted">
-                        <div
-                          className={cn(
-                            "h-full",
-                            row.score >= 8 ? "bg-severity-critical" : row.score >= 5 ? "bg-severity-high" : "bg-severity-medium"
-                          )}
-                          style={{ width: `${Math.min(100, (row.score / 10) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-normal text-muted-foreground">OWASP Top 10 Compliance</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <OwaspChart data={owaspData} activeCategory={owaspFilter} onSelectCategory={(code) =>
+                setOwaspFilter((prev) => (prev === code ? undefined : code))
+              } />
+            </CardContent>
+          </Card>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">Filter:</span>
-              {SEVERITIES.map((s) => (
-                <Button
-                  key={s}
-                  size="xs"
-                  variant={severity === s ? "secondary" : "ghost"}
-                  onClick={() => setSeverity(severity === s ? undefined : s)}
-                >
-                  {s}
-                </Button>
-              ))}
-              <span className="mx-1 text-muted-foreground">·</span>
-              {KINDS.map((k) => (
-                <Button
-                  key={k}
-                  size="xs"
-                  variant={kind === k ? "secondary" : "ghost"}
-                  onClick={() => setKind(kind === k ? undefined : k)}
-                >
-                  {k}
-                </Button>
-              ))}
-            </div>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search findings…"
-                className="pl-8"
-              />
-            </div>
-          </div>
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search findings…"
+            facets={[
+              {
+                type: "select",
+                value: severity ?? ALL,
+                onChange: (v) => setSeverity(v === ALL ? undefined : (v as Severity)),
+                placeholder: "Severity",
+                options: [{ value: ALL, label: "All severities" }, ...SEVERITIES.map((s) => ({ value: s, label: s }))],
+              },
+              {
+                type: "select",
+                value: kind ?? ALL,
+                onChange: (v) => setKind(v === ALL ? undefined : (v as FindingKind)),
+                placeholder: "Kind",
+                options: [{ value: ALL, label: "All kinds" }, ...KINDS.map((k) => ({ value: k, label: k }))],
+              },
+              {
+                type: "select",
+                value: owaspFilter ?? ALL,
+                onChange: (v) => setOwaspFilter(v === ALL ? undefined : v),
+                placeholder: "OWASP category",
+                options: [
+                  { value: ALL, label: "All OWASP categories" },
+                  ...Object.entries(OWASP_TITLES).map(([code, title]) => ({ value: code, label: `${code} — ${title}` })),
+                ],
+              },
+              {
+                type: "select",
+                value: priority ?? ALL,
+                onChange: (v) => setPriority(v === ALL ? undefined : (v as PriorityTier)),
+                placeholder: "Priority",
+                options: [
+                  { value: ALL, label: "All priorities" },
+                  ...PRIORITY_TIERS.map((p) => ({ value: p, label: PRIORITY_LABELS[p] })),
+                ],
+              },
+            ]}
+          />
 
           <DataTableCard
             bare
