@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from beanie import Document, Indexed
 
@@ -10,6 +11,9 @@ class Project(Document):
     is_archived: bool = False
     scan_count: int = 0
     last_scan_at: datetime | None = None
+    # None = inherit the workspace-wide default (see report_template_service, added in a
+    # later task).
+    report_template: Literal["standard", "executive"] | None = None
     created_at: datetime
     updated_at: datetime
 

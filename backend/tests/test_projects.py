@@ -1,5 +1,12 @@
+import asyncio
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 from tests.test_auth_flow import register_and_login
 from tests.test_users import _admin_headers
+
+_FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
 
 
 def _headers(tokens):
@@ -106,3 +113,89 @@ def test_delete_project_cascades_and_is_audited(client):
     actions = [log["action"] for log in logs]
     assert "Project Created" in actions
     assert "Project Deleted" in actions
+
+
+def test_projects_stats_route_not_swallowed_by_project_detail(client):
+    owner = register_and_login(client, email="owner7@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.get("/api/v1/projects/stats", headers=_headers(owner))
+    assert r.status_code == 200
+    body = r.json()
+    assert project["id"] in body["items"]
+
+
+def test_get_project_includes_zeroed_stats_for_fresh_project(client):
+    owner = register_and_login(client, email="owner8@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(owner))
+    body = r.json()
+    assert body["total_findings"] == 0
+    assert body["risk_repo_count"] == 0
+    assert body["total_repo_count"] == 0
+    assert body["scan_status_counts"] == {
+        "pending": 0, "queued": 0, "running": 0, "completed": 0, "failed": 0,
+    }
+
+
+def test_owner_can_set_and_clear_report_template_override(client):
+    owner = register_and_login(client, email="owner7@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    assert project["report_template"] is None
+
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}", json={"report_template": "executive"}, headers=_headers(owner)
+    )
+    assert r.status_code == 200
+    assert r.json()["report_template"] == "executive"
+
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}", json={"report_template": "inherit"}, headers=_headers(owner)
+    )
+    assert r.status_code == 200
+    assert r.json()["report_template"] is None
+
+
+def test_project_stats_reflect_ingested_findings_and_risk_repo_count(client):
+    from app.models.project_repo import ProjectRepo
+    from app.models.scan import Scan
+    from app.schemas.report import GoReportIn
+    from app.services import report_ingestion_service as ingest_svc
+
+    owner = register_and_login(client, email="owner9@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        repo = ProjectRepo(
+            project_id=project["id"],
+            provider="github",
+            organization="acme",
+            repo_full_name="acme/widgets",
+            clone_url="https://github.com/acme/widgets.git",
+            selected_branch="main",
+            pat_encrypted="x",
+            created_by=str(owner["access_token"]),
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.insert()
+        scan = Scan(
+            project_id=project["id"],
+            scan_type="cloud",
+            project_repo_id=str(repo.id),
+            created_at=now,
+            updated_at=now,
+        )
+        await scan.insert()
+        report = GoReportIn.model_validate(json.loads(_FIXTURE.read_text()))
+        await ingest_svc.ingest(scan, report, raw_json="{}")
+
+    asyncio.run(run())
+
+    r = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(owner))
+    body = r.json()
+    assert body["total_findings"] == 4
+    assert body["risk_repo_count"] == 1  # the fixture has a "critical" finding
+    assert body["total_repo_count"] == 1
