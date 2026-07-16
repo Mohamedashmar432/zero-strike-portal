@@ -12,6 +12,7 @@ from app.core.logging import configure_logging
 from app.db.mongo import close_mongo_connection, connect_to_mongo
 from app.routers import (
     admin_downloads,
+    admin_scanner_status,
     api_keys,
     audit_logs,
     auth,
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(repo_credentials.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
+    app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(report_templates.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)

@@ -187,7 +187,7 @@ async def invite_member(
     project_id: str, payload: MemberInviteRequest, user: User = Depends(get_current_user)
 ):
     await project_service.get_project_or_404(project_id)
-    await project_service.require_member(project_id, user)
+    await project_service.require_owner_or_admin(project_id, user)
 
     if await ProjectMember.find_one(
         ProjectMember.project_id == project_id, ProjectMember.invited_email == payload.email

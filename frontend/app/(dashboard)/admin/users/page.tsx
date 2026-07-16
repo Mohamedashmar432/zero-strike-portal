@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { deleteUser, listUsers, updateUser } from "@/lib/api/users";
+import { roleLabel } from "@/lib/role-labels";
 import { getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -41,7 +42,11 @@ function UserRowActions({
     mutationFn: () => updateUser(targetUser.id, { role: targetUser.role === "admin" ? "user" : "admin" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
-      toast.success(targetUser.role === "admin" ? "User demoted to user" : "User promoted to admin");
+      toast.success(
+        targetUser.role === "admin"
+          ? `User demoted to ${roleLabel("user")}`
+          : `User promoted to ${roleLabel("admin")}`
+      );
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update role"),
   });
@@ -63,7 +68,7 @@ function UserRowActions({
         disabled={isSelf || toggleRole.isPending}
         onClick={() => toggleRole.mutate()}
       >
-        {targetUser.role === "admin" ? "Demote to user" : "Promote to admin"}
+        {targetUser.role === "admin" ? `Demote to ${roleLabel("user")}` : `Promote to ${roleLabel("admin")}`}
       </Button>
       <Button
         variant="outline"
@@ -164,9 +169,7 @@ export default function AdminUsersPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-mono uppercase">
-                      {u.role}
-                    </Badge>
+                    <Badge variant="secondary">{roleLabel(u.role)}</Badge>
                   </TableCell>
                   <TableCell>{u.is_active ? "Active" : "Disabled"}</TableCell>
                   <TableCell>

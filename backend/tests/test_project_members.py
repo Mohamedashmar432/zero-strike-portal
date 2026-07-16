@@ -82,10 +82,10 @@ def test_duplicate_invite_is_conflict(client):
     assert r.status_code == 409
 
 
-def test_collaborator_can_invite(client):
-    # Any project member can invite — only removing *others* and role changes are
-    # owner/admin-gated (see test_member_can_remove_self_but_not_owner and
-    # test_only_owner_or_admin_can_change_role below).
+def test_collaborator_cannot_invite(client):
+    # Inviting is an owner/admin-only action — only removing *yourself* is open to any member
+    # (see test_member_can_remove_self_but_not_owner and test_only_owner_or_admin_can_change_role
+    # below for the other permission boundaries).
     owner = register_and_login(client, email="mowner5@zerostrike.dev")
     collab = register_and_login(client, email="collabm5@zerostrike.dev")
     project = _create_project(client, _headers(owner))
@@ -100,7 +100,7 @@ def test_collaborator_can_invite(client):
         json={"email": "someoneelse5@zerostrike.dev"},
         headers=_headers(collab),
     )
-    assert r.status_code == 201
+    assert r.status_code == 403
 
 
 def test_non_member_cannot_invite(client):

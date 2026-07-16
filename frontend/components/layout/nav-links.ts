@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   FileText,
   FolderKanban,
@@ -20,6 +21,7 @@ export const mainLinks = [
 export const adminLinks = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
+  { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },
 ];
 
 export const settingsLinks = [

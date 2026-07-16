@@ -56,6 +56,7 @@ import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { projectRiskStatus, SeverityCountPills } from "@/components/severity/severity-count-pills";
 import { cn, getInitials } from "@/lib/utils";
+import { roleLabel } from "@/lib/role-labels";
 import type { SeverityCounts } from "@/lib/api/dashboard";
 
 const EMPTY_SEVERITY_COUNTS: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
@@ -337,17 +338,19 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
 
   return (
     <div className="space-y-4">
-      {/* Any member can invite — only role changes and removing *others* are owner/admin-gated below. */}
-      <form onSubmit={handleSubmit((values) => invite.mutate(values))} className="flex items-end gap-2">
-        <div className="flex-1 space-y-2">
-          <Label htmlFor="invite-email">Invite by email</Label>
-          <Input id="invite-email" type="email" {...register("email")} />
-          {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
-        </div>
-        <Button type="submit" disabled={invite.isPending}>
-          {invite.isPending ? "Inviting…" : "Invite"}
-        </Button>
-      </form>
+      {/* Inviting, like role changes and removing *others*, is owner/admin-gated. */}
+      {canManage(myRole) && (
+        <form onSubmit={handleSubmit((values) => invite.mutate(values))} className="flex items-end gap-2">
+          <div className="flex-1 space-y-2">
+            <Label htmlFor="invite-email">Invite by email</Label>
+            <Input id="invite-email" type="email" {...register("email")} />
+            {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
+          </div>
+          <Button type="submit" disabled={invite.isPending}>
+            {invite.isPending ? "Inviting…" : "Invite"}
+          </Button>
+        </form>
+      )}
       <FilterBar
         search={search}
         onSearchChange={setSearch}
@@ -391,9 +394,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
                 <TableRow key={m.id}>
                   <TableCell className="font-mono text-xs">{m.invited_email}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-mono uppercase">
-                      {m.role}
-                    </Badge>
+                    <Badge variant="secondary">{roleLabel(m.role)}</Badge>
                   </TableCell>
                   <TableCell>{m.status === "pending" ? "Pending" : "Accepted"}</TableCell>
                   <TableCell>
@@ -410,7 +411,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
                           }
                           disabled={updateRole.isPending}
                         >
-                          {m.role === "owner" ? "Demote" : "Promote to owner"}
+                          {m.role === "owner" ? "Demote" : `Promote to ${roleLabel("owner")}`}
                         </Button>
                       )}
                       {isSelf && m.role !== "owner" && (
@@ -911,11 +912,7 @@ export default function ProjectDetailPage() {
           />
         }
         actions={
-          project && (
-            <Badge variant="secondary" className="font-mono uppercase">
-              {project.my_role}
-            </Badge>
-          )
+          project && <Badge variant="secondary">{roleLabel(project.my_role)}</Badge>
         }
       />
       <Tabs defaultValue={initialTab}>
