@@ -89,12 +89,18 @@ stage (which has a real C toolchain, so CGO always works here regardless of what
 your local machine), rebuilds, and re-runs the existing build-time smoke check (fails the image
 build outright if CGO/tree-sitter detection ever regresses).
 
-## 4. (Optional) Publish to the self-hosted-CI download endpoint
+## 4. Publish to the self-hosted-CI download endpoint (REQUIRED — do not skip)
 
-Separate from the above — this portal also serves scanner binaries to external self-hosted CI
-runners via GridFS, unrelated to how the portal runs its own cloud scans. If you want a given
-version downloadable that way too, upload each OS/arch binary from the GitHub Release (admin JWT
-required, one call per `(version, os, arch)`, no UI yet):
+Separate from the above — this portal also serves scanner binaries to external CI/CD pipelines
+(GitHub Actions, GitLab CI, Azure Pipelines) via GridFS, unrelated to how the portal runs its own
+cloud scans. The portal's own "New scan → CI/CD" onboarding UI (`frontend/.../scans/new/page.tsx`)
+unconditionally generates a `curl .../downloads/zerostrike/latest/linux-amd64` step for every user,
+on every provider, because all three providers' default runners are Linux — so this is not
+optional for any deployment that has real users setting up CI/CD scans. Skipping it means every
+one of those pipelines 404s (see `docs/CICD_SCAN_BINARY_404.md` for the incident this caused).
+
+Upload each OS/arch binary from the GitHub Release (admin JWT required, one call per
+`(version, os, arch)`, no UI yet):
 
 ```
 curl -X POST {BACKEND_PUBLIC_URL}/api/v1/admin/downloads/zerostrike \
@@ -103,7 +109,11 @@ curl -X POST {BACKEND_PUBLIC_URL}/api/v1/admin/downloads/zerostrike \
   -F "file=@zerostrike_linux_amd64"
 ```
 
-Skip this step entirely if no CI runners currently rely on `/api/v1/downloads/zerostrike/...`.
+At minimum, publish `linux-amd64` every time — it's the only arch any current CI/CD onboarding
+snippet asks for. `../zero-strike-code-scanner`'s `.github/workflows/release.yml` has a
+"Publish binaries to the ZeroStrike portal" job that automates all five `(os, arch)` combos after
+every tagged release (needs `ZS_PORTAL_ADMIN_EMAIL`/`ZS_PORTAL_ADMIN_PASSWORD` secrets configured
+in that repo) — prefer fixing it there once over remembering this manual step per release.
 
 ## Verification
 

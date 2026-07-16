@@ -60,7 +60,7 @@ Let's Encrypt, so no separate cert step.
    | `CADDY_DOMAIN` | your domain, e.g. `portal.example.com` |
    | `CADDY_EMAIL` | your email (Let's Encrypt renewal notices) |
    | `CORS_ORIGINS` | `["https://portal.example.com"]` (your domain) |
-   | `NEXT_PUBLIC_PORTAL_ORIGIN` | `https://portal.example.com` |
+   | `NEXT_PUBLIC_SCANNER_SERVER_ORIGIN` | `https://portal.example.com` |
    Leave `NEXT_PUBLIC_API_BASE_URL=/api/v1` as-is — Caddy proxies `/api/*` to the
    backend on the same origin, so the frontend never needs a separate host.
 
@@ -110,6 +110,13 @@ Let's Encrypt, so no separate cert step.
    | `MONGODB_DB_NAME` | `zerostrike` |
    | `JWT_SECRET` | the `openssl rand -hex 32` value |
    | `CORS_ORIGINS` | `["https://<your-vercel-domain>"]` — fill in after B2, once you know it |
+   | `BACKEND_PUBLIC_URL` | `https://<your-railway-domain>` (this service's own URL, from step 3 above) |
+   | `FRONTEND_ORIGIN` | `https://<your-vercel-domain>` — fill in after B2, same as `CORS_ORIGINS` |
+
+   `BACKEND_PUBLIC_URL`/`FRONTEND_ORIGIN` are required for GitHub/Azure DevOps "Connect a repo"
+   OAuth and password-reset emails to work in production — left at their `localhost` defaults,
+   the OAuth redirect_uri won't match what's registered with the provider, and reset-link/
+   post-connect redirects will point at `localhost` instead of your real Vercel URL.
 5. Deploy (push to `main` triggers it automatically once connected). Watch build
    logs — the scanner-build stage takes a few minutes on first build.
 6. **Verify**: `curl https://<your-railway-domain>/api/v1/health`.
@@ -128,16 +135,16 @@ will silently stop draining queued cloud scans.
    | Var | Value |
    |---|---|
    | `NEXT_PUBLIC_API_BASE_URL` | `https://<your-railway-domain>/api/v1` |
-   | `NEXT_PUBLIC_PORTAL_ORIGIN` | `https://<your-railway-domain>` |
+   | `NEXT_PUBLIC_SCANNER_SERVER_ORIGIN` | `https://<your-railway-domain>` |
 4. **Deploy**. Note the resulting `*.vercel.app` domain (or your custom domain if
    you attach one under **Settings → Domains**).
 
 ### B3. Close the loop
 
-Go back to Railway's backend `CORS_ORIGINS` variable and set it to your actual
-Vercel domain (`["https://<your-app>.vercel.app"]`, or your custom domain if you
-attached one) — the placeholder from B1 step 4 needs the real value now. Redeploy
-the backend service for it to take effect.
+Go back to Railway's backend variables and fill in the two placeholders from B1 step 4 that
+needed the Vercel domain: `CORS_ORIGINS` (`["https://<your-app>.vercel.app"]`, or your custom
+domain if you attached one) and `FRONTEND_ORIGIN` (same value, no brackets — it's a single URL,
+not a list). Redeploy the backend service for it to take effect.
 
 **Verify**: open the Vercel URL, log in page should load and API calls (check
 Network tab) should hit the Railway domain without CORS errors.

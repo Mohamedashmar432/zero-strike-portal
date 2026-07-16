@@ -62,7 +62,7 @@ cp .env.example .env.local
 
 ```
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
-NEXT_PUBLIC_PORTAL_ORIGIN=http://localhost:8000
+NEXT_PUBLIC_SCANNER_SERVER_ORIGIN=http://localhost:8000
 ```
 
 (These are the only two `NEXT_PUBLIC_*` vars the frontend reads anywhere.)

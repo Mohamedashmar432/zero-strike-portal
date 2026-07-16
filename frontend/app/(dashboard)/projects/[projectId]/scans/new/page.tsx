@@ -24,8 +24,8 @@ import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
-function portalOrigin(): string {
-  const env = process.env.NEXT_PUBLIC_PORTAL_ORIGIN;
+function scannerServerOrigin(): string {
+  const env = process.env.NEXT_PUBLIC_SCANNER_SERVER_ORIGIN;
   if (env) return env.replace(/\/$/, "");
   if (typeof window !== "undefined") return window.location.origin;
   return "https://your-portal";
@@ -144,7 +144,7 @@ function localInstallCmd(os: LocalOs, origin: string): string {
 
 function localRunCmd(os: LocalOs, token: string): string {
   const bin = os === "windows" ? ".\\zerostrike.exe" : "./zerostrike";
-  return `${bin} scan . --server ${portalOrigin()} --token ${token}`;
+  return `${bin} scan . --server ${scannerServerOrigin()} --token ${token}`;
 }
 
 function localFilename(os: LocalOs): string {
@@ -161,7 +161,7 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
   });
 
   const token = rawToken ?? "<PROJECT_TOKEN>";
-  const command = `${localInstallCmd(os, portalOrigin())}\n${localRunCmd(os, token)}`;
+  const command = `${localInstallCmd(os, scannerServerOrigin())}\n${localRunCmd(os, token)}`;
 
   return (
     <div className="space-y-4">
@@ -290,7 +290,7 @@ function CicdSetupStep({ onDone }: { onDone: () => void }) {
         <div className="space-y-1">
           <CopyBlock
             label="Pipeline snippet"
-            text={cicdSnippet(provider, portalOrigin())}
+            text={cicdSnippet(provider, scannerServerOrigin())}
             filename={cicdFilename(provider)}
           />
           {provider === "github_actions" && (

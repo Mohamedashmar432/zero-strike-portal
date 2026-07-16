@@ -14,7 +14,7 @@ the current Docker Compose deployment.
 
 Set as Vercel project env vars, pointed at wherever the backend ends up:
 - `NEXT_PUBLIC_API_BASE_URL=https://<your-backend-host>/api/v1`
-- `NEXT_PUBLIC_PORTAL_ORIGIN=https://<your-backend-host>`
+- `NEXT_PUBLIC_SCANNER_SERVER_ORIGIN=https://<your-backend-host>`
 
 ## Backend: must be an always-on container, not serverless
 
