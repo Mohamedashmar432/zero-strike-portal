@@ -6,15 +6,11 @@ export function CodeSnippet({
   highlightStart,
   highlightEnd,
 }: {
-  snippet: string | null | undefined;
+  snippet: string;
   snippetStartLine: number | null;
   highlightStart: number | null;
   highlightEnd: number | null;
 }) {
-  if (!snippet) {
-    return <p className="p-4 text-xs text-muted-foreground">No code snippet available for this finding.</p>;
-  }
-
   const lines = snippet.split("\n");
   // snippetStartLine is the real file line number of the snippet's first line — when
   // absent (offset unknown) fall back to plain numbering from 1 with no highlight,

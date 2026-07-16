@@ -143,6 +143,7 @@ function FindingItem({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const snippet = finding.evidence[0]?.snippet;
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       <button
@@ -175,16 +176,23 @@ function FindingItem({
         </div>
       </button>
       {expanded && (
-        <div className="grid grid-cols-1 border-t border-border lg:grid-cols-12">
-          <div className="lg:col-span-8">
-            <CodeSnippet
-              snippet={finding.evidence[0]?.snippet}
-              snippetStartLine={finding.evidence[0]?.start_line ?? null}
-              highlightStart={finding.location.start_line}
-              highlightEnd={finding.location.end_line ?? finding.location.start_line}
-            />
-          </div>
-          <div className="space-y-4 border-t border-border bg-muted/30 p-4 lg:col-span-4 lg:border-t-0 lg:border-l">
+        <div className={cn("grid grid-cols-1 border-t border-border", snippet && "lg:grid-cols-12")}>
+          {snippet && (
+            <div className="lg:col-span-8">
+              <CodeSnippet
+                snippet={snippet}
+                snippetStartLine={finding.evidence[0]?.start_line ?? null}
+                highlightStart={finding.location.start_line}
+                highlightEnd={finding.location.end_line ?? finding.location.start_line}
+              />
+            </div>
+          )}
+          <div
+            className={cn(
+              "space-y-4 border-t border-border bg-muted/30 p-4 lg:border-t-0",
+              snippet ? "lg:col-span-4 lg:border-l" : ""
+            )}
+          >
             <div>
               <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                 Vulnerability Details
