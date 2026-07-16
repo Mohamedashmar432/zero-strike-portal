@@ -1,15 +1,16 @@
 import asyncio
 import contextlib
-import logging
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.db.mongo import close_mongo_connection, connect_to_mongo
+from app.core.middleware import RequestIDMiddleware
+from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
     admin_downloads,
     admin_scanner_status,
@@ -29,7 +30,7 @@ from app.routers import (
 from app.services import cloud_scan_service, scan_queue_service
 from app.services.oauth import OAuthProviderError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -63,6 +64,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added after CORS so it's the outermost layer (Starlette wraps in reverse add order) —
+    # every request gets a request_id bound before anything else runs.
+    app.add_middleware(RequestIDMiddleware)
 
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
@@ -87,7 +91,15 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok"}
+        mongo_ok = True
+        try:
+            await get_database().command("ping")
+        except Exception:
+            mongo_ok = False
+        scanner_ok = cloud_scan_service.scanner_available()
+        healthy = mongo_ok and scanner_ok
+        body = {"status": "ok" if healthy else "degraded", "mongo": mongo_ok, "scanner": scanner_ok}
+        return JSONResponse(status_code=200 if healthy else 503, content=body)
 
     return app
 

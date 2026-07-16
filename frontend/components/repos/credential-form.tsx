@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApiError } from "@/lib/api/client";
+import { queryKeys } from "@/lib/api/query-keys";
 import { createRepoCredential, type Provider, type RepoCredential } from "@/lib/api/repo-credentials";
 import { repoCredentialSchema, type RepoCredentialInput } from "@/lib/validation/repo-credential.schema";
 
@@ -40,7 +41,7 @@ export function CredentialForm({
   const create = useMutation({
     mutationFn: (values: RepoCredentialInput) => createRepoCredential(values),
     onSuccess: (credential) => {
-      queryClient.invalidateQueries({ queryKey: ["repo-credentials"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.repoCredentials.all() });
       toast.success("Credential saved");
       onCreated(credential);
     },

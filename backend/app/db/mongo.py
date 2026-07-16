@@ -2,6 +2,9 @@ from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.core.config import settings
+from app.models.ai_finding_insight import AIFindingInsight
+from app.models.ai_fix_proposal import AIFixProposal
+from app.models.ai_scan_insight import AIScanInsight
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.finding import Finding
@@ -44,6 +47,9 @@ async def connect_to_mongo() -> None:
             RepoCredential,
             ProjectRepo,
             WorkspaceSettings,
+            AIFindingInsight,
+            AIScanInsight,
+            AIFixProposal,
         ],
     )
 

@@ -4,7 +4,7 @@ services:
       context: ../backend
       args:
         SCANNER_REPO: ${SCANNER_REPO:-https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git}
-        SCANNER_REF: ${SCANNER_REF:-v0.23.1}
+        SCANNER_REF: ${SCANNER_REF:-v0.24.0}
     env_file: .env
     environment:
       # Reports live in Mongo (no artifact volume). Clones go to an ephemeral tmpfs.

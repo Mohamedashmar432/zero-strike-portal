@@ -6,6 +6,7 @@ import { OwaspChart } from "@/components/common/owasp-chart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { listProjectRepos } from "@/lib/api/project-repos";
 import { getProjectOwaspSummary } from "@/lib/api/projects";
+import { queryKeys } from "@/lib/api/query-keys";
 import { owaspChartData } from "@/lib/owasp";
 
 const ALL_REPOS = "__all__";
@@ -14,14 +15,14 @@ const ALL_REPOS = "__all__";
 // compliance chart — decorative here (no findings list on this tab to filter into).
 export function ProjectOwaspSection({ projectId }: { projectId: string }) {
   const { data: repos } = useQuery({
-    queryKey: ["projects", projectId, "repos"],
+    queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
   const [scope, setScope] = useState<string>(ALL_REPOS);
   const projectRepoId = scope === ALL_REPOS ? undefined : scope;
 
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "owasp-summary", projectRepoId ?? ""],
+    queryKey: queryKeys.projects.owaspSummary(projectId, projectRepoId ?? ""),
     queryFn: () => getProjectOwaspSummary(projectId, projectRepoId),
   });
 

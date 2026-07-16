@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { RequireRole } from "@/components/auth/require-role";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks } from "./nav-links";
@@ -71,26 +72,24 @@ export function MobileNav() {
               {link.label}
             </Link>
           ))}
-          {user?.role === "admin" && (
-            <>
-              <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Admin
-              </div>
-              {adminLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                    pathname?.startsWith(link.href) && "bg-accent text-foreground"
-                  )}
-                >
-                  <link.icon className="size-[18px]" />
-                  {link.label}
-                </Link>
-              ))}
-            </>
-          )}
+          <RequireRole role="admin">
+            <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Admin
+            </div>
+            {adminLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+                  pathname?.startsWith(link.href) && "bg-accent text-foreground"
+                )}
+              >
+                <link.icon className="size-[18px]" />
+                {link.label}
+              </Link>
+            ))}
+          </RequireRole>
           <Link
             href="/settings/profile"
             className={cn(

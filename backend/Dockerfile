@@ -7,6 +7,8 @@
 FROM golang:1.26-bookworm AS scanner-builder
 
 ARG SCANNER_REPO=https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git
+# Keep in sync with deploy/docker-compose.yml's SCANNER_REF fallback and
+# deploy/.env.example -- all three must match or environments silently diverge.
 ARG SCANNER_REF=v0.24.0
 ENV CGO_ENABLED=1
 

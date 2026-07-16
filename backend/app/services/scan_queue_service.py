@@ -10,16 +10,16 @@ claim plus a periodic poll loop, both running in this same FastAPI process.
 """
 
 import asyncio
-import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
-from pymongo import ReturnDocument
+import structlog
 
 from app.core.config import settings
+from app.core.job_queue import claim_next, reap_stuck
 from app.models.scan import Scan
 from app.services import cloud_scan_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _in_flight: set[asyncio.Task] = set()
 
@@ -46,19 +46,12 @@ async def _capacity() -> int:
 async def _claim_next() -> Scan | None:
     """Atomically claim the oldest queued scan, if any. Safe across concurrent callers/replicas:
     Mongo serializes the write per-document, so only one caller's filter can still match."""
-    col = Scan.get_pymongo_collection()
-    raw = await col.find_one_and_update(
-        {"status": "queued"},
-        {
-            "$set": {"status": "running", "started_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)},
-            "$unset": {"repo_token": "", "repo_token_auth_scheme": ""},
-        },
-        sort=[("created_at", 1)],
-        return_document=ReturnDocument.BEFORE,
+    return await claim_next(
+        Scan,
+        queued_status="queued",
+        running_status="running",
+        extra_unset={"repo_token": "", "repo_token_auth_scheme": ""},
     )
-    if raw is None:
-        return None
-    return Scan.model_validate(raw)
 
 
 async def drain_queue() -> None:
@@ -75,19 +68,19 @@ async def drain_queue() -> None:
 
 
 async def reap_stuck_scans() -> None:
-    """Fail any cloud scan stuck 'running' long past a plausible crash recovery window —
-    covers a backend restart mid-scan, which would otherwise leave it running forever."""
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        seconds=settings.scan_timeout_seconds * settings.queue_stuck_multiplier
+    """Reclaim any cloud scan stuck 'running' long past a plausible crash recovery window —
+    covers a backend restart mid-scan, which would otherwise leave it running forever.
+    Cloud scans default to max_attempts=1, so this always terminally fails them today
+    (see Scan.max_attempts); the requeue path exists for job kinds that opt into retries."""
+    await reap_stuck(
+        Scan,
+        running_status="running",
+        queued_status="queued",
+        failed_status="failed",
+        stuck_after=timedelta(seconds=settings.scan_timeout_seconds * settings.queue_stuck_multiplier),
+        crash_message="Reclaimed: worker likely crashed mid-scan",
+        dead_letter_message="Reclaimed: worker likely crashed mid-scan (retries exhausted)",
     )
-    stuck = await Scan.find(Scan.status == "running", Scan.updated_at < cutoff).to_list()
-    for scan in stuck:
-        now = datetime.now(timezone.utc)
-        scan.status = "failed"
-        scan.error_message = "Reclaimed: worker likely crashed mid-scan"
-        scan.completed_at = now
-        scan.updated_at = now
-        await scan.save()
 
 
 async def poll_loop() -> None:

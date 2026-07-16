@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from beanie import Document, Indexed
+from pymongo import IndexModel
 
 
 class Project(Document):
@@ -19,3 +20,4 @@ class Project(Document):
 
     class Settings:
         name = "projects"
+        indexes = [IndexModel([("owner_id", 1), ("is_archived", 1)])]  # standard list-view filter

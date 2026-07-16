@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listProjectRepos } from "@/lib/api/project-repos";
 import { getRepoScanHistory } from "@/lib/api/projects";
+import { queryKeys } from "@/lib/api/query-keys";
 
 const chartConfig: ChartConfig = {
   total: { label: "Findings", color: "var(--primary)" },
@@ -19,14 +20,14 @@ const chartConfig: ChartConfig = {
 // trend is comparable per repo instead of blended across a whole multi-repo project.
 export function RepoScanTrendChart({ projectId }: { projectId: string }) {
   const { data: repos } = useQuery({
-    queryKey: ["projects", projectId, "repos"],
+    queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
   const [selectedRepoId, setSelectedRepoId] = useState<string>();
   const repoId = selectedRepoId ?? repos?.[0]?.id;
 
   const { data: history, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "repos", repoId, "scan-history"],
+    queryKey: queryKeys.projects.repoScanHistory(projectId, repoId ?? ""),
     queryFn: () => getRepoScanHistory(projectId, repoId!),
     enabled: !!repoId,
   });

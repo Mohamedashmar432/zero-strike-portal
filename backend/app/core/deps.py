@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core import security
+from app.models.api_key import ApiKeyScope
 from app.models.user import User
 from app.services import api_key_service
 
@@ -36,6 +37,7 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 class ApiKeyContext:
     project_id: str
     key_id: str
+    scope: ApiKeyScope = "scanner"
 
 
 async def get_api_key_context(
@@ -48,4 +50,4 @@ async def get_api_key_context(
     so scanner handlers and JWT handlers can never receive each other's principal.
     """
     key = await api_key_service.resolve_api_key(credentials.credentials, request)
-    return ApiKeyContext(project_id=key.project_id, key_id=str(key.id))
+    return ApiKeyContext(project_id=key.project_id, key_id=str(key.id), scope=key.scope)

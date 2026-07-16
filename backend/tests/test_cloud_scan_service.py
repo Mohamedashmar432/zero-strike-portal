@@ -80,6 +80,61 @@ def test_cloud_scan_clone_failure_marks_failed(client, monkeypatch, tmp_path):
     asyncio.run(run())
 
 
+def test_cloud_scan_transient_clone_error_retries_then_succeeds(client, monkeypatch, tmp_path):
+    async def _no_delay(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+
+    calls = {"clone": 0}
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git":
+            calls["clone"] += 1
+            if calls["clone"] < 2:
+                return _FakeCompleted(128, b"", b"fatal: Connection reset by peer")
+            return _FakeCompleted(0, b"", b"")
+        return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
+
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "completed"
+        assert calls["clone"] == 2  # first attempt transient-failed, second succeeded
+
+    asyncio.run(run())
+
+
+def test_cloud_scan_non_transient_clone_error_does_not_retry(client, monkeypatch, tmp_path):
+    calls = {"clone": 0}
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git":
+            calls["clone"] += 1
+            return _FakeCompleted(128, b"", b"fatal: Authentication failed for repo")
+        return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
+
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+    monkeypatch.setattr(css.subprocess, "run", fake_run)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "failed"
+        assert calls["clone"] == 1  # a non-transient failure must not burn retry attempts
+
+    asyncio.run(run())
+
+
 def test_cloud_scan_scanner_error_marks_failed(client, monkeypatch, tmp_path):
     _patch_subprocess(monkeypatch, tmp_path, scan_rc=3, scan_stdout=b"")
 

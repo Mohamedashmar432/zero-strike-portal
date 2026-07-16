@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApiError } from "@/lib/api/client";
 import { addProjectRepo, type ProjectRepo } from "@/lib/api/project-repos";
+import { queryKeys } from "@/lib/api/query-keys";
 import {
   listCredentialBranches,
   listCredentialRepos,
@@ -54,7 +55,7 @@ export function RepoConnectWizard({
   const [label, setLabel] = useState("");
 
   const { data: credentials } = useQuery({
-    queryKey: ["repo-credentials"],
+    queryKey: queryKeys.repoCredentials.all(),
     queryFn: listRepoCredentials,
   });
   const providerCredentials = credentials?.filter((c) => c.provider === provider);
@@ -64,7 +65,7 @@ export function RepoConnectWizard({
     isLoading: reposLoading,
     isError: reposError,
   } = useQuery({
-    queryKey: ["repo-credentials", credentialId, "repos", repoQuery],
+    queryKey: queryKeys.repoCredentials.repos(credentialId ?? "", repoQuery),
     queryFn: () => listCredentialRepos(credentialId!, repoQuery),
     enabled: !!credentialId,
   });
@@ -72,7 +73,7 @@ export function RepoConnectWizard({
   const repoIdForBranches = selectedRepo ? (provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
 
   const { data: branches, isLoading: branchesLoading } = useQuery({
-    queryKey: ["repo-credentials", credentialId, "branches", repoIdForBranches],
+    queryKey: queryKeys.repoCredentials.branches(credentialId ?? "", repoIdForBranches ?? ""),
     queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
     enabled: !!credentialId && !!repoIdForBranches,
   });
@@ -87,7 +88,7 @@ export function RepoConnectWizard({
         label: label || undefined,
       }),
     onSuccess: (repo) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
       toast.success("Repository connected");
       onConnected(repo);
     },

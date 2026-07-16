@@ -37,6 +37,15 @@ class Scan(Document):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
+    # Reap-then-retry escalation (see app.core.job_queue.reap_stuck): a scan stuck
+    # "running" past the crash-recovery window is requeued if retry_count+1 < max_attempts,
+    # otherwise terminally failed. Defaults preserve the original always-terminal reap
+    # behavior for cloud scans (0+1 is never < 1). NOTE: repo_token is cleared at the
+    # first claim (see scan_queue_service._claim_next) and never restored, so raising
+    # max_attempts above 1 for a token-authenticated repo would make a retried attempt
+    # clone without auth — fine for public repos, not yet solved for private ones.
+    retry_count: int = 0
+    max_attempts: int = 1
     created_at: datetime
     updated_at: datetime
 

@@ -25,6 +25,7 @@ def _to_response(key: ApiKey) -> ApiKeyResponse:
         project_id=key.project_id,
         label=key.label,
         prefix=key.prefix,
+        scope=key.scope,
         created_by=key.created_by,
         created_at=key.created_at,
         expires_at=key.expires_at,

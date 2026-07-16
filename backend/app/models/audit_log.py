@@ -3,6 +3,7 @@ from typing import Literal
 
 from beanie import Document, Indexed
 from pydantic import Field
+from pymongo import IndexModel
 
 
 class AuditLog(Document):
@@ -19,4 +20,9 @@ class AuditLog(Document):
 
     class Settings:
         name = "audit_logs"
-        indexes = ["created_at", "actor_user_id", "action"]
+        indexes = [
+            "created_at",
+            "actor_user_id",
+            "action",
+            IndexModel([("project_id", 1), ("created_at", -1)]),  # "actions for project, newest first"
+        ]

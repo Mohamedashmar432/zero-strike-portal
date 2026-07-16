@@ -5,14 +5,15 @@ synchronous: smtplib is blocking, so a caller running in an async context should
 wrap these in `asyncio.to_thread` rather than this module growing an async API.
 """
 
-import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import structlog
+
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def send_email(to_address: str, subject: str, text_body: str, html_body: str | None = None) -> None:

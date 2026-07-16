@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Settings } from "lucide-react";
+import { RequireRole } from "@/components/auth/require-role";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks } from "./nav-links";
@@ -47,26 +48,24 @@ export function Sidebar() {
             {link.label}
           </Link>
         ))}
-        {user?.role === "admin" && (
-          <>
-            <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest text-sidebar-foreground/40 uppercase">
-              Admin
-            </div>
-            {adminLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                  pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
-                )}
-              >
-                <link.icon className="size-[18px]" />
-                {link.label}
-              </Link>
-            ))}
-          </>
-        )}
+        <RequireRole role="admin">
+          <div className="px-3 pt-4 pb-1 text-xs font-semibold tracking-widest text-sidebar-foreground/40 uppercase">
+            Admin
+          </div>
+          {adminLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                pathname?.startsWith(link.href) && "bg-sidebar-accent font-semibold text-sidebar-foreground"
+              )}
+            >
+              <link.icon className="size-[18px]" />
+              {link.label}
+            </Link>
+          ))}
+        </RequireRole>
         <Link
           href="/settings/profile"
           className={cn(

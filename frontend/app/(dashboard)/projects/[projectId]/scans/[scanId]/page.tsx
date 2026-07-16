@@ -34,7 +34,9 @@ import { cn } from "@/lib/utils";
 import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
 import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
 import { listFindings, type Finding, type FindingKind, type Severity } from "@/lib/api/findings";
+import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
+import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
 import { createCloudScan, getScan, type Scan } from "@/lib/api/scans";
 
@@ -92,7 +94,7 @@ function RescanDialog({
         scan_label: scan.scan_label ?? undefined,
       }),
     onSuccess: (createdScan) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
       toast.success("Re-scan started");
       onClose();
       router.push(`/projects/${projectId}/scans/${createdScan.id}`);
@@ -269,17 +271,14 @@ export default function ScanDetailPage() {
   }
 
   const { data: project } = useQuery({
-    queryKey: ["projects", projectId],
+    queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
   });
 
   const { data: scan, isLoading: scanLoading } = useQuery({
-    queryKey: ["scans", scanId],
+    queryKey: queryKeys.scans.detail(scanId),
     queryFn: () => getScan(scanId),
-    refetchInterval: (q) => {
-      const s = q.state.data?.status;
-      return s === "pending" || s === "running" ? 3000 : false;
-    },
+    refetchInterval: refetchWhileStatusActive<Scan>(),
   });
 
   // Direct one-click re-scan when the scan came from a connected repo (credential is
@@ -289,7 +288,7 @@ export default function ScanDetailPage() {
     mutationFn: () =>
       createCloudScan(projectId, { project_repo_id: scan!.project_repo_id!, scan_label: scan!.scan_label ?? undefined }),
     onSuccess: (createdScan) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
       toast.success("Re-scan started");
       router.push(`/projects/${projectId}/scans/${createdScan.id}`);
     },
@@ -299,14 +298,19 @@ export default function ScanDetailPage() {
   const completed = scan?.status === "completed";
 
   const { data: report } = useQuery({
-    queryKey: ["scans", scanId, "report"],
+    queryKey: queryKeys.scans.report(scanId),
     queryFn: () => getReport(scanId),
     enabled: completed,
     retry: false,
   });
 
   const { data: findings, isLoading: findingsLoading } = useQuery({
-    queryKey: ["scans", scanId, "findings", severity ?? "", kind ?? "", owaspFilter ?? "", priority ?? ""],
+    queryKey: queryKeys.scans.findings(scanId, {
+      severity,
+      kind,
+      owasp: owaspFilter,
+      priority,
+    }),
     queryFn: () => listFindings(scanId, { severity, kind, owasp: owaspFilter, priority }),
     enabled: completed,
     retry: false,

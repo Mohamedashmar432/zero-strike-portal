@@ -193,3 +193,41 @@ def test_reap_stuck_scans_marks_stale_running_failed(client, monkeypatch):
         assert (await Scan.get(fresh.id)).status == "running"
 
     asyncio.run(run())
+
+
+def test_reap_stuck_scan_with_retry_budget_requeues_then_dead_letters(client, monkeypatch):
+    monkeypatch.setattr(scan_queue_service.settings, "scan_timeout_seconds", 10)
+    monkeypatch.setattr(scan_queue_service.settings, "queue_stuck_multiplier", 3)
+
+    async def run():
+        stale_time = datetime.now(timezone.utc) - timedelta(seconds=1000)
+        scan = Scan(
+            project_id="qproj",
+            scan_type="cloud",
+            triggered_by="cloud",
+            status="running",
+            repo_url="https://github.com/example/repo",
+            max_attempts=2,
+            created_at=stale_time,
+            updated_at=stale_time,
+        )
+        await scan.insert()
+
+        # First reap: retry budget remains (retry_count 0 + 1 < max_attempts 2) -> requeued.
+        await scan_queue_service.reap_stuck_scans()
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "queued"
+        assert reloaded.retry_count == 1
+
+        # Simulate it getting claimed again and going stale a second time.
+        reloaded.status = "running"
+        reloaded.updated_at = stale_time
+        await reloaded.save()
+
+        # Second reap: retry budget exhausted (1 + 1 is not < 2) -> terminal, dead-lettered.
+        await scan_queue_service.reap_stuck_scans()
+        final = await Scan.get(scan.id)
+        assert final.status == "failed"
+        assert "retries exhausted" in final.error_message
+
+    asyncio.run(run())

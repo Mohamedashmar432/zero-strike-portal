@@ -15,7 +15,6 @@ so the same code path works on Windows (local dev) and Linux (container).
 import asyncio
 import base64
 import ipaddress
-import logging
 import os
 import shutil
 import socket
@@ -25,16 +24,42 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+import structlog
+
 from app.core.config import settings
+from app.core.retry import retry_transient
 from app.models.scan import Scan
 from app.schemas.report import GoReportIn
 from app.services import report_ingestion_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class CloudScanError(Exception):
     """A recoverable cloud-scan failure; message is surfaced (sanitized) on the scan."""
+
+
+class _TransientCloneError(CloudScanError):
+    """A git-clone failure that looks like a network blip rather than a real
+    auth/URL/branch problem -- worth a couple of quick retries."""
+
+
+# Substrings from git's stderr that indicate a transient network condition. Deliberately
+# narrow: retrying a genuine auth/URL/branch failure would just waste the scan's timeout
+# budget three times over before surfacing an error the user could actually act on.
+_TRANSIENT_GIT_PATTERNS = (
+    "could not resolve host",
+    "connection reset",
+    "connection timed out",
+    "the remote end hung up unexpectedly",
+    "recv failure",
+    "temporary failure in name resolution",
+)
+
+
+def _is_transient_git_error(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return any(pattern in lowered for pattern in _TRANSIENT_GIT_PATTERNS)
 
 
 def scanner_available() -> bool:
@@ -130,9 +155,21 @@ async def _clone(
     if branch:
         cmd += ["--branch", branch]
     cmd += [repo_url, workdir]
-    rc, _out, err = await _run(cmd, settings.scan_timeout_seconds, env=env)
-    if rc != 0:
-        raise CloudScanError(f"git clone failed (exit {rc}): {err.decode(errors='replace')}")
+
+    @retry_transient((_TransientCloneError,), max_attempts=3, base_delay=2.0)
+    async def _do_clone() -> None:
+        # A retried attempt must start from an empty dir -- git clone refuses a non-empty
+        # target, and a failed attempt can leave partial content behind in one that already existed.
+        shutil.rmtree(workdir, ignore_errors=True)
+        os.makedirs(workdir, exist_ok=True)
+        rc, _out, err = await _run(cmd, settings.scan_timeout_seconds, env=env)
+        if rc != 0:
+            message = err.decode(errors="replace")
+            if _is_transient_git_error(message):
+                raise _TransientCloneError(f"git clone failed (exit {rc}): {message}")
+            raise CloudScanError(f"git clone failed (exit {rc}): {message}")
+
+    await _do_clone()
 
 
 async def _scan_and_ingest(scan: Scan, workdir: str) -> None:

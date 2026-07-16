@@ -10,8 +10,10 @@ import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
+import { refetchWhileAnyItemActive } from "@/lib/api/polling";
 import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/api/project-repos";
 import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
+import { queryKeys } from "@/lib/api/query-keys";
 import { getReport } from "@/lib/api/reports";
 import { createCloudScan, listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
 import {
@@ -69,12 +71,12 @@ function OverviewTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { data: project } = useQuery({
-    queryKey: ["projects", projectId],
+    queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
   });
   // Shared query key with MembersTab, so this reuses that cache instead of re-fetching.
   const { data: members } = useQuery({
-    queryKey: ["projects", projectId, "members"],
+    queryKey: queryKeys.projects.members(projectId),
     queryFn: () => listMembers(projectId),
   });
   const owners = (members ?? []).filter((m) => m.role === "owner");
@@ -86,7 +88,7 @@ function OverviewTab({ projectId }: { projectId: string }) {
   const mutation = useMutation({
     mutationFn: () => updateProject(projectId, { name, description }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
       toast.success("Project updated");
       setEditing(false);
     },
@@ -96,7 +98,7 @@ function OverviewTab({ projectId }: { projectId: string }) {
   const updateTemplate = useMutation({
     mutationFn: (template: ReportTemplateValue) => updateProject(projectId, { report_template: template }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
       toast.success("Report template updated");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update report template"),
@@ -289,7 +291,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
   const { data: members, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "members"],
+    queryKey: queryKeys.projects.members(projectId),
     queryFn: () => listMembers(projectId),
   });
   const {
@@ -302,7 +304,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
   const invite = useMutation({
     mutationFn: (values: InviteMemberInput) => inviteMember(projectId, values.email),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "members"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(projectId) });
       toast.success("Invite sent");
       reset();
     },
@@ -312,7 +314,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
   const remove = useMutation({
     mutationFn: (memberId: string) => removeMember(projectId, memberId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "members"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(projectId) });
       toast.success("Member removed");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to remove member"),
@@ -322,7 +324,7 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
     mutationFn: ({ memberId, role }: { memberId: string; role: "owner" | "collaborator" }) =>
       updateMemberRole(projectId, memberId, role),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "members"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(projectId) });
       toast.success("Role updated");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update role"),
@@ -448,16 +450,15 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
 
 function ScansTab({ projectId }: { projectId: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "scans"],
+    queryKey: queryKeys.projects.scans(projectId),
     queryFn: () => listScans(projectId),
     // Poll while any scan is still running so cloud-scan status updates live.
-    refetchInterval: (q) =>
-      q.state.data?.items.some((s) => s.status === "pending" || s.status === "running") ? 3000 : false,
+    refetchInterval: refetchWhileAnyItemActive<Scan>(),
   });
 
   // Shared query key with RepositoriesTab so this reuses the same cache entry.
   const { data: repos } = useQuery({
-    queryKey: ["projects", projectId, "repos"],
+    queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
   const repoById = new Map((repos ?? []).map((r) => [r.id, r]));
@@ -469,7 +470,7 @@ function ScansTab({ projectId }: { projectId: string }) {
 
   const reportQueries = useQueries({
     queries: (data?.items ?? []).map((s) => ({
-      queryKey: ["scans", s.id, "report"],
+      queryKey: queryKeys.scans.report(s.id),
       queryFn: () => getReport(s.id),
       enabled: s.status === "completed",
       retry: false,
@@ -615,7 +616,7 @@ function ReauthDialog({
   const reauth = useMutation({
     mutationFn: (values: ReauthRepoInput) => reauthProjectRepo(projectId, repoId!, values.pat),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
       toast.success("Repository re-authenticated");
       reset();
       onClose();
@@ -655,14 +656,14 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "repos"],
+    queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
 
   const remove = useMutation({
     mutationFn: (repoId: string) => removeProjectRepo(projectId, repoId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "repos"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
       toast.success("Repository disconnected");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to disconnect repository"),
@@ -671,7 +672,7 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
   const scan = useMutation({
     mutationFn: (repoId: string) => createCloudScan(projectId, { project_repo_id: repoId }),
     onSuccess: (createdScan) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
       toast.success("Scan started");
       router.push(`/projects/${projectId}/scans/${createdScan.id}`);
     },
@@ -757,7 +758,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", projectId, "apiKeys"],
+    queryKey: queryKeys.projects.apiKeys(projectId),
     queryFn: () => listApiKeys(projectId),
   });
   const {
@@ -773,7 +774,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
   const create = useMutation({
     mutationFn: (values: CreateApiKeyInput) => createApiKey(projectId, values),
     onSuccess: (key) => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "apiKeys"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.apiKeys(projectId) });
       setRevealedToken(key.raw_token);
       reset({ expires_in_days: 90 });
     },
@@ -783,7 +784,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
   const revoke = useMutation({
     mutationFn: (id: string) => revokeApiKey(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "apiKeys"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.apiKeys(projectId) });
       toast.success("Project token revoked");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to revoke project token"),
@@ -898,7 +899,7 @@ export default function ProjectDetailPage() {
       ? tabParam
       : "overview";
   const { data: project } = useQuery({
-    queryKey: ["projects", projectId],
+    queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
   });
 

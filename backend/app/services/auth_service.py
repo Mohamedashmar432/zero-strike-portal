@@ -1,7 +1,7 @@
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import HTTPException, status
 
 from app.core import security
@@ -10,7 +10,7 @@ from app.models.project_member import ProjectMember
 from app.models.user import RefreshTokenRecord, User
 from app.services import email_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class AuthError(HTTPException):

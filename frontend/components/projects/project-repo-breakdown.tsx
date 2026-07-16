@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { SeverityCounts } from "@/lib/api/dashboard";
 import { listProjectRepos } from "@/lib/api/project-repos";
+import { queryKeys } from "@/lib/api/query-keys";
 import { getReport } from "@/lib/api/reports";
 import { listScans, type Scan } from "@/lib/api/scans";
 
@@ -23,7 +24,7 @@ const EMPTY_COUNTS: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, 
  */
 export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
   const { data: repos, isLoading: reposLoading } = useQuery({
-    queryKey: ["projects", projectId, "repos"],
+    queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
   const { data: scansPage, isLoading: scansLoading } = useQuery({
@@ -47,7 +48,7 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
 
   const reportQueries = useQueries({
     queries: matchedScans.map((scan) => ({
-      queryKey: ["scans", scan?.id, "report"],
+      queryKey: queryKeys.scans.report(scan?.id ?? ""),
       queryFn: () => getReport(scan!.id),
       enabled: !!scan && scan.status === "completed",
       retry: false,

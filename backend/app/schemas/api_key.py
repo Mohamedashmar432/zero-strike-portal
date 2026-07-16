@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.models.api_key import ApiKeyScope
+
 
 class ApiKeyCreateRequest(BaseModel):
     project_id: str
@@ -24,6 +26,7 @@ class ApiKeyResponse(BaseModel):
     project_id: str
     label: str
     prefix: str
+    scope: ApiKeyScope
     created_by: str
     created_at: datetime
     expires_at: datetime
