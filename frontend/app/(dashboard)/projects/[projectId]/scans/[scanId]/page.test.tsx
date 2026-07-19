@@ -122,6 +122,7 @@ describe("FindingItem AI analysis", () => {
       insight: {
         is_false_positive: false,
         false_positive_confidence: 0.9,
+        analysis_confidence: 0.9,
         verdict_reasoning: null,
         improved_description: "This is a real SQL injection.",
         adjusted_severity: null,
@@ -130,6 +131,7 @@ describe("FindingItem AI analysis", () => {
         cwe: [],
         cvss_score: null,
         explanation: "User input flows directly into the query.",
+        similar_finding_count: 2,
         provider: "anthropic",
         model_name: "claude-sonnet-5",
         updated_at: "2026-01-01T00:00:00Z",
@@ -138,6 +140,10 @@ describe("FindingItem AI analysis", () => {
 
     expect(await screen.findByText("Likely valid")).toBeDefined();
     expect(screen.getByText("User input flows directly into the query.")).toBeDefined();
+    // AI confidence comes from analysis_confidence (not the false-positive score).
+    expect(screen.getByText(/AI confidence: 90%/i)).toBeDefined();
+    // Recurring-finding tag (informative, not "duplicate").
+    expect(screen.getByText(/Found in 2 other locations/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /re-analyze/i })).toBeDefined();
     // The original trigger button is replaced by Re-analyze once there's a terminal result.
     expect(screen.queryByRole("button", { name: /^analyze with ai$/i })).toBeNull();
@@ -154,6 +160,7 @@ describe("FindingItem AI analysis", () => {
       insight: {
         is_false_positive: true,
         false_positive_confidence: 0.8,
+        analysis_confidence: null,
         verdict_reasoning: "parameterized query",
         improved_description: null,
         adjusted_severity: "low",
@@ -162,6 +169,7 @@ describe("FindingItem AI analysis", () => {
         cwe: [],
         cvss_score: null,
         explanation: null,
+        similar_finding_count: 0,
         provider: "anthropic",
         model_name: "claude-sonnet-5",
         updated_at: "2026-01-01T00:00:00Z",

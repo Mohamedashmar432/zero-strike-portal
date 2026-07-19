@@ -19,6 +19,10 @@ class AIScanInsight(Document):
     project_id: str
 
     summary: str | None = None
+    # intended = how many findings the job set out to analyze; analyzed = how many actually got an
+    # insight. When analyzed < intended, coverage was partial (an LLM rule-group failed); the UI
+    # shows "Analyzed X of Y" and a re-run backfills the gap (insights are cached by fingerprint).
+    total_findings_intended: int = 0
     total_findings_analyzed: int = 0
     false_positive_count: int = 0
     top_recommendations: list[str] = Field(default_factory=list)

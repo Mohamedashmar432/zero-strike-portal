@@ -32,7 +32,14 @@ export const queryKeys = {
     report: (scanId: string) => ["scans", scanId, "report"] as const,
     findings: (
       scanId: string,
-      filters: { severity?: string; kind?: string; owasp?: string; priority?: string }
+      filters: {
+        severity?: string;
+        kind?: string;
+        owasp?: string;
+        priority?: string;
+        page?: number;
+        pageSize?: number;
+      }
     ) =>
       [
         "scans",
@@ -42,6 +49,8 @@ export const queryKeys = {
         filters.kind ?? "",
         filters.owasp ?? "",
         filters.priority ?? "",
+        filters.page ?? 1,
+        filters.pageSize ?? 15,
       ] as const,
   },
   ai: {

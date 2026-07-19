@@ -10,6 +10,7 @@ export const AI_PROVIDERS = [
   "openrouter",
   "custom",
   "commandcode",
+  "groq",
 ] as const;
 
 // Self-hosted providers have no fixed default endpoint, so a base_url is mandatory for

@@ -24,8 +24,12 @@ class FindingInsight(BaseModel):
 
     is_false_positive: bool | None
     false_positive_confidence: float | None
+    # The AI's confidence in its own verdict (0-1) — what the UI shows as "AI confidence".
+    analysis_confidence: float | None = None
     verdict_reasoning: str | None
     improved_description: str | None
+    # How many other findings share this rule (same vuln recurring across the repo).
+    similar_finding_count: int = 0
     # Display-only AI severity overlay (None when the AI didn't override the scanner severity).
     adjusted_severity: Literal["critical", "high", "medium", "low", "info"] | None = None
     severity_reasoning: str | None = None
@@ -42,6 +46,7 @@ class ScanInsight(BaseModel):
     """AIScanInsight's fields, verbatim."""
 
     summary: str | None
+    total_findings_intended: int = 0
     total_findings_analyzed: int
     false_positive_count: int
     top_recommendations: list[str] = Field(default_factory=list)

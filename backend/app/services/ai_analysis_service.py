@@ -18,6 +18,7 @@ from beanie.operators import In
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import settings
+from app.core.retry import retry_transient
 from app.core.timeutils import as_utc
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.ai_finding_insight import AIFindingInsight
@@ -29,6 +30,7 @@ from app.services import ai_provider_config_service, audit_service, llm_client
 logger = structlog.get_logger(__name__)
 
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
+_SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 _JOB_STATUS_TO_API = {"queued": "queued", "running": "in_progress", "completed": "completed", "failed": "failed"}
 
 
@@ -83,6 +85,7 @@ _ENRICH_SYSTEM_PROMPT = (
     '      "explanation": "why this is or is not actually exploitable",\n'
     '      "is_false_positive": false,\n'
     '      "false_positive_confidence": 0.0,\n'
+    '      "analysis_confidence": 0.85,\n'
     '      "verdict_reasoning": "one sentence justifying the verdict",\n'
     '      "improved_description": "a clearer description of the issue",\n'
     '      "adjusted_severity": null,\n'
@@ -91,6 +94,8 @@ _ENRICH_SYSTEM_PROMPT = (
     "  ]\n"
     "}\n\n"
     "Rules:\n"
+    "0. analysis_confidence is YOUR confidence in this verdict/enrichment, from 0.0 to 1.0 "
+    "(distinct from false_positive_confidence). Always provide it.\n"
     "1. Output exactly one object per finding, each echoing its fingerprint verbatim.\n"
     "2. adjusted_severity MUST be one of critical, high, medium, low, info — or null when the "
     "scanner's severity is already correct. Only change it when the scanner is clearly wrong: "
@@ -116,6 +121,7 @@ class _FindingEnrichment(BaseModel):
     explanation: str | None = None
     is_false_positive: bool | None = None
     false_positive_confidence: float | None = None
+    analysis_confidence: float | None = None
     verdict_reasoning: str | None = None
     improved_description: str | None = None
     # Loose here (normalized to a valid severity or None at persist time) so a sloppy value from a
@@ -173,102 +179,138 @@ def _parse_enrichments(raw: dict) -> dict[str, _FindingEnrichment]:
     return by_fingerprint
 
 
-async def _analyze_chunk(
-    semaphore: asyncio.Semaphore,
-    rule_id: str,
-    chunk_findings: list[Finding],
-    project_id: str,
-    force: bool,
-    config,
-) -> list[AIFindingInsight]:
-    # Findings without a fingerprint can't be keyed into AIFindingInsight (its unique index
-    # is (fingerprint, project_id)) -- skip them; nothing invented, nothing stored for them.
-    fingerprinted = [f for f in chunk_findings if f.fingerprint]
-    if not fingerprinted:
-        return []
+def _representative(members: list[Finding]) -> Finding:
+    """The highest-severity member of a rule group -- the one finding we actually send to the LLM
+    for the whole group. Its verdict is fanned out to every member (see zero-strike-cli's
+    per-rule enrichment). Same vulnerability across N files = one LLM call, applied to all N."""
+    return min(members, key=lambda f: _SEV_ORDER.get((f.severity or "").lower(), 9))
 
+
+async def _persist_insight(
+    finding: Finding, item: _FindingEnrichment, config, similar_finding_count: int, now: datetime
+) -> AIFindingInsight:
+    """Upsert one AIFindingInsight (keyed by fingerprint, project_id) from a rule's enrichment.
+    Called once per finding in the group -- the rule's single verdict copied onto each occurrence."""
+    insight = await AIFindingInsight.find_one(
+        AIFindingInsight.fingerprint == finding.fingerprint,
+        AIFindingInsight.project_id == finding.project_id,
+    )
+    if insight is None:
+        insight = AIFindingInsight(fingerprint=finding.fingerprint, project_id=finding.project_id)
+    insight.owasp = item.owasp
+    insight.cwe = item.cwe
+    insight.cvss_score = item.cvss_score
+    insight.explanation = item.explanation
+    insight.is_false_positive = item.is_false_positive
+    insight.false_positive_confidence = item.false_positive_confidence
+    insight.analysis_confidence = item.analysis_confidence
+    insight.verdict_reasoning = item.verdict_reasoning
+    insight.improved_description = item.improved_description
+    # Normalize the AI severity overlay: keep it only if it's a real severity level,
+    # otherwise drop the override (and its reasoning) rather than trusting a sloppy value.
+    adjusted = (item.adjusted_severity or "").strip().lower() or None
+    insight.adjusted_severity = adjusted if adjusted in _SEVERITIES else None
+    insight.severity_reasoning = item.severity_reasoning if insight.adjusted_severity else None
+    insight.similar_finding_count = similar_finding_count
+    insight.provider = config.provider if config else None
+    insight.model_name = config.model_name if config else None
+    insight.updated_at = now
+    await insight.save()
+    return insight
+
+
+@retry_transient((llm_client.LLMMalformedResponseError,), max_attempts=2, base_delay=1.0)
+async def _enrich_completion(messages: list[dict]) -> dict:
+    """One enrichment call, capped by max_tokens so a small local model can't run past its own
+    output limit mid-JSON and truncate. A malformed/garbled response is retried once (the model
+    often produces valid JSON on a second pass) before it counts as a coverage gap."""
+    return await llm_client.get_completion(messages, max_tokens=settings.ai_analysis_max_output_tokens)
+
+
+async def _group_cached(members: list[Finding], project_id: str) -> list[AIFindingInsight] | None:
+    """If every fingerprinted member already has an insight, return them (no LLM call needed).
+    A single missing member returns None so the whole group is re-enriched -- which is exactly
+    what makes a partial run re-runnable: rerun with force=False backfills only the gaps."""
+    fingerprinted = [m for m in members if m.fingerprint]
+    if not fingerprinted:
+        return []  # nothing keyable in this group -- treat as resolved, no insight to store
+    cached: list[AIFindingInsight] = []
+    for f in fingerprinted:
+        existing = await AIFindingInsight.find_one(
+            AIFindingInsight.fingerprint == f.fingerprint, AIFindingInsight.project_id == project_id
+        )
+        if existing is None:
+            return None
+        cached.append(existing)
+    return cached
+
+
+async def _enrich_group_chunk(
+    semaphore: asyncio.Semaphore,
+    chunk_groups: list[tuple[str, list[Finding]]],
+    project_id: str,
+    config,
+) -> tuple[list[AIFindingInsight], int]:
+    """Enrich up to batch_size RULE GROUPS in one LLM call: send one representative per group,
+    then fan each rule's verdict out to every member of its group. Returns (saved insights,
+    number of groups actually covered) -- a group whose representative the model omitted is a
+    coverage gap this round (not a silent drop; it's re-runnable). Findings without a fingerprint
+    can't be keyed into AIFindingInsight, so they're skipped."""
     async with semaphore:
-        if not force:
-            cached: list[AIFindingInsight] = []
-            all_cached = True
-            for f in fingerprinted:
-                existing = await AIFindingInsight.find_one(
-                    AIFindingInsight.fingerprint == f.fingerprint,
-                    AIFindingInsight.project_id == project_id,
-                )
-                if existing is None:
-                    all_cached = False
-                    break
-                cached.append(existing)
-            if all_cached:
-                return cached
+        rep_to_group: dict[str, list[Finding]] = {}
+        payload_reps: list[dict] = []
+        for rule_id, members in chunk_groups:
+            fp_members = [m for m in members if m.fingerprint]
+            if not fp_members:
+                continue
+            rep = _representative(fp_members)
+            rep_to_group[rep.fingerprint] = fp_members
+            payload_reps.append({"fingerprint": rep.fingerprint, "rule_id": rule_id, **_finding_payload(rep)})
+        if not payload_reps:
+            return [], 0
 
         messages = [
             {"role": "system", "content": _ENRICH_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "rule_id": rule_id,
-                        "findings": [
-                            {"fingerprint": f.fingerprint, **_finding_payload(f)} for f in fingerprinted
-                        ],
-                    }
-                ),
-            },
+            {"role": "user", "content": json.dumps({"findings": payload_reps})},
         ]
-        raw = await llm_client.get_completion(messages)
+        raw = await _enrich_completion(messages)
         by_fingerprint = _parse_enrichments(raw)
 
         now = datetime.now(timezone.utc)
         saved: list[AIFindingInsight] = []
-        for f in fingerprinted:
-            item = by_fingerprint.get(f.fingerprint)
+        covered = 0
+        for rep_fp, fp_members in rep_to_group.items():
+            item = by_fingerprint.get(rep_fp)
             if item is None:
-                continue  # LLM omitted this finding -- leave any existing insight untouched
-            insight = await AIFindingInsight.find_one(
-                AIFindingInsight.fingerprint == f.fingerprint, AIFindingInsight.project_id == project_id
-            )
-            if insight is None:
-                insight = AIFindingInsight(fingerprint=f.fingerprint, project_id=project_id)
-            insight.owasp = item.owasp
-            insight.cwe = item.cwe
-            insight.cvss_score = item.cvss_score
-            insight.explanation = item.explanation
-            insight.is_false_positive = item.is_false_positive
-            insight.false_positive_confidence = item.false_positive_confidence
-            insight.verdict_reasoning = item.verdict_reasoning
-            insight.improved_description = item.improved_description
-            # Normalize the AI severity overlay: keep it only if it's a real severity level,
-            # otherwise drop the override (and its reasoning) rather than trusting a sloppy value.
-            adjusted = (item.adjusted_severity or "").strip().lower() or None
-            insight.adjusted_severity = adjusted if adjusted in _SEVERITIES else None
-            insight.severity_reasoning = item.severity_reasoning if insight.adjusted_severity else None
-            insight.provider = config.provider
-            insight.model_name = config.model_name
-            insight.updated_at = now
-            await insight.save()
-            saved.append(insight)
-        return saved
+                continue  # rep omitted -> whole group left for a re-run to backfill
+            covered += 1
+            similar = len(fp_members) - 1  # other files/locations with this same rule
+            for member in fp_members:
+                saved.append(await _persist_insight(member, item, config, similar, now))
+        return saved, covered
 
 
 async def analyze_findings_batch(
     findings: list[Finding], *, force: bool = False, progress_cb=None
 ) -> list[AIFindingInsight]:
-    """Groups findings by rule_id, then chunks each group into provider-sized batches (one LLM
-    call per chunk, so a huge rule group doesn't overflow a small local model). Chunks run
-    concurrently and tolerate partial failure -- a chunk that fails is logged and skipped, and
-    the successful chunks still persist. Only if *every* chunk fails do we re-raise (so the job
-    is marked failed with the real upstream error, not silently empty).
+    """Groups findings by rule_id and enriches ONE representative per group, fanning that verdict
+    out to every member (same vulnerability across N files = one LLM call, applied to all N, each
+    tagged with how many siblings it has). Representatives are chunked into provider-sized batches
+    so even hundreds of distinct rules stay within the model's context, and chunks run concurrently.
 
-    progress_cb (optional async callable(completed:int, total:int)) is invoked once the chunk
-    count is known and again as each chunk finishes -- drives the "AI analyzing · N%" tag."""
+    Partial-tolerant: a rule group whose representative fails or is omitted is a coverage GAP, not a
+    silent success -- the caller (synthesize_scan) records analyzed-vs-intended, and a re-run
+    (force=False) backfills only the gaps. Only if *every* chunk errors do we re-raise, so a wholly
+    broken provider marks the job failed rather than "completed with 0 findings".
+
+    progress_cb (optional async callable(completed, total)) reports RULE GROUPS resolved (cached or
+    enriched) out of total groups -- it advances only on real coverage, never on a mere attempt."""
     if not findings:
         return []
     project_id = findings[0].project_id
-    # Only needed for batch sizing + stamping provider/model on newly-saved insights. Don't hard-fail
-    # if it's absent -- a fully-cached batch (force=False) short-circuits without any LLM call, and a
-    # non-cached chunk will raise LLMNotConfiguredError from get_completion itself if there's no provider.
+    # Only needed for batch sizing + stamping provider/model. Don't hard-fail if absent: a fully-cached
+    # batch short-circuits without any LLM call, and an actual enrichment call raises
+    # LLMNotConfiguredError from get_completion itself when there's no provider.
     config = await ai_provider_config_service.get_active_config()
     batch_size = (
         settings.ai_analysis_local_batch_size
@@ -279,49 +321,54 @@ async def analyze_findings_batch(
     groups: dict[str, list[Finding]] = defaultdict(list)
     for f in findings:
         groups[f.rule_id or "unknown"].append(f)
+    group_items = list(groups.items())
 
-    # Flatten to (rule_id, chunk) units so a 128-finding rule group becomes several bounded calls.
-    chunks: list[tuple[str, list[Finding]]] = []
-    for rule_id, group in groups.items():
-        for i in range(0, len(group), batch_size):
-            chunks.append((rule_id, group[i : i + batch_size]))
-
-    total = len(chunks)
+    total = len(group_items)  # progress is measured in rule groups, not raw findings
+    completed = 0
     if progress_cb:
         await progress_cb(0, total)
 
+    all_insights: list[AIFindingInsight] = []
+    to_enrich: list[tuple[str, list[Finding]]] = []
+
+    # Cache pass: fully-cached groups resolve with no LLM call (and count toward progress).
+    for rule_id, members in group_items:
+        if not force:
+            cached = await _group_cached(members, project_id)
+            if cached is not None:
+                all_insights.extend(cached)
+                completed += 1
+                if progress_cb:
+                    await progress_cb(completed, total)
+                continue
+        to_enrich.append((rule_id, members))
+
+    chunks = [to_enrich[i : i + batch_size] for i in range(0, len(to_enrich), batch_size)]
     semaphore = asyncio.Semaphore(settings.ai_analysis_concurrency)
-    completed = 0
 
-    async def _run(rule_id: str, chunk: list[Finding]):
+    async def _run(chunk_groups: list[tuple[str, list[Finding]]]):
         nonlocal completed
-        try:
-            return await _analyze_chunk(semaphore, rule_id, chunk, project_id, force, config)
-        finally:
-            # Bump progress whether the chunk succeeded or failed -- the tag tracks work done,
-            # not work succeeded. Single-threaded asyncio makes the increment race-free.
-            completed += 1
-            if progress_cb:
-                await progress_cb(completed, total)
+        insights, covered = await _enrich_group_chunk(semaphore, chunk_groups, project_id, config)
+        completed += covered  # advance only by groups actually enriched (honest partial signal)
+        if progress_cb:
+            await progress_cb(completed, total)
+        return insights
 
-    results = await asyncio.gather(
-        *(_run(rule_id, chunk) for rule_id, chunk in chunks),
-        return_exceptions=True,
-    )
+    results = await asyncio.gather(*(_run(c) for c in chunks), return_exceptions=True)
 
     errors = [r for r in results if isinstance(r, Exception)]
-    all_insights: list[AIFindingInsight] = [
-        insight for r in results if not isinstance(r, Exception) for insight in r
-    ]
+    for r in results:
+        if not isinstance(r, Exception):
+            all_insights.extend(r)
     for err in errors:
         logger.warning("ai analysis chunk failed", error=str(err))
     if chunks and len(errors) == len(chunks):
-        raise errors[0]  # every chunk failed -- surface the real upstream error to the job
+        raise errors[0]  # every enrichment chunk failed -- surface the real upstream error
     return all_insights
 
 
 async def analyze_finding(finding: Finding, *, force: bool = False) -> AIFindingInsight:
-    """Single-finding convenience wrapper over analyze_findings_batch."""
+    """Single-finding convenience wrapper over analyze_findings_batch (one group, one rep call)."""
     if not finding.fingerprint:
         raise ValueError("Finding has no fingerprint; cannot run AI analysis")
     insights = await analyze_findings_batch([finding], force=force)
@@ -333,10 +380,17 @@ async def analyze_finding(finding: Finding, *, force: bool = False) -> AIFinding
     )
 
 
-async def synthesize_scan(scan: Scan, insights: list[AIFindingInsight]) -> AIScanInsight:
+async def synthesize_scan(
+    scan: Scan, insights: list[AIFindingInsight], *, intended: int | None = None
+) -> AIScanInsight:
     """Reduces the already-computed AIFindingInsight list into one AIScanInsight -- one
-    additional summarization LLM call, not a second full analysis pass."""
+    additional summarization LLM call, not a second full analysis pass.
+
+    `intended` is how many findings the job set out to analyze; `total` (len(insights)) is how many
+    actually got an insight. When intended > total, coverage was partial and the summary says so --
+    the UI shows "Analyzed X of Y" instead of pretending the truncated count is the whole scan."""
     total = len(insights)
+    intended = intended if intended is not None else total
     false_positive_count = sum(1 for i in insights if i.is_false_positive)
 
     config = await ai_provider_config_service.get_active_config()
@@ -349,7 +403,12 @@ async def synthesize_scan(scan: Scan, insights: list[AIFindingInsight]) -> AISca
         existing = AIScanInsight(scan_id=str(scan.id), project_id=scan.project_id)
 
     if not insights:
-        existing.summary = "No findings were analyzed."
+        existing.summary = (
+            "No findings were analyzed." if not intended
+            else f"None of the {intended} findings could be analyzed — the AI provider returned no "
+            "usable results. Re-run analysis to try again."
+        )
+        existing.total_findings_intended = intended
         existing.total_findings_analyzed = 0
         existing.false_positive_count = 0
         existing.top_recommendations = []
@@ -381,6 +440,7 @@ async def synthesize_scan(scan: Scan, insights: list[AIFindingInsight]) -> AISca
             ),
         },
     ]
+    coverage = f"{total} of {intended}" if intended > total else f"{total}"
     # The per-finding insights are already persisted by this point; a failed summary must NOT
     # fail the whole scan job. Validate before mutating `existing`, and fall back to a computed
     # summary on ANY LLM error (malformed JSON, wrong shape, or a permanent error such as a
@@ -393,12 +453,17 @@ async def synthesize_scan(scan: Scan, insights: list[AIFindingInsight]) -> AISca
     except (llm_client.LLMError, ValidationError):
         logger.warning("scan synthesis response unusable; using computed fallback", scan_id=str(scan.id))
         summary = (
-            f"Analyzed {total} findings; {false_positive_count} flagged as likely false positives. "
+            f"Analyzed {coverage} findings; {false_positive_count} flagged as likely false positives. "
             "See the enriched findings below."
         )
         recommendations = []
+    # Prepend a partial-coverage note even to a model-written summary, so an incomplete run never
+    # reads as a full one (re-run to backfill the rest -- cached insights make it cheap).
+    if intended > total:
+        summary = f"Analyzed {coverage} findings (re-run to analyze the rest). {summary}"
 
     existing.summary = summary
+    existing.total_findings_intended = intended
     existing.total_findings_analyzed = total
     existing.false_positive_count = false_positive_count
     existing.top_recommendations = recommendations
@@ -453,7 +518,7 @@ async def run_job(job: AIAnalysisJob) -> None:
                 )
 
             insights = await analyze_findings_batch(findings, force=job.force, progress_cb=_progress)
-            await synthesize_scan(scan, insights)
+            await synthesize_scan(scan, insights, intended=len(findings))
     except Exception as exc:
         logger.exception("ai analysis job failed", job_id=str(job.id), kind=job.kind)
         now = datetime.now(timezone.utc)

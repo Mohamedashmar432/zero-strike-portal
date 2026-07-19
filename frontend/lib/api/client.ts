@@ -2,12 +2,24 @@ import { clearTokens, getTokens, setTokens } from "./token-store";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
+// FastAPI puts the reason under `detail`: a plain string for our HTTPExceptions, but an
+// array of {loc, msg, ...} objects for 422 validation errors. String()-ing the latter gives
+// "[object Object]", so pull out the msg(s) instead.
+function formatDetail(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((e) => (e && typeof e === "object" && "msg" in e ? String((e as { msg: unknown }).msg) : String(e)));
+    if (msgs.length) return msgs.join("; ");
+  }
+  return `Request failed (${status})`;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
 
   constructor(status: number, body: unknown) {
-    super(typeof body === "object" && body && "detail" in body ? String((body as { detail: unknown }).detail) : `Request failed (${status})`);
+    super(formatDetail(body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : undefined, status));
     this.status = status;
     this.body = body;
   }

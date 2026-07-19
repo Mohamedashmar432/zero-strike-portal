@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Download, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
 import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
@@ -67,6 +68,8 @@ function findingVerdict(insight: FindingInsight | null | undefined): {
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const KINDS: FindingKind[] = ["sast", "secret", "sca", "config"];
 const ALL = "__all__";
+// Findings-per-page choices: default 15, selectable up to 30.
+const PAGE_SIZE_OPTIONS = [15, 20, 25, 30];
 
 function fileLine(file: string, line: number | null) {
   return line ? `${file}:${line}` : file;
@@ -313,9 +316,14 @@ export function FindingItem({
                 from AI-generated content. */}
             {showResultSection && (
               <div className="space-y-2 border-t border-border pt-4">
-                <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  AI Analysis
-                </h6>
+                <div className="flex items-center justify-between gap-2">
+                  <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    AI Analysis
+                  </h6>
+                  {/* Progress for single-finding analysis: QUEUED → ANALYZING → (self-hides).
+                      Mirrors the bulk badge so the user sees it's working, not stuck. */}
+                  <AiStatusBadge status={analysis?.status} startedAt={analysis?.started_at} />
+                </div>
                 {isAnalyzing && (
                   <div className="space-y-2">
                     <Skeleton className="h-4 w-1/3" />
@@ -326,10 +334,18 @@ export function FindingItem({
                   <div className="space-y-2 rounded-lg border border-border bg-background p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       {verdict && <Badge variant={verdict.variant}>{verdict.label}</Badge>}
-                      {analysis.insight.false_positive_confidence != null && (
+                      {analysis.insight.analysis_confidence != null && (
                         <span className="text-xs text-muted-foreground">
-                          {Math.round(analysis.insight.false_positive_confidence * 100)}% confidence
+                          AI confidence: {Math.round(analysis.insight.analysis_confidence * 100)}%
                         </span>
+                      )}
+                      {/* NOT "duplicate" — every occurrence is a real issue to fix. This flags that
+                          the same rule recurs elsewhere so it isn't dismissed as a one-off. */}
+                      {analysis.insight.similar_finding_count > 0 && (
+                        <Badge variant="outline" title="The same vulnerability rule was found elsewhere in this scan. Each location must be fixed.">
+                          Found in {analysis.insight.similar_finding_count} other{" "}
+                          {analysis.insight.similar_finding_count === 1 ? "location" : "locations"} — fix each
+                        </Badge>
                       )}
                     </div>
                     {analysis.insight.adjusted_severity &&
@@ -391,6 +407,9 @@ export default function ScanDetailPage() {
   const [owaspFilter, setOwaspFilter] = useState<string>();
   const [priority, setPriority] = useState<PriorityTier>();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  // Findings per page — user-selectable (default 15, up to 30, see PAGE_SIZE_OPTIONS).
+  const [pageSize, setPageSize] = useState(15);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [rescanDialogOpen, setRescanDialogOpen] = useState(false);
@@ -461,11 +480,32 @@ export default function ScanDetailPage() {
       kind,
       owasp: owaspFilter,
       priority,
+      page,
+      pageSize,
     }),
-    queryFn: () => listFindings(scanId, { severity, kind, owasp: owaspFilter, priority }),
+    queryFn: () => listFindings(scanId, { severity, kind, owasp: owaspFilter, priority, page, pageSize }),
     enabled: completed,
     retry: false,
+    // Keep the current page visible while the next page loads. Without this, `findings` goes
+    // undefined mid-fetch, `findingsTotalPages` collapses to 1, and the snap-back below would
+    // immediately bounce `page` back to 1 — which made Next/Previous appear to do nothing.
+    placeholderData: keepPreviousData,
   });
+
+  const findingsTotalPages = findings ? Math.max(1, Math.ceil(findings.total / pageSize)) : 1;
+  // Snap `page` back if a filter/page-size change shrank the result set below the current page
+  // (adjust-during-render pattern). Guarded on `findings` being present so it never fires during
+  // a page refetch — that false trigger was the pagination bug.
+  const [prevFindingsTotalPages, setPrevFindingsTotalPages] = useState(findingsTotalPages);
+  if (findings && findingsTotalPages !== prevFindingsTotalPages) {
+    setPrevFindingsTotalPages(findingsTotalPages);
+    if (page > findingsTotalPages) setPage(findingsTotalPages);
+  }
+
+  // Filters/page-size re-query server-side, so reset to page 1 whenever any of them changes.
+  function resetToFirstPage() {
+    setPage(1);
+  }
 
   const { data: aiStatus } = useQuery({
     queryKey: queryKeys.ai.status(),
@@ -704,21 +744,30 @@ export default function ScanDetailPage() {
               {
                 type: "select",
                 value: severity ?? ALL,
-                onChange: (v) => setSeverity(v === ALL ? undefined : (v as Severity)),
+                onChange: (v) => {
+                  setSeverity(v === ALL ? undefined : (v as Severity));
+                  resetToFirstPage();
+                },
                 placeholder: "Severity",
                 options: [{ value: ALL, label: "All severities" }, ...SEVERITIES.map((s) => ({ value: s, label: s }))],
               },
               {
                 type: "select",
                 value: kind ?? ALL,
-                onChange: (v) => setKind(v === ALL ? undefined : (v as FindingKind)),
+                onChange: (v) => {
+                  setKind(v === ALL ? undefined : (v as FindingKind));
+                  resetToFirstPage();
+                },
                 placeholder: "Kind",
                 options: [{ value: ALL, label: "All kinds" }, ...KINDS.map((k) => ({ value: k, label: k }))],
               },
               {
                 type: "select",
                 value: owaspFilter ?? ALL,
-                onChange: (v) => setOwaspFilter(v === ALL ? undefined : v),
+                onChange: (v) => {
+                  setOwaspFilter(v === ALL ? undefined : v);
+                  resetToFirstPage();
+                },
                 placeholder: "OWASP category",
                 options: [
                   { value: ALL, label: "All OWASP categories" },
@@ -728,7 +777,10 @@ export default function ScanDetailPage() {
               {
                 type: "select",
                 value: priority ?? ALL,
-                onChange: (v) => setPriority(v === ALL ? undefined : (v as PriorityTier)),
+                onChange: (v) => {
+                  setPriority(v === ALL ? undefined : (v as PriorityTier));
+                  resetToFirstPage();
+                },
                 placeholder: "Priority",
                 options: [
                   { value: ALL, label: "All priorities" },
@@ -761,10 +813,57 @@ export default function ScanDetailPage() {
               ))}
             </div>
           </DataTableCard>
-          {findings && findings.total > findings.items.length && (
-            <p className="text-center text-xs text-muted-foreground">
-              Showing {findings.items.length} of {findings.total} findings.
-            </p>
+          {findings && findings.total > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {/* ponytail: search filters only the current page's items, not the whole scan.
+                    Server-side text search is out of scope; page + facet filters cover navigation. */}
+                <span>
+                  Page {page} of {findingsTotalPages} · {findings.total} findings
+                </span>
+                <span aria-hidden>·</span>
+                <span className="flex items-center gap-1">
+                  Show
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => {
+                      setPageSize(Number(v));
+                      resetToFirstPage();
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="h-7 w-[4.5rem]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  per page
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= findingsTotalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           )}
           <footer className="border-t border-border pt-6 text-center text-xs text-muted-foreground">
             ZeroStrike Security Platform Scan Engine

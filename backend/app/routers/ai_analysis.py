@@ -45,8 +45,10 @@ def _to_finding_insight(insight: AIFindingInsight | None) -> FindingInsight | No
     return FindingInsight(
         is_false_positive=insight.is_false_positive,
         false_positive_confidence=insight.false_positive_confidence,
+        analysis_confidence=insight.analysis_confidence,
         verdict_reasoning=insight.verdict_reasoning,
         improved_description=insight.improved_description,
+        similar_finding_count=insight.similar_finding_count,
         adjusted_severity=insight.adjusted_severity,
         severity_reasoning=insight.severity_reasoning,
         owasp=insight.owasp,
@@ -64,6 +66,7 @@ def _to_scan_insight(insight: AIScanInsight | None) -> ScanInsight | None:
         return None
     return ScanInsight(
         summary=insight.summary,
+        total_findings_intended=insight.total_findings_intended,
         total_findings_analyzed=insight.total_findings_analyzed,
         false_positive_count=insight.false_positive_count,
         top_recommendations=insight.top_recommendations,

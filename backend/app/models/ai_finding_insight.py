@@ -31,6 +31,10 @@ class AIFindingInsight(Document):
     # Verdict/quality-review, beyond what the CLI does: does this finding actually hold up?
     is_false_positive: bool | None = None
     false_positive_confidence: float | None = None
+    # The AI's confidence in its own verdict/enrichment (0-1) — distinct from
+    # false_positive_confidence (which is only about the is_false_positive judgment and is ~0 for
+    # genuine findings). This is the value surfaced to users as "AI confidence".
+    analysis_confidence: float | None = None
     verdict_reasoning: str | None = None
     # Display-only AI severity overlay: when the AI judges the scanner's severity clearly wrong,
     # it sets adjusted_severity (else None). The scanner's Finding.severity stays the immutable
@@ -42,6 +46,11 @@ class AIFindingInsight(Document):
     # rationale/remediation are never overwritten -- this is a separate, clearly-labeled
     # layer so the original detection stays traceable/auditable.
     improved_description: str | None = None
+
+    # How many OTHER findings share this finding's rule_id in the analyzed set — i.e. the same
+    # vulnerability pattern recurring across the repo. Surfaced as an informative "found in N other
+    # locations" tag (NOT "duplicate" — every occurrence is a real issue that must be fixed).
+    similar_finding_count: int = 0
 
     provider: str | None = None
     model_name: str | None = None
