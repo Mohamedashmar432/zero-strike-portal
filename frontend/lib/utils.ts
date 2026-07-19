@@ -23,9 +23,16 @@ const RELATIVE_TIME_UNITS: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] =
   { unit: "minute", ms: 60 * 1000 },
 ]
 
+// The backend serializes timestamps as naive UTC (no trailing Z/offset — Mongo returns
+// tz-naive datetimes). `new Date()` would parse those as LOCAL time, skewing every relative/
+// absolute display by the viewer's UTC offset. Treat a bare timestamp as UTC.
+export function parseApiDate(iso: string): Date {
+  return new Date(/([zZ]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`)
+}
+
 // Coarse "2 minutes ago" / "in 3 days" via Intl.RelativeTimeFormat — no date library.
 export function formatRelativeTime(iso: string): string {
-  const diffMs = new Date(iso).getTime() - Date.now()
+  const diffMs = parseApiDate(iso).getTime() - Date.now()
   const absMs = Math.abs(diffMs)
   for (const { unit, ms } of RELATIVE_TIME_UNITS) {
     if (absMs >= ms) return relativeTimeFormatter.format(Math.round(diffMs / ms), unit)

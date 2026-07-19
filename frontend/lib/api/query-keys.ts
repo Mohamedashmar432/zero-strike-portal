@@ -26,6 +26,8 @@ export const queryKeys = {
       ["projects", projectId, "owasp-summary", projectRepoId] as const,
     repoScanHistory: (projectId: string, repoId: string) =>
       ["projects", projectId, "repos", repoId, "scan-history"] as const,
+    scanActivity: (projectId: string) => ["projects", projectId, "scan-activity"] as const,
+    aiUsage: (projectId: string) => ["projects", projectId, "ai-usage"] as const,
   },
   scans: {
     detail: (scanId: string) => ["scans", scanId] as const,

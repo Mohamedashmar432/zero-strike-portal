@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
@@ -12,7 +12,8 @@ import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/api/project-repos";
-import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
+import { getProject, getProjectScanActivity } from "@/lib/api/projects";
+import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 import { getReport } from "@/lib/api/reports";
 import { createCloudScan, listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
@@ -48,17 +49,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/providers/auth-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/common/stat-card";
-import { RepoScanTrendChart } from "@/components/projects/repo-scan-trend-chart";
-import { ProjectOwaspSection } from "@/components/projects/project-owasp-section";
-import {
-  ReportTemplatePicker,
-  type ReportTemplateValue,
-} from "@/components/reports/report-template-picker";
+import { ProjectHistoryTab } from "@/components/projects/project-history-tab";
+import { ProjectComplianceTab } from "@/components/projects/project-compliance-tab";
+import { ProjectSettingsTab } from "@/components/projects/project-settings-tab";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { projectRiskStatus, SeverityCountPills } from "@/components/severity/severity-count-pills";
-import { cn, getInitials } from "@/lib/utils";
+import { cn, getInitials, parseApiDate } from "@/lib/utils";
 import { roleLabel } from "@/lib/role-labels";
 import type { SeverityCounts } from "@/lib/api/dashboard";
 
@@ -68,9 +66,25 @@ function canManage(role: string | undefined) {
   return role === "owner" || role === "admin";
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  github: "GitHub",
+  azure_devops: "Azure DevOps",
+};
+
+function providerLabel(p: string) {
+  return PROVIDER_LABELS[p] ?? p;
+}
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[9rem_1fr] items-start gap-2 py-2 text-sm">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0">{children}</dd>
+    </div>
+  );
+}
+
 function OverviewTab({ projectId }: { projectId: string }) {
-  const queryClient = useQueryClient();
-  const router = useRouter();
   const { data: project } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
@@ -80,45 +94,32 @@ function OverviewTab({ projectId }: { projectId: string }) {
     queryKey: queryKeys.projects.members(projectId),
     queryFn: () => listMembers(projectId),
   });
+  const { data: repos } = useQuery({
+    queryKey: queryKeys.projects.repos(projectId),
+    queryFn: () => listProjectRepos(projectId),
+  });
+  const { data: activity } = useQuery({
+    queryKey: queryKeys.projects.scanActivity(projectId),
+    queryFn: () => getProjectScanActivity(projectId),
+  });
+  const { data: aiUsage } = useQuery({
+    queryKey: queryKeys.projects.aiUsage(projectId),
+    queryFn: () => getProjectAiUsage(projectId),
+  });
+
   const owners = (members ?? []).filter((m) => m.role === "owner");
-
-  const [name, setName] = useState(project?.name ?? "");
-  const [description, setDescription] = useState(project?.description ?? "");
-  const [editing, setEditing] = useState(false);
-
-  const mutation = useMutation({
-    mutationFn: () => updateProject(projectId, { name, description }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
-      toast.success("Project updated");
-      setEditing(false);
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update project"),
-  });
-
-  const updateTemplate = useMutation({
-    mutationFn: (template: ReportTemplateValue) => updateProject(projectId, { report_template: template }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
-      toast.success("Report template updated");
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update report template"),
-  });
-
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [confirmName, setConfirmName] = useState("");
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteProject(projectId),
-    onSuccess: () => {
-      toast.success("Project deleted");
-      router.push("/projects");
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete project"),
-  });
 
   if (!project) return <Skeleton className="h-32 w-full" />;
 
-  const risk = projectRiskStatus(project.findings_by_severity ?? EMPTY_SEVERITY_COUNTS);
+  // Risk + overall findings reflect CURRENT posture (latest scan per repo), not all-time.
+  const currentCounts = activity?.current_findings ?? project.findings_by_severity ?? EMPTY_SEVERITY_COUNTS;
+  const risk = projectRiskStatus(currentCounts);
+  const sources = [...new Set((repos ?? []).map((r) => providerLabel(r.provider)))];
+  const connectedCount = activity?.repos.filter((g) => g.repo_id).length ?? repos?.length ?? 0;
+
+  const aiUsageText = aiUsage?.enabled
+    ? [aiUsage.active_provider, aiUsage.active_model].filter(Boolean).join(" · ") || "Enabled"
+    : "Not configured";
 
   return (
     <div className="space-y-6">
@@ -126,66 +127,41 @@ function OverviewTab({ projectId }: { projectId: string }) {
         <CardHeader>
           <CardTitle>Overview</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {editing ? (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="p-name">Name</Label>
-                <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="p-desc">Description</Label>
-                <Input id="p-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-                  {mutation.isPending ? "Saving…" : "Save"}
-                </Button>
-                <Button variant="ghost" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">{project.description || "No description."}</p>
-              <dl className="grid grid-cols-2 gap-2 text-sm">
-                <dt className="text-muted-foreground">Last scan</dt>
-                <dd>{project.last_scan_at ? new Date(project.last_scan_at).toLocaleString() : "Never"}</dd>
-                <dt className="text-muted-foreground">Status</dt>
-                <dd>{project.is_archived ? "Archived" : "Active"}</dd>
-                <dt className="text-muted-foreground">Owners</dt>
-                <dd>
-                  {owners.length === 0 ? (
-                    "—"
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {owners.map((o) => (
-                        <span key={o.id} className="flex items-center gap-1.5">
-                          <Avatar size="sm">
-                            <AvatarFallback>{getInitials(o.name ?? o.invited_email)}</AvatarFallback>
-                          </Avatar>
-                          {o.name ?? o.invited_email}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </dd>
-              </dl>
-              {canManage(project.my_role) && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setName(project.name);
-                    setDescription(project.description ?? "");
-                    setEditing(true);
-                  }}
-                >
-                  Edit
-                </Button>
+        <CardContent>
+          <dl className="divide-y">
+            <DetailRow label="Name">{project.name}</DetailRow>
+            <DetailRow label="Owner">
+              {owners.length === 0 ? (
+                "—"
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  {owners.map((o) => (
+                    <span key={o.id} className="flex items-center gap-1.5">
+                      <Avatar size="sm">
+                        <AvatarFallback>{getInitials(o.name ?? o.invited_email)}</AvatarFallback>
+                      </Avatar>
+                      {o.name ?? o.invited_email}
+                    </span>
+                  ))}
+                </div>
               )}
-            </>
-          )}
+            </DetailRow>
+            <DetailRow label="Description">
+              <span className="text-muted-foreground">{project.description || "No description."}</span>
+            </DetailRow>
+            <DetailRow label="Status">{project.is_archived ? "Archived" : "Active"}</DetailRow>
+            <DetailRow label="Source">{sources.length ? sources.join(", ") : "No repositories connected"}</DetailRow>
+            <DetailRow label="Last scan">
+              {project.last_scan_at ? parseApiDate(project.last_scan_at).toLocaleString() : "Never"}
+            </DetailRow>
+            <DetailRow label="AI usage">{aiUsageText}</DetailRow>
+            <DetailRow label="Input tokens">
+              {aiUsage ? aiUsage.total_prompt_tokens.toLocaleString() : "—"}
+            </DetailRow>
+            <DetailRow label="Output tokens">
+              {aiUsage ? aiUsage.total_completion_tokens.toLocaleString() : "—"}
+            </DetailRow>
+          </dl>
         </CardContent>
       </Card>
 
@@ -195,95 +171,21 @@ function OverviewTab({ projectId }: { projectId: string }) {
           value={<span className={cn("rounded-sm px-2 py-0.5 text-lg", risk.className)}>{risk.label}</span>}
         />
         <StatCard label="Total Scans" value={project.scan_count} />
-        <StatCard label="Overall Findings" value={project.total_findings ?? 0} />
+        <StatCard
+          label="Overall Findings"
+          value={activity?.current_findings_total ?? project.total_findings ?? 0}
+          caption={connectedCount ? `latest scan across ${connectedCount} repo(s)` : undefined}
+        />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">Scan History by Repository</CardTitle>
+          <CardTitle className="text-sm font-normal text-muted-foreground">Current findings by severity</CardTitle>
         </CardHeader>
         <CardContent>
-          <RepoScanTrendChart projectId={projectId} />
+          <SeverityCountPills counts={currentCounts} />
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">OWASP Top 10 Compliance</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ProjectOwaspSection projectId={projectId} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">Report Template</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ReportTemplatePicker
-            value={(project.report_template ?? "inherit") as ReportTemplateValue}
-            onChange={(v) => updateTemplate.mutate(v)}
-            allowInherit
-          />
-        </CardContent>
-      </Card>
-
-      {canManage(project.my_role) && (
-        <Card className="border-destructive/30">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-destructive">Danger Zone</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              Permanently delete this project, along with its scans, findings, and reports. This cannot be
-              undone.
-            </p>
-            <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-              Delete Project
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      <Dialog
-        open={deleteDialogOpen}
-        onOpenChange={(open) => {
-          setDeleteDialogOpen(open);
-          if (!open) setConfirmName("");
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete project</DialogTitle>
-            <DialogDescription>
-              This permanently deletes <strong>{project.name}</strong> and all its scans, findings, and
-              reports. This cannot be undone. Type <strong>{project.name}</strong> below to confirm.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="confirm-project-name">Project name</Label>
-            <Input
-              id="confirm-project-name"
-              value={confirmName}
-              onChange={(e) => setConfirmName(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={confirmName !== project.name || deleteMutation.isPending}
-              onClick={() => deleteMutation.mutate()}
-            >
-              {deleteMutation.isPending ? "Deleting…" : "Delete Project"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -904,10 +806,8 @@ export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab =
-    tabParam === "keys" || tabParam === "members" || tabParam === "scans" || tabParam === "repos"
-      ? tabParam
-      : "overview";
+  const TAB_VALUES = ["scans", "repos", "history", "compliance", "members", "keys", "settings"];
+  const initialTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
   const { data: project } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
@@ -931,8 +831,11 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="scans">Scans</TabsTrigger>
           <TabsTrigger value="repos">Repositories</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="compliance">Compliance</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="keys">Project Tokens</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <OverviewTab projectId={projectId} />
@@ -943,11 +846,20 @@ export default function ProjectDetailPage() {
         <TabsContent value="repos">
           <RepositoriesTab projectId={projectId} />
         </TabsContent>
+        <TabsContent value="history">
+          <ProjectHistoryTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="compliance">
+          <ProjectComplianceTab projectId={projectId} />
+        </TabsContent>
         <TabsContent value="members">
           <MembersTab projectId={projectId} myRole={project?.my_role} />
         </TabsContent>
         <TabsContent value="keys">
           <ApiKeysTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="settings">
+          <ProjectSettingsTab projectId={projectId} />
         </TabsContent>
       </Tabs>
     </div>

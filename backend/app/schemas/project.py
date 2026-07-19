@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.models.scan import ScanStatus
+from app.models.scan import ScanStatus, ScanType
 from app.schemas.dashboard import SeverityCounts
 
 
@@ -49,12 +49,40 @@ class ScanHistoryItem(BaseModel):
     completed_at: datetime | None
     total_findings: int
     findings_by_severity: SeverityCounts
+    # Optional context for the History timeline — populated by scan-activity, left None by the
+    # older per-repo scan-history endpoint.
+    scan_type: ScanType | None = None
+    scanned_by: str | None = None
 
 
 class OwaspSummaryResponse(BaseModel):
     project_id: str
     project_repo_id: str | None
     by_owasp: dict[str, int]
+
+
+class RepoScanGroup(BaseModel):
+    repo_id: str | None  # None for the synthetic "Unlinked scans" group
+    repo_label: str
+    provider: str | None
+    scans: list[ScanHistoryItem]  # newest -> oldest
+
+
+class ProjectScanActivityResponse(BaseModel):
+    repos: list[RepoScanGroup]
+    # Live posture: sum of each repo's most recent COMPLETED scan, NOT the all-time total.
+    current_findings: SeverityCounts
+    current_findings_total: int
+
+
+class ProjectAiUsageResponse(BaseModel):
+    enabled: bool
+    active_provider: str | None
+    active_model: str | None
+    total_requests: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_cost_usd: float
 
 
 class ProjectResponse(BaseModel):

@@ -156,6 +156,10 @@ async def _record_usage_safe(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     cost_usd: float = 0.0,
+    provider: str | None = None,
+    model_name: str | None = None,
+    project_id: str | None = None,
+    scan_id: str | None = None,
 ) -> None:
     """Never lets a usage-write hiccup surface as an error -- by the time this is called the
     provider call itself has already succeeded or definitively failed, so a bookkeeping
@@ -167,13 +171,22 @@ async def _record_usage_safe(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             cost_usd=cost_usd,
+            provider=provider,
+            model_name=model_name,
+            project_id=project_id,
+            scan_id=scan_id,
         )
     except Exception:
         logger.exception("failed to record llm usage", config_id=str(config_id), success=success)
 
 
 async def get_completion(
-    messages: list[dict], *, response_format_json: bool = True, max_tokens: int | None = None
+    messages: list[dict],
+    *,
+    response_format_json: bool = True,
+    max_tokens: int | None = None,
+    project_id: str | None = None,
+    scan_id: str | None = None,
 ) -> dict:
     """Resolves the active provider and returns the parsed-JSON response body.
 
@@ -239,6 +252,10 @@ async def get_completion(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_usd=cost_usd,
+        provider=config.provider,
+        model_name=config.model_name,
+        project_id=project_id,
+        scan_id=scan_id,
     )
 
     content = response.choices[0].message.content or ""
