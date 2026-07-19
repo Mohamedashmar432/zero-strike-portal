@@ -276,6 +276,34 @@ def test_connection_fails_with_permanent_error(client, monkeypatch):
     asyncio.run(run())
 
 
+def test_connection_maps_unmapped_api_error_to_permanent(client, monkeypatch):
+    """Regression: litellm raises the bare base litellm.APIError for statuses it doesn't map to a
+    specific subclass (e.g. CommandCode's 403 "Go plan doesn't include API access"). That used to
+    escape test_connection uncaught -> the router's `except LLMError` missed it -> opaque 500 with
+    no reason. It must now surface as LLMPermanentError so the real message reaches the admin."""
+
+    async def fake_acompletion(**kwargs):
+        raise litellm.APIError(
+            status_code=403,
+            message="Your Go plan doesn't include API access.",
+            llm_provider="openai",
+            model="deepseek/deepseek-v4-flash",
+        )
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        with pytest.raises(llm_client.LLMPermanentError, match="Go plan"):
+            await llm_client.test_connection(
+                provider="commandcode",
+                model_name="deepseek/deepseek-v4-flash",
+                api_key="user_x",
+                base_url="https://api.commandcode.ai/provider/v1",
+            )
+
+    asyncio.run(run())
+
+
 def test_connection_fails_with_transient_error_after_retries(client, monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", _no_delay)
     calls = {"n": 0}
@@ -307,6 +335,8 @@ def test_connection_fails_with_transient_error_after_retries(client, monkeypatch
         ("nvidia_nim", "kimi-k2.6", "https://integrate.api.nvidia.com/v1", "nvidia_nim/kimi-k2.6",
          "https://integrate.api.nvidia.com/v1"),
         ("openrouter", "openai/gpt-4o", None, "openrouter/openai/gpt-4o", None),
+        # groq: litellm's native provider prefix, key required, no base_url needed.
+        ("groq", "llama-3.3-70b-versatile", None, "groq/llama-3.3-70b-versatile", None),
         # already-prefixed by the admin themselves -- must not be double-prefixed.
         ("nvidia_nim", "nvidia_nim/meta/llama-3.1-70b-instruct", None,
          "nvidia_nim/meta/llama-3.1-70b-instruct", None),

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # zero-strike-cli's SecurityAgentRunner batch sizing).
     ai_analysis_local_batch_size: int = 8
     ai_analysis_cloud_batch_size: int = 40
+    # Caps the LLM's output on an enrichment call so a small local model doesn't run past its own
+    # (often tiny) default output limit mid-JSON and truncate the response — the root cause of
+    # findings silently going un-enriched. Generous: one enrichment object per rule in a batch.
+    ai_analysis_max_output_tokens: int = 4000
     # Providers served by a local, resource-constrained runtime (LM Studio / a custom self-hosted
     # endpoint) — get the smaller batch size above.
     ai_analysis_local_providers: set[str] = {"lmstudio", "custom"}

@@ -3,7 +3,9 @@
  * pending/running" — the idiom already used for scan status, and the one an AI
  * analysis/auto-fix job will need too. Centralized so it isn't hand-rolled per page.
  */
-const ACTIVE_STATUSES = new Set(["pending", "running", "in_progress"]);
+// "queued" included so an AI job that's waiting in the queue (not yet picked up by a worker)
+// still polls — otherwise the UI freezes on "queued" until something else triggers a refetch.
+const ACTIVE_STATUSES = new Set(["pending", "queued", "running", "in_progress"]);
 
 function isActive(status: string | null | undefined): boolean {
   return !!status && ACTIVE_STATUSES.has(status);

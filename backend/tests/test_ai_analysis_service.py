@@ -68,7 +68,7 @@ def _enrichment_response(fingerprints):
     }
 
 
-def test_one_llm_call_per_rule_id_group_not_per_finding(client, monkeypatch):
+def test_one_representative_per_rule_group_fans_out_to_all_members(client, monkeypatch):
     calls = []
 
     async def fake_get_completion(messages, **kwargs):
@@ -86,14 +86,23 @@ def test_one_llm_call_per_rule_id_group_not_per_finding(client, monkeypatch):
             _make_finding("fp-3", "rule-b"),
         ]
         insights = await ai_analysis_service.analyze_findings_batch(findings, force=False)
-        # One call per rule_id group (rule-a, rule-b) since each group fits in one batch.
-        assert len(calls) == 2
-        assert len(insights) == 3
+        # Both rule groups' representatives fit in ONE batch => a single LLM call. Only the two
+        # representatives are sent, not all three findings.
+        assert len(calls) == 1
+        sent = {f["fingerprint"] for f in json.loads(calls[0][1]["content"])["findings"]}
+        assert sent == {"fp-1", "fp-3"}
+        # Every member still gets an insight (rule-a's verdict fanned out to fp-1 AND fp-2).
+        assert {i.fingerprint for i in insights} == {"fp-1", "fp-2", "fp-3"}
+        by = {i.fingerprint: i for i in insights}
+        # The non-representative member (fp-2) is tagged as recurring (1 sibling), not dropped.
+        assert by["fp-2"].similar_finding_count == 1
+        assert by["fp-1"].similar_finding_count == 1
+        assert by["fp-3"].similar_finding_count == 0
 
     asyncio.run(run())
 
 
-def test_large_group_is_split_into_provider_sized_chunks(client, monkeypatch):
+def test_many_rule_groups_are_split_into_provider_sized_chunks(client, monkeypatch):
     calls = []
 
     async def fake_get_completion(messages, **kwargs):
@@ -102,14 +111,15 @@ def test_large_group_is_split_into_provider_sized_chunks(client, monkeypatch):
         return _enrichment_response([f["fingerprint"] for f in payload["findings"]])
 
     monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
-    # openai provider => cloud batch size; shrink it so 5 findings need multiple calls.
+    # openai provider => cloud batch size; shrink it so 5 distinct rules need multiple calls.
     monkeypatch.setattr(ai_analysis_service.settings, "ai_analysis_cloud_batch_size", 2)
 
     async def run():
         await _create_active_provider()
-        findings = [_make_finding(f"fp-{i}", "rule-a") for i in range(5)]
+        # 5 DISTINCT rules => 5 representatives, chunked 2 per call.
+        findings = [_make_finding(f"fp-{i}", f"rule-{i}") for i in range(5)]
         insights = await ai_analysis_service.analyze_findings_batch(findings, force=False)
-        assert len(calls) == 3  # ceil(5 / 2) chunks, all in the one rule group
+        assert len(calls) == 3  # ceil(5 / 2) chunks of representatives
         assert len(insights) == 5
 
     asyncio.run(run())
@@ -130,9 +140,10 @@ def test_progress_callback_reports_completed_over_total(client, monkeypatch):
 
     async def run():
         await _create_active_provider()
-        findings = [_make_finding(f"fp-{i}", "rule-a") for i in range(3)]
+        # 3 distinct rule groups; progress is measured in GROUPS, not raw findings.
+        findings = [_make_finding(f"fp-{i}", f"rule-{i}") for i in range(3)]
         await ai_analysis_service.analyze_findings_batch(findings, force=False, progress_cb=cb)
-        # 3 findings / batch 1 = 3 chunks: an initial (0,3), then one bump per finished chunk.
+        # batch 1 => 3 chunks: an initial (0,3), then one bump per finished group.
         assert calls[0] == (0, 3)
         assert calls[-1] == (3, 3)
         assert {c[0] for c in calls} == {0, 1, 2, 3}
@@ -140,7 +151,7 @@ def test_progress_callback_reports_completed_over_total(client, monkeypatch):
     asyncio.run(run())
 
 
-def test_partial_chunk_failure_still_persists_successful_chunks(client, monkeypatch):
+def test_partial_group_failure_still_persists_successful_groups(client, monkeypatch):
     async def fake_get_completion(messages, **kwargs):
         payload = json.loads(messages[1]["content"])
         fps = [f["fingerprint"] for f in payload["findings"]]
@@ -153,13 +164,14 @@ def test_partial_chunk_failure_still_persists_successful_chunks(client, monkeypa
 
     async def run():
         await _create_active_provider()
+        # Distinct rules so each is its own chunk; the fp-boom group fails, the others survive.
         findings = [
             _make_finding("fp-ok1", "rule-a"),
-            _make_finding("fp-boom", "rule-a"),
-            _make_finding("fp-ok2", "rule-a"),
+            _make_finding("fp-boom", "rule-b"),
+            _make_finding("fp-ok2", "rule-c"),
         ]
         insights = await ai_analysis_service.analyze_findings_batch(findings, force=False)
-        # The failing chunk is skipped; the other two still land -- batch never fails wholesale.
+        # The failing group is skipped (a coverage gap); the other two still land.
         assert {i.fingerprint for i in insights} == {"fp-ok1", "fp-ok2"}
 
     asyncio.run(run())
@@ -200,10 +212,11 @@ def test_adjusted_severity_is_persisted_and_normalized(client, monkeypatch):
 
     async def run():
         await _create_active_provider()
+        # Distinct rules so each finding is its own representative with its own severity verdict.
         findings = [
             _make_finding("fp-low", "rule-a"),
-            _make_finding("fp-bad", "rule-a"),
-            _make_finding("fp-none", "rule-a"),
+            _make_finding("fp-bad", "rule-b"),
+            _make_finding("fp-none", "rule-c"),
         ]
         insights = await ai_analysis_service.analyze_findings_batch(findings, force=True)
         by = {i.fingerprint: i for i in insights}
@@ -254,6 +267,48 @@ def test_force_true_overwrites_cached_insight(client, monkeypatch):
         insights = await ai_analysis_service.analyze_findings_batch([finding], force=True)
         assert calls["n"] == 1
         assert insights[0].explanation == "explained"
+
+    asyncio.run(run())
+
+
+def test_analysis_confidence_is_persisted(client, monkeypatch):
+    async def fake_get_completion(messages, **kwargs):
+        payload = json.loads(messages[1]["content"])
+        fp = payload["findings"][0]["fingerprint"]
+        return {"findings": [{"fingerprint": fp, "explanation": "x", "analysis_confidence": 0.9}]}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+
+    async def run():
+        await _create_active_provider()
+        insights = await ai_analysis_service.analyze_findings_batch(
+            [_make_finding("fp-1", "rule-a")], force=True
+        )
+        assert insights[0].analysis_confidence == 0.9
+
+    asyncio.run(run())
+
+
+def test_synthesize_scan_reports_partial_coverage(client, monkeypatch):
+    async def fake_get_completion(messages, **kwargs):
+        return {"summary": "model summary", "top_recommendations": []}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+
+    async def run():
+        await _create_active_provider()
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id="proj-1", scan_type="cloud", triggered_by="cloud", status="completed",
+            created_at=now, updated_at=now,
+        )
+        await scan.insert()
+        insights = [AIFindingInsight(fingerprint=f"fp-{i}", project_id="proj-1") for i in range(3)]
+        # 47 intended but only 3 analyzed => partial coverage must be recorded and surfaced.
+        scan_insight = await ai_analysis_service.synthesize_scan(scan, insights, intended=47)
+        assert scan_insight.total_findings_intended == 47
+        assert scan_insight.total_findings_analyzed == 3
+        assert "3 of 47" in scan_insight.summary
 
     asyncio.run(run())
 
@@ -332,8 +387,8 @@ def test_run_job_scan_partial_failure_completes_with_surviving_insights(client, 
 
     async def fake_get_completion(messages, **kwargs):
         payload = json.loads(messages[1]["content"])
-        # The scan synthesis call has no "rule_id"; make it succeed with a summary.
-        if "rule_id" not in payload:
+        # The scan synthesis call carries "insights"; make it succeed with a summary.
+        if "insights" in payload:
             return {"summary": "ok", "top_recommendations": []}
         fps = [f["fingerprint"] for f in payload["findings"]]
         if "fp-bad" in fps:
@@ -351,8 +406,9 @@ def test_run_job_scan_partial_failure_completes_with_surviving_insights(client, 
             created_at=now, updated_at=now,
         )
         await scan.insert()
-        for fp in ("fp-ok", "fp-bad"):
-            await _make_finding(fp, "rule-a", scan_id=str(scan.id), project_id="proj-p").insert()
+        # Distinct rules so each is its own group/chunk; fp-bad's group fails, fp-ok's survives.
+        await _make_finding("fp-ok", "rule-a", scan_id=str(scan.id), project_id="proj-p").insert()
+        await _make_finding("fp-bad", "rule-b", scan_id=str(scan.id), project_id="proj-p").insert()
 
         job = AIAnalysisJob(
             kind="scan", project_id="proj-p", scan_id=str(scan.id), scope_key=str(scan.id), status="queued"

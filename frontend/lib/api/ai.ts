@@ -14,7 +14,8 @@ export type AiProvider =
   | "nvidia_nim"
   | "openrouter"
   | "custom"
-  | "commandcode";
+  | "commandcode"
+  | "groq";
 
 export type AiStatus = { enabled: boolean };
 
@@ -88,8 +89,14 @@ export type AiAnalysisResult<T> = {
 export type FindingInsight = {
   is_false_positive: boolean | null;
   false_positive_confidence: number | null;
+  // The AI's confidence in its own verdict (0-1) — shown as "AI confidence". Distinct from
+  // false_positive_confidence (which is ~0 for genuine findings and was being mislabeled as this).
+  analysis_confidence: number | null;
   verdict_reasoning: string | null;
   improved_description: string | null;
+  // How many other findings share this rule (same vuln recurring across the repo). >0 => show the
+  // "found in N other locations" tag.
+  similar_finding_count: number;
   // Display-only AI severity overlay (null when the AI left the scanner severity as-is).
   adjusted_severity: Severity | null;
   severity_reasoning: string | null;
@@ -104,6 +111,9 @@ export type FindingInsight = {
 
 export type ScanInsight = {
   summary: string | null;
+  // How many findings the job set out to analyze; when > total_findings_analyzed, coverage was
+  // partial (the summary spells out "Analyzed X of Y" and a re-run backfills the rest).
+  total_findings_intended: number | null;
   total_findings_analyzed: number | null;
   false_positive_count: number | null;
   top_recommendations: string[];

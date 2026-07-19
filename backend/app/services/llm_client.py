@@ -24,7 +24,7 @@ logger = structlog.get_logger(__name__)
 # "openai" against a custom api_base). Without this, litellm raises "LLM Provider NOT
 # provided" for a bare model name like "kimi-k2.6" -- it has no way to guess which backend
 # that string belongs to.
-_NATIVE_PREFIX_PROVIDERS = {"nvidia_nim", "openrouter"}
+_NATIVE_PREFIX_PROVIDERS = {"nvidia_nim", "openrouter", "groq"}
 _OPENAI_COMPATIBLE_PROVIDERS = {"lmstudio", "kimi", "custom", "commandcode"}
 # Kimi/Moonshot's and Command Code's endpoints are fixed and well-known, so admins don't need
 # to type them themselves (mirrors why they aren't in the frontend's SELF_HOSTED_PROVIDERS
@@ -172,7 +172,9 @@ async def _record_usage_safe(
         logger.exception("failed to record llm usage", config_id=str(config_id), success=success)
 
 
-async def get_completion(messages: list[dict], *, response_format_json: bool = True) -> dict:
+async def get_completion(
+    messages: list[dict], *, response_format_json: bool = True, max_tokens: int | None = None
+) -> dict:
     """Resolves the active provider and returns the parsed-JSON response body.
 
     Fails fast with LLMNotConfiguredError (no network call) if no provider is active/ready.
@@ -196,6 +198,8 @@ async def get_completion(messages: list[dict], *, response_format_json: bool = T
     }
     if api_base:
         kwargs["api_base"] = api_base
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
     if response_format_json and config.provider in _JSON_OBJECT_PROVIDERS:
         kwargs["response_format"] = {"type": "json_object"}
 
@@ -209,6 +213,14 @@ async def get_completion(messages: list[dict], *, response_format_json: bool = T
         logger.error("llm call exhausted retries", error=str(exc))
         await _record_usage_safe(config.id, success=False)
         raise LLMTransientError(str(exc)) from exc
+    except litellm.APIError as exc:
+        # litellm raises the bare base APIError for statuses it doesn't map to a specific
+        # subclass (e.g. a provider's 403 "upgrade_required"). Treat as permanent so the real
+        # upstream message surfaces instead of escaping as an opaque 500 -- none of the mapped
+        # exceptions above subclass APIError, so this never shadows them.
+        logger.warning("llm call failed with unmapped api error", error=str(exc))
+        await _record_usage_safe(config.id, success=False)
+        raise LLMPermanentError(str(exc)) from exc
 
     usage = getattr(response, "usage", None)
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -262,3 +274,7 @@ async def test_connection(
         raise LLMPermanentError(str(exc)) from exc
     except _TRANSIENT_EXCEPTIONS as exc:
         raise LLMTransientError(str(exc)) from exc
+    except litellm.APIError as exc:
+        # See get_completion: unmapped base APIError (e.g. a 403 "upgrade_required") -> permanent,
+        # so the test surfaces the real reason rather than a raw 500.
+        raise LLMPermanentError(str(exc)) from exc

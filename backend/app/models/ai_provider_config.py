@@ -18,7 +18,7 @@ from pymongo import IndexModel
 # Matches litellm model-string prefixes used by the sibling zero-strike-cli project
 # this mirrors (see SecurityAgentRunner._PROVIDER_MODEL_MAP / SecurityAnalyzer).
 AIProvider = Literal[
-    "anthropic", "openai", "lmstudio", "kimi", "nvidia_nim", "openrouter", "custom", "commandcode"
+    "anthropic", "openai", "lmstudio", "kimi", "nvidia_nim", "openrouter", "custom", "commandcode", "groq"
 ]
 
 # Self-hosted OpenAI-compatible servers -- the admin points these at their own instance
