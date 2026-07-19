@@ -20,13 +20,23 @@ export function listProjectRepos(projectId: string) {
 
 export function addProjectRepo(
   projectId: string,
-  input: {
-    credential_id: string;
-    repo_full_name: string;
-    clone_url: string;
-    selected_branch: string;
-    label?: string;
-  }
+  input:
+    | {
+        credential_id: string;
+        repo_full_name: string;
+        clone_url: string;
+        selected_branch: string;
+        label?: string;
+      }
+    | {
+        // A public GitHub repo, connected with no credential at all (see public-repos.ts).
+        public: true;
+        provider: "github";
+        repo_full_name: string;
+        clone_url: string;
+        selected_branch: string;
+        label?: string;
+      }
 ) {
   return apiFetch<ProjectRepo>(`/projects/${projectId}/repos`, {
     method: "POST",

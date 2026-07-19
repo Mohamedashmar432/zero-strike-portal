@@ -25,6 +25,26 @@ class Settings(BaseSettings):
     queue_poll_interval_seconds: int = 5
     queue_stuck_multiplier: int = 3  # a "running" scan idle longer than this * scan_timeout_seconds is reaped
 
+    # AI analysis (see ai_job_queue_service / ai_analysis_service) — mirrors the cloud-scan queue's
+    # Mongo-backed claim/reap pattern, just bounded by different concurrency/timeout knobs since an
+    # AI job is an LLM call, not a clone+scan subprocess.
+    max_concurrent_ai_jobs: int = 3
+    ai_job_timeout_seconds: int = 300
+    ai_queue_stuck_multiplier: int = 3
+    # Bounds concurrent per-rule-group LLM calls within a single job (ai_analysis_service).
+    ai_analysis_concurrency: int = 3
+    # Caps how many of a scan's findings (sorted by priority_score desc) get analyzed per scan-level job.
+    ai_analysis_max_findings_per_scan: int = 200
+    # A rule_id group is chunked into batches of this many findings per LLM call so a huge group
+    # (a rule firing across hundreds of files) doesn't overflow a small local model's context.
+    # Smaller for local providers — shorter prompt = faster, more reliable local response (mirrors
+    # zero-strike-cli's SecurityAgentRunner batch sizing).
+    ai_analysis_local_batch_size: int = 8
+    ai_analysis_cloud_batch_size: int = 40
+    # Providers served by a local, resource-constrained runtime (LM Studio / a custom self-hosted
+    # endpoint) — get the smaller batch size above.
+    ai_analysis_local_providers: set[str] = {"lmstudio", "custom"}
+
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""
     github_client_secret: str = ""

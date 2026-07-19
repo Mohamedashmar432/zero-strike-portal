@@ -230,6 +230,8 @@ def test_create_cloud_scan_via_connection_id(client, monkeypatch):
 
         scan = await Scan.get(r.json()["id"])
         assert scan.repo_token == "gho_abc123"
+        # GitHub's git-over-HTTPS backend rejects Bearer even for OAuth tokens.
+        assert scan.repo_token_auth_scheme == "basic"
 
     asyncio.run(_check_token())
 

@@ -12,11 +12,22 @@ from app.models.project_repo import ProjectRepo
 from app.models.user import User
 from app.schemas.project_repo import ProjectRepoCreateRequest
 from app.services import repo_credential_service
-from app.services.repo_pat import RepoPatError
+from app.services.repo_pat import RepoPatError, github
 
 
 async def add_repo(project_id: str, payload: ProjectRepoCreateRequest, user: User) -> ProjectRepo:
-    if payload.credential_id:
+    if payload.public:
+        owner, _, _name = payload.repo_full_name.partition("/")
+        try:
+            await github.fetch_public_repo(owner, _name)
+        except RepoPatError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        provider = "github"
+        organization = owner
+        ado_project = None
+        pat_encrypted = None
+        source_credential_id = None
+    elif payload.credential_id:
         credential = await repo_credential_service.get_own_credential_or_404(user, payload.credential_id)
         provider = credential.provider
         organization = credential.organization
@@ -74,8 +85,10 @@ async def update_branch(project_id: str, repo_id: str, branch: str) -> ProjectRe
     return repo
 
 
-def decrypt_pat(repo: ProjectRepo) -> str:
-    return security.decrypt_secret(repo.pat_encrypted)
+def decrypt_pat(repo: ProjectRepo) -> str | None:
+    # None for a public repo connected with no credential at all (see add_repo) — the clone runs
+    # anonymously, so there's nothing to decrypt.
+    return security.decrypt_secret(repo.pat_encrypted) if repo.pat_encrypted else None
 
 
 async def reauth_repo(project_id: str, repo_id: str, new_pat: str) -> ProjectRepo:

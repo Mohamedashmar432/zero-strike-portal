@@ -270,6 +270,145 @@ def test_reauth_repo_rejects_invalid_pat(client, monkeypatch):
     assert r.status_code == 400
 
 
+def test_add_public_github_repo_needs_no_pat(client, monkeypatch):
+    from app.services.repo_pat import github
+
+    async def _fake_fetch_public_repo(owner, repo):
+        assert (owner, repo) == ("octocat", "hello-world")
+        return {
+            "id": "1",
+            "name": "hello-world",
+            "full_name": "octocat/hello-world",
+            "clone_url": "https://github.com/octocat/hello-world.git",
+            "private": False,
+            "default_branch": "main",
+        }
+
+    monkeypatch.setattr(github, "fetch_public_repo", _fake_fetch_public_repo)
+
+    owner = register_and_login(client, email="prepo9@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "public": True,
+            "repo_full_name": "octocat/hello-world",
+            "clone_url": "https://github.com/octocat/hello-world.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["provider"] == "github"
+    assert body["organization"] == "octocat"
+    assert "pat" not in body
+
+    async def _check():
+        from app.models.project_repo import ProjectRepo
+
+        repo = await ProjectRepo.get(body["id"])
+        assert repo.pat_encrypted is None
+
+    asyncio.run(_check())
+
+
+def test_add_public_github_repo_rejects_actually_private_repo(client, monkeypatch):
+    from app.services.repo_pat import RepoPatError, github
+
+    async def _fake_fetch_public_repo(owner, repo):
+        raise RepoPatError("Repository not found or not public — private repos need a Personal Access Token")
+
+    monkeypatch.setattr(github, "fetch_public_repo", _fake_fetch_public_repo)
+
+    owner = register_and_login(client, email="prepo10@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "public": True,
+            "repo_full_name": "octocat/secret-repo",
+            "clone_url": "https://github.com/octocat/secret-repo.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    )
+    assert r.status_code == 400
+
+
+def test_public_repo_connection_rejected_for_azure_devops(client):
+    owner = register_and_login(client, email="prepo11@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "azure_devops",
+            "public": True,
+            "repo_full_name": "org/repo",
+            "clone_url": "https://dev.azure.com/org/proj/_git/repo",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    )
+    assert r.status_code == 422
+
+
+def test_scan_from_public_project_repo_clones_with_no_token(client, monkeypatch):
+    import app.services.scan_queue_service as scan_queue_service_module
+    from app.services.repo_pat import github
+
+    async def _noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(scan_queue_service_module, "drain_queue", _noop)
+
+    async def _fake_fetch_public_repo(owner, repo):
+        return {
+            "id": "1",
+            "name": "hello-world",
+            "full_name": "octocat/hello-world",
+            "clone_url": "https://github.com/octocat/hello-world.git",
+            "private": False,
+            "default_branch": "main",
+        }
+
+    monkeypatch.setattr(github, "fetch_public_repo", _fake_fetch_public_repo)
+
+    owner = register_and_login(client, email="prepo12@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    project_repo = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "public": True,
+            "repo_full_name": "octocat/hello-world",
+            "clone_url": "https://github.com/octocat/hello-world.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    ).json()
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/scans",
+        json={"scan_type": "cloud", "project_repo_id": project_repo["id"]},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201
+
+    async def _check():
+        from app.models.scan import Scan
+
+        scan = await Scan.get(r.json()["id"])
+        assert scan.repo_token is None
+
+    asyncio.run(_check())
+
+
 def test_collaborator_cannot_add_repo(client):
     owner = register_and_login(client, email="prepo6a@zerostrike.dev")
     collaborator = register_and_login(client, email="prepo6b@zerostrike.dev")

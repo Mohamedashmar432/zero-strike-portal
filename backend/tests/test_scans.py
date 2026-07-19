@@ -130,7 +130,7 @@ def test_create_cloud_scan_via_project_repo_id_resolves_url_branch_and_token(cli
 
         scan = await Scan.get(body["id"])
         assert scan.repo_token == "pat-value"
-        assert scan.repo_token_auth_scheme == "bearer"
+        assert scan.repo_token_auth_scheme == "basic"
 
     asyncio.run(_check())
 
@@ -185,6 +185,46 @@ def test_list_scans_scoped_to_project(client):
     body = client.get(f"/api/v1/projects/{project['id']}/scans", headers=_headers(owner)).json()
     assert body["total"] == 1
     assert body["items"][0]["project_id"] == project["id"]
+
+
+def test_scan_list_and_detail_carry_ai_analysis_status(client):
+    from datetime import datetime, timezone
+
+    from app.models.ai_analysis_job import AIAnalysisJob
+
+    owner = register_and_login(client, email="saistatus@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"])
+
+    async def _seed_running_ai_job():
+        await AIAnalysisJob(
+            kind="scan",
+            project_id=project["id"],
+            scan_id=scan_id,
+            scope_key=scan_id,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+        ).insert()
+
+    asyncio.run(_seed_running_ai_job())
+
+    detail = client.get(f"/api/v1/scans/{scan_id}", headers=_headers(owner)).json()
+    assert detail["ai_analysis_status"] == "in_progress"
+    assert detail["ai_analysis_started_at"] is not None
+    # The tz-normalized timestamp must be an unambiguous UTC string (has offset/Z), not naive.
+    assert detail["ai_analysis_started_at"].endswith(("Z", "+00:00"))
+
+    listed = client.get(f"/api/v1/projects/{project['id']}/scans", headers=_headers(owner)).json()
+    assert listed["items"][0]["ai_analysis_status"] == "in_progress"
+
+
+def test_scan_without_ai_job_has_null_ai_status(client):
+    owner = register_and_login(client, email="snoaistatus@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"])
+    detail = client.get(f"/api/v1/scans/{scan_id}", headers=_headers(owner)).json()
+    assert detail["ai_analysis_status"] is None
+    assert detail["ai_analysis_started_at"] is None
 
 
 def test_get_scan_forbidden_for_non_member(client):

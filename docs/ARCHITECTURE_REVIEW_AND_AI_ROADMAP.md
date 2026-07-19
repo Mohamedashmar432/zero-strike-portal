@@ -178,14 +178,23 @@ Mirrors `SecurityRemediationAgent`:
 
 ### Provider config & secrets
 
-- New collection `AIProviderConfig`, scoped per-project (consistent with `ApiKey`,
-  `ProjectRepo`): `provider_name`, `api_key_encrypted`, `base_url_encrypted`,
-  `model_name`, `is_default`.
-- Encrypt with the existing `oauth_encryption_key` Fernet key already in
-  `core/config.py:33-36` — same primitive currently used for OAuth tokens, zero new
-  crypto code.
-- Frontend: wire real forms into `settings/ai-provider/page.tsx` (provider dropdown, API
-  key, base_url, model) and `settings/auto-fix/page.tsx` (confidence-threshold display).
+**Revised 2026-07-16**: `AIProviderConfig` is a **global, admin-only singleton** (one document for
+the whole portal, mirroring `WorkspaceSettings`'s "at most one document ever exists" pattern) —
+**not** per-project as originally scoped below. This was confirmed during Analysis-MVP planning:
+the product requirement is "any LLM model, set by the portal admin," and the frontend settings page
+was already scaffolded under global Settings (not a per-project tab), so per-project scoping would
+have meant moving the UI and adding per-project credential storage nobody asked for. Gate reads/
+writes with the existing global `role == "admin"` check (`require_admin`/`<RequireRole
+role="admin">`), not project membership.
+
+- `AIProviderConfig` fields: `provider` (`anthropic|openai|lmstudio|kimi|nvidia_nim|openrouter|
+  custom`), `model_name`, `api_key_encrypted`, `base_url` (plaintext — not credential material),
+  `enabled`, `temperature`, `updated_at`, `updated_by`.
+- Encrypt the API key with the existing `oauth_encryption_key` Fernet key already in
+  `core/config.py:33-36` — same primitive currently used for OAuth tokens, zero new crypto code.
+- Frontend: wire a real form into `settings/ai-provider/page.tsx` (provider dropdown, API key,
+  base_url, model, enabled toggle), gated admin-only. `settings/auto-fix/page.tsx` stays a stub —
+  out of scope until the AI Auto-Fix phase below.
 
 ### Frontend delivery
 

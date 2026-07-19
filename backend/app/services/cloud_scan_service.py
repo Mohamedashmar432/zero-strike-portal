@@ -145,8 +145,9 @@ async def _clone(
         env["GIT_CONFIG_COUNT"] = "1"
         env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
         if auth_scheme == "basic":
-            # Azure DevOps PATs use HTTP Basic (empty username, PAT as password) — Bearer here would
-            # silently 401 (see repo_token_auth_scheme on Scan for why this matters).
+            # GitHub tokens (PAT or OAuth) and Azure DevOps PATs all authenticate git-over-HTTPS via
+            # HTTP Basic (empty/placeholder username, token as password) — Bearer here gets silently
+            # rejected instead (see repo_token_auth_scheme on Scan for why this matters).
             basic_token = base64.b64encode(f":{repo_token}".encode()).decode()
             env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Basic {basic_token}"
         else:

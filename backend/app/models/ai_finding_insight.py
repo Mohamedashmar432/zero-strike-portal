@@ -11,6 +11,7 @@ once that phase starts.
 """
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from beanie import Document
 from pydantic import Field
@@ -31,6 +32,12 @@ class AIFindingInsight(Document):
     is_false_positive: bool | None = None
     false_positive_confidence: float | None = None
     verdict_reasoning: str | None = None
+    # Display-only AI severity overlay: when the AI judges the scanner's severity clearly wrong,
+    # it sets adjusted_severity (else None). The scanner's Finding.severity stays the immutable
+    # source of truth for counts/priority/dashboards -- this is a labeled, auditable overlay,
+    # never written back onto the Finding.
+    adjusted_severity: Literal["critical", "high", "medium", "low", "info"] | None = None
+    severity_reasoning: str | None = None
     # AI-refined explanation/recommendation. The scanner-produced Finding.message/
     # rationale/remediation are never overwritten -- this is a separate, clearly-labeled
     # layer so the original detection stays traceable/auditable.

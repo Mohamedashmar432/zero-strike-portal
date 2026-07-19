@@ -11,6 +11,7 @@ from app.schemas.common import Page
 from app.schemas.report import FindingResponse, ReportResponse
 from app.schemas.scan import ScanCreateRequest, ScanResponse
 from app.services import (
+    ai_analysis_service,
     audit_service,
     connection_service,
     pdf_report_service,
@@ -58,7 +59,7 @@ def _to_finding_response(f: Finding) -> FindingResponse:
     )
 
 
-def _to_response(scan: Scan) -> ScanResponse:
+def _to_response(scan: Scan, ai: ai_analysis_service.ScanAiStatus | None = None) -> ScanResponse:
     return ScanResponse(
         id=str(scan.id),
         project_id=scan.project_id,
@@ -80,6 +81,10 @@ def _to_response(scan: Scan) -> ScanResponse:
         error_message=scan.error_message,
         created_at=scan.created_at,
         updated_at=scan.updated_at,
+        ai_analysis_status=ai.status if ai else None,
+        ai_analysis_started_at=ai.started_at if ai else None,
+        ai_analysis_progress_completed=ai.progress_completed if ai else 0,
+        ai_analysis_progress_total=ai.progress_total if ai else 0,
     )
 
 
@@ -112,9 +117,13 @@ async def create_scan(
         repo_url = project_repo.clone_url
         branch = project_repo.selected_branch
         repo_token = project_repo_service.decrypt_pat(project_repo)
-        repo_token_auth_scheme = "basic" if project_repo.provider == "azure_devops" else "bearer"
+        # Both providers' PATs authenticate git-over-HTTPS via Basic, never Bearer.
+        repo_token_auth_scheme = "basic"
     elif payload.connection_id:
-        repo_token = await connection_service.get_decrypted_token(payload.connection_id, user)
+        repo_token, conn_provider = await connection_service.get_decrypted_token(payload.connection_id, user)
+        # GitHub's git-over-HTTPS backend rejects Bearer even for OAuth tokens; Azure DevOps OAuth
+        # (AAD) tokens are the one case that actually wants Bearer.
+        repo_token_auth_scheme = "basic" if conn_provider == "github" else "bearer"
 
     if not repo_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "repo_url or project_repo_id is required")
@@ -171,14 +180,17 @@ async def list_scans(
     query = Scan.find(*criteria)
     total = await query.count()
     scans = await query.sort("-created_at").skip((page - 1) * page_size).limit(page_size).to_list()
-    return Page(items=[_to_response(s) for s in scans], total=total, page=page, page_size=page_size)
+    ai_status = await ai_analysis_service.latest_scan_ai_status([str(s.id) for s in scans])
+    items = [_to_response(s, ai_status.get(str(s.id))) for s in scans]
+    return Page(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/scans/{scan_id}", response_model=ScanResponse)
 async def get_scan(scan_id: str, user: User = Depends(get_current_user)):
     scan = await scan_service.get_scan_or_404(scan_id)
     await project_service.require_member(scan.project_id, user)
-    return _to_response(scan)
+    ai_status = await ai_analysis_service.latest_scan_ai_status([str(scan.id)])
+    return _to_response(scan, ai_status.get(str(scan.id)))
 
 
 @router.get("/scans/{scan_id}/report", response_model=ReportResponse)

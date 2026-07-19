@@ -119,14 +119,15 @@ async def _resolve_access_token(conn: OAuthConnection) -> str:
     return security.decrypt_secret(conn.access_token_encrypted)
 
 
-async def get_decrypted_token(connection_id: str, user: User) -> str:
-    """Used by scan creation to turn a connection_id into a usable repo_token. IDOR-safe by
-    construction: filters by owner, 404s (never 403s) on a mismatch so a caller can't distinguish
+async def get_decrypted_token(connection_id: str, user: User) -> tuple[str, str]:
+    """Used by scan creation to turn a connection_id into a usable (repo_token, provider) pair —
+    the caller needs provider to pick the right git auth scheme (see routers/scans.py). IDOR-safe
+    by construction: filters by owner, 404s (never 403s) on a mismatch so a caller can't distinguish
     "doesn't exist" from "not yours." No admin bypass — see module docstring."""
     conn = await OAuthConnection.get(connection_id)
     if not conn or conn.user_id != str(user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Connection not found")
-    return await _resolve_access_token(conn)
+    return await _resolve_access_token(conn), conn.provider
 
 
 async def list_repos(user: User, provider: str, *, query: str | None = None, page: int = 1) -> list[dict]:

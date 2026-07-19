@@ -7,6 +7,7 @@ from app.models.project_member import ProjectMember
 from app.models.scan import Scan
 from app.models.user import User
 from app.schemas.dashboard import DashboardStatsResponse, RecentScanItem, SeverityCounts
+from app.services import ai_analysis_service
 
 RECENT_SCANS_LIMIT = 5
 
@@ -35,19 +36,29 @@ async def _recent_scans(project_ids: list[str] | None) -> list[RecentScanItem]:
 
     project_object_ids = [PydanticObjectId(s.project_id) for s in scans]
     projects_by_id = {str(p.id): p for p in await Project.find(In(Project.id, project_object_ids)).to_list()}
+    ai_status = await ai_analysis_service.latest_scan_ai_status(scan_ids)
 
-    return [
-        RecentScanItem(
-            scan_id=str(s.id),
-            project_id=s.project_id,
-            project_name=projects_by_id[s.project_id].name if s.project_id in projects_by_id else "Unknown project",
-            status=s.status,
-            scan_type=s.scan_type,
-            created_at=s.created_at,
-            findings_by_severity=counts_by_scan.get(str(s.id), SeverityCounts()),
+    items: list[RecentScanItem] = []
+    for s in scans:
+        ai = ai_status.get(str(s.id))
+        items.append(
+            RecentScanItem(
+                scan_id=str(s.id),
+                project_id=s.project_id,
+                project_name=projects_by_id[s.project_id].name
+                if s.project_id in projects_by_id
+                else "Unknown project",
+                status=s.status,
+                scan_type=s.scan_type,
+                created_at=s.created_at,
+                findings_by_severity=counts_by_scan.get(str(s.id), SeverityCounts()),
+                ai_analysis_status=ai.status if ai else None,
+                ai_analysis_started_at=ai.started_at if ai else None,
+                ai_analysis_progress_completed=ai.progress_completed if ai else 0,
+                ai_analysis_progress_total=ai.progress_total if ai else 0,
+            )
         )
-        for s in scans
-    ]
+    return items
 
 
 async def _severity_groups(pipeline: list[dict]) -> list[dict]:

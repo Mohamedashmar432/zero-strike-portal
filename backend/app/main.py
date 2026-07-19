@@ -14,6 +14,8 @@ from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
     admin_downloads,
     admin_scanner_status,
+    ai_analysis,
+    ai_provider_config,
     api_keys,
     audit_logs,
     auth,
@@ -21,13 +23,14 @@ from app.routers import (
     dashboard,
     downloads,
     projects,
+    public_repos,
     repo_credentials,
     report_templates,
     scanner_scans,
     scans,
     users,
 )
-from app.services import cloud_scan_service, scan_queue_service
+from app.services import ai_job_queue_service, cloud_scan_service, scan_queue_service
 from app.services.oauth import OAuthProviderError
 
 logger = structlog.get_logger(__name__)
@@ -47,10 +50,14 @@ async def lifespan(app: FastAPI):
             settings.scanner_binary_path,
         )
     poll_task = asyncio.create_task(scan_queue_service.poll_loop())
+    ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
     yield
     poll_task.cancel()
+    ai_poll_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await poll_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await ai_poll_task
     await close_mongo_connection()
 
 
@@ -78,10 +85,14 @@ def create_app() -> FastAPI:
     app.include_router(scanner_scans.router, prefix="/api/v1")
     app.include_router(connections.router, prefix="/api/v1")
     app.include_router(repo_credentials.router, prefix="/api/v1")
+    app.include_router(public_repos.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(report_templates.router, prefix="/api/v1")
+    app.include_router(ai_analysis.router, prefix="/api/v1")
+    app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")
+    app.include_router(ai_provider_config.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

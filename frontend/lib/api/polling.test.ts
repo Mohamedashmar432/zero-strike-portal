@@ -8,7 +8,7 @@ function q<T>(data: T | undefined) {
 describe("refetchWhileStatusActive", () => {
   const check = refetchWhileStatusActive<{ status?: string }>(3000);
 
-  test.each(["pending", "running"])("polls while status is %s", (status) => {
+  test.each(["pending", "running", "in_progress"])("polls while status is %s", (status) => {
     expect(check(q({ status }))).toBe(3000);
   });
 
