@@ -44,6 +44,14 @@ export const queryKeys = {
         filters.priority ?? "",
       ] as const,
   },
+  ai: {
+    providers: {
+      all: () => ["ai", "providers"] as const,
+    },
+    status: () => ["ai", "status"] as const,
+    findingInsight: (findingId: string) => ["ai", "finding", findingId] as const,
+    scanInsight: (scanId: string) => ["ai", "scan", scanId] as const,
+  },
   repoCredentials: {
     all: () => ["repo-credentials"] as const,
     repos: (credentialId: string, query: string) =>

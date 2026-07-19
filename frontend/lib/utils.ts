@@ -13,3 +13,22 @@ export function getInitials(name: string) {
   if (parts.length === 1) return parts[0].charAt(0).toUpperCase()
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
 }
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" })
+const RELATIVE_TIME_UNITS: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
+  { unit: "year", ms: 365 * 24 * 60 * 60 * 1000 },
+  { unit: "month", ms: 30 * 24 * 60 * 60 * 1000 },
+  { unit: "day", ms: 24 * 60 * 60 * 1000 },
+  { unit: "hour", ms: 60 * 60 * 1000 },
+  { unit: "minute", ms: 60 * 1000 },
+]
+
+// Coarse "2 minutes ago" / "in 3 days" via Intl.RelativeTimeFormat — no date library.
+export function formatRelativeTime(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now()
+  const absMs = Math.abs(diffMs)
+  for (const { unit, ms } of RELATIVE_TIME_UNITS) {
+    if (absMs >= ms) return relativeTimeFormatter.format(Math.round(diffMs / ms), unit)
+  }
+  return relativeTimeFormatter.format(Math.round(diffMs / 1000), "second")
+}

@@ -1,3 +1,4 @@
+import type { AiAnalysisStatus } from "./ai";
 import { apiFetch } from "./client";
 import type { Page } from "./users";
 
@@ -26,6 +27,12 @@ export type Scan = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  // Latest scan-level AI analysis status (null = never requested); when active, when it started
+  // + batch progress (completed/total) for the "AI analyzing · N%" tag.
+  ai_analysis_status: AiAnalysisStatus | null;
+  ai_analysis_started_at: string | null;
+  ai_analysis_progress_completed: number;
+  ai_analysis_progress_total: number;
 };
 
 export function listScans(projectId: string, page = 1, pageSize = 20) {

@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApiError } from "@/lib/api/client";
 import { addProjectRepo, type ProjectRepo } from "@/lib/api/project-repos";
+import { getPublicGithubRepo, listPublicGithubBranches, parseGithubOwnerRepo } from "@/lib/api/public-repos";
 import { queryKeys } from "@/lib/api/query-keys";
 import {
   listCredentialBranches,
@@ -27,8 +28,10 @@ import {
 
 const PROVIDER_LABEL: Record<Provider, string> = { github: "GitHub", azure_devops: "Azure DevOps" };
 
+type AccessMode = "credential" | "public";
+
 // Shared by /projects/[projectId]/repos/new (standalone) and /projects/new (embedded
-// right after project creation) — same credential -> repo -> branch -> label flow either way.
+// right after project creation) — same provider -> repo -> branch -> label flow either way.
 export function RepoConnectWizard({
   projectId,
   onConnected,
@@ -47,9 +50,13 @@ export function RepoConnectWizard({
   const queryClient = useQueryClient();
 
   const [provider, setProvider] = useState<Provider | null>(null);
+  // Only GitHub offers a choice — Azure DevOps always goes through a credential.
+  const [mode, setMode] = useState<AccessMode | null>(null);
+  const effectiveMode: AccessMode | null = provider === "azure_devops" ? "credential" : mode;
   const [addingCredential, setAddingCredential] = useState(false);
   const [credentialId, setCredentialId] = useState<string | null>(null);
   const [repoQuery, setRepoQuery] = useState("");
+  const [publicRepoInput, setPublicRepoInput] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [label, setLabel] = useState("");
@@ -61,32 +68,69 @@ export function RepoConnectWizard({
   const providerCredentials = credentials?.filter((c) => c.provider === provider);
 
   const {
-    data: repos,
-    isLoading: reposLoading,
-    isError: reposError,
+    data: credentialRepos,
+    isLoading: credentialReposLoading,
+    isError: credentialReposError,
   } = useQuery({
     queryKey: queryKeys.repoCredentials.repos(credentialId ?? "", repoQuery),
     queryFn: () => listCredentialRepos(credentialId!, repoQuery),
-    enabled: !!credentialId,
+    enabled: effectiveMode === "credential" && !!credentialId,
   });
 
   const repoIdForBranches = selectedRepo ? (provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
 
-  const { data: branches, isLoading: branchesLoading } = useQuery({
+  const { data: credentialBranches, isLoading: credentialBranchesLoading } = useQuery({
     queryKey: queryKeys.repoCredentials.branches(credentialId ?? "", repoIdForBranches ?? ""),
     queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
-    enabled: !!credentialId && !!repoIdForBranches,
+    enabled: effectiveMode === "credential" && !!credentialId && !!repoIdForBranches,
+  });
+
+  const { data: publicBranches, isLoading: publicBranchesLoading } = useQuery({
+    queryKey: queryKeys.repoCredentials.branches("public", selectedRepo?.full_name ?? ""),
+    queryFn: () => {
+      const parsed = parseGithubOwnerRepo(selectedRepo!.full_name);
+      return listPublicGithubBranches(parsed!.owner, parsed!.repo);
+    },
+    enabled: effectiveMode === "public" && !!selectedRepo,
+  });
+
+  const branches = effectiveMode === "public" ? publicBranches : credentialBranches;
+  const branchesLoading = effectiveMode === "public" ? publicBranchesLoading : credentialBranchesLoading;
+
+  const publicLookup = useMutation({
+    mutationFn: () => {
+      const parsed = parseGithubOwnerRepo(publicRepoInput);
+      if (!parsed) {
+        throw new Error('Enter as "owner/repo" or a full GitHub URL');
+      }
+      return getPublicGithubRepo(parsed.owner, parsed.repo);
+    },
+    onSuccess: (repo) => setSelectedRepo(repo),
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Repo lookup failed"),
   });
 
   const add = useMutation({
     mutationFn: () =>
-      addProjectRepo(projectId, {
-        credential_id: credentialId!,
-        repo_full_name: selectedRepo!.full_name,
-        clone_url: selectedRepo!.clone_url,
-        selected_branch: selectedBranch!,
-        label: label || undefined,
-      }),
+      addProjectRepo(
+        projectId,
+        effectiveMode === "public"
+          ? {
+              public: true,
+              provider: "github",
+              repo_full_name: selectedRepo!.full_name,
+              clone_url: selectedRepo!.clone_url,
+              selected_branch: selectedBranch!,
+              label: label || undefined,
+            }
+          : {
+              credential_id: credentialId!,
+              repo_full_name: selectedRepo!.full_name,
+              clone_url: selectedRepo!.clone_url,
+              selected_branch: selectedBranch!,
+              label: label || undefined,
+            }
+      ),
     onSuccess: (repo) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
       toast.success("Repository connected");
@@ -95,17 +139,80 @@ export function RepoConnectWizard({
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to connect repository"),
   });
 
-  const step = !provider ? 1 : !credentialId ? 2 : !selectedRepo ? 3 : !selectedBranch ? 4 : 5;
+  const stages =
+    provider === "azure_devops"
+      ? ["provider", "credential", "repo", "branch", "label"]
+      : effectiveMode === "public"
+        ? ["provider", "mode", "lookup", "branch", "label"]
+        : ["provider", "mode", "credential", "repo", "branch", "label"];
+  const currentStage = !provider
+    ? "provider"
+    : provider === "github" && !mode
+      ? "mode"
+      : effectiveMode === "credential" && !credentialId
+        ? "credential"
+        : !selectedRepo
+          ? effectiveMode === "public"
+            ? "lookup"
+            : "repo"
+          : !selectedBranch
+            ? "branch"
+            : "label";
+  const step = stages.indexOf(currentStage) + 1;
+
+  function backToProvider() {
+    setProvider(null);
+    setMode(null);
+    setAddingCredential(false);
+  }
+
+  function backToMode() {
+    setMode(null);
+    setSelectedRepo(null);
+    setSelectedBranch(null);
+  }
 
   return (
     <Card className="mx-auto max-w-xl">
       <CardHeader>
-        <CardTitle className="text-sm font-medium text-muted-foreground">Step {step} of 5</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          Step {step} of {stages.length}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {!provider ? (
           <ProviderPicker onSelect={setProvider} />
-        ) : !credentialId ? (
+        ) : provider === "github" && !mode ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={backToProvider}
+              className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" />
+              Change provider
+            </button>
+            <Label>How should this repo be accessed?</Label>
+            <button
+              type="button"
+              onClick={() => setMode("public")}
+              className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-accent"
+            >
+              <p className="text-sm font-medium text-foreground">Public repo — no credential needed</p>
+              <p className="text-xs text-muted-foreground">For open-source repos anyone can clone.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("credential")}
+              className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-accent"
+            >
+              <p className="text-sm font-medium text-foreground">Private repo — use a credential</p>
+              <p className="text-xs text-muted-foreground">
+                Requires a saved or one-off Personal Access Token.
+              </p>
+            </button>
+          </div>
+        ) : effectiveMode === "credential" && !credentialId ? (
           addingCredential ? (
             <CredentialForm
               provider={provider}
@@ -118,14 +225,11 @@ export function RepoConnectWizard({
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => {
-                  setProvider(null);
-                  setAddingCredential(false);
-                }}
+                onClick={provider === "github" ? backToMode : backToProvider}
                 className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="size-3.5" />
-                Change provider
+                {provider === "github" ? "Back" : "Change provider"}
               </button>
               <Label>{PROVIDER_LABEL[provider]} credential</Label>
               {providerCredentials?.length ? (
@@ -150,15 +254,55 @@ export function RepoConnectWizard({
             </div>
           )
         ) : !selectedRepo ? (
-          <div className="space-y-2">
-            <Input
-              placeholder="Search repos…"
-              autoComplete="off"
-              value={repoQuery}
-              onChange={(e) => setRepoQuery(e.target.value)}
-            />
-            <RepoPickerList repos={repos} isLoading={reposLoading} isError={reposError} onSelect={setSelectedRepo} />
-          </div>
+          effectiveMode === "public" ? (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={backToMode}
+                className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-3.5" />
+                Back
+              </button>
+              <Label htmlFor="public-repo">Repository</Label>
+              <Input
+                id="public-repo"
+                placeholder="owner/repo or https://github.com/owner/repo"
+                autoComplete="off"
+                value={publicRepoInput}
+                onChange={(e) => setPublicRepoInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    publicLookup.mutate();
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => publicLookup.mutate()}
+                disabled={!publicRepoInput.trim() || publicLookup.isPending}
+              >
+                {publicLookup.isPending ? "Looking up…" : "Look up repo"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Input
+                placeholder="Search repos…"
+                autoComplete="off"
+                value={repoQuery}
+                onChange={(e) => setRepoQuery(e.target.value)}
+              />
+              <RepoPickerList
+                repos={credentialRepos}
+                isLoading={credentialReposLoading}
+                isError={credentialReposError}
+                onSelect={setSelectedRepo}
+              />
+            </div>
+          )
         ) : !selectedBranch ? (
           <div className="space-y-2">
             <SelectedRepoSummary repo={selectedRepo} onChange={() => setSelectedRepo(null)} />

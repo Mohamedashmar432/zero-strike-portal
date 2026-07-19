@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
-import { refetchWhileAnyItemActive } from "@/lib/api/polling";
+import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/api/project-repos";
 import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
@@ -55,6 +55,7 @@ import {
   type ReportTemplateValue,
 } from "@/components/reports/report-template-picker";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
+import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { projectRiskStatus, SeverityCountPills } from "@/components/severity/severity-count-pills";
 import { cn, getInitials } from "@/lib/utils";
@@ -452,8 +453,9 @@ function ScansTab({ projectId }: { projectId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.projects.scans(projectId),
     queryFn: () => listScans(projectId),
-    // Poll while any scan is still running so cloud-scan status updates live.
-    refetchInterval: refetchWhileAnyItemActive<Scan>(),
+    // Poll while any scan is running OR mid-AI-analysis, so both the scan status and the
+    // "AI analyzing…" tag update live (a completed scan can still be enriching).
+    refetchInterval: refetchWhileAnyScanOrAiActive<Scan>(),
   });
 
   // Shared query key with RepositoriesTab so this reuses the same cache entry.
@@ -572,7 +574,15 @@ function ScansTab({ projectId }: { projectId: string }) {
                     {repoLabel(s)}
                   </TableCell>
                   <TableCell>
-                    <ScanStatusBadge status={s.status} />
+                    <div className="flex flex-col items-start gap-1">
+                      <ScanStatusBadge status={s.status} />
+                      <AiStatusBadge
+                        status={s.ai_analysis_status}
+                        startedAt={s.ai_analysis_started_at}
+                        progressCompleted={s.ai_analysis_progress_completed}
+                        progressTotal={s.ai_analysis_progress_total}
+                      />
+                    </div>
                   </TableCell>
                   <TableCell>{s.status === "completed" ? <SeverityCountPills counts={counts} /> : "—"}</TableCell>
                   <TableCell>{new Date(s.created_at).toLocaleString()}</TableCell>

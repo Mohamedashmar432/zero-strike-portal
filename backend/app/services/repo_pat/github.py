@@ -54,3 +54,30 @@ async def list_branches(pat: str, owner: str, repo: str) -> list[dict]:
     if resp.status_code != 200:
         raise RepoPatError("GitHub branch listing failed")
     return [{"name": b["name"]} for b in resp.json()]
+
+
+async def fetch_public_repo(owner: str, repo: str) -> dict:
+    """Unauthenticated lookup, used to connect a public repo to a project with no PAT at all. Raises
+    RepoPatError if the repo doesn't exist or (the actual safety check, since anyone could claim a
+    private repo is public) isn't actually public -- private repos 404 on this unauthenticated call."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{API_BASE}/repos/{owner}/{repo}", timeout=15)
+    if resp.status_code != 200:
+        raise RepoPatError("Repository not found or not public — private repos need a Personal Access Token")
+    body = resp.json()
+    return {
+        "id": str(body["id"]),
+        "name": body["name"],
+        "full_name": body["full_name"],
+        "clone_url": body["clone_url"],
+        "private": body["private"],
+        "default_branch": body.get("default_branch"),
+    }
+
+
+async def list_public_branches(owner: str, repo: str) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{API_BASE}/repos/{owner}/{repo}/branches", timeout=15)
+    if resp.status_code != 200:
+        raise RepoPatError("GitHub branch listing failed")
+    return [{"name": b["name"]} for b in resp.json()]

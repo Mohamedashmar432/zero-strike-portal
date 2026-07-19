@@ -54,6 +54,13 @@ class ScanResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    # Denormalized (read-side join) from the latest scan-level AIAnalysisJob, so any list/detail
+    # view can show an "AI analyzing · N%" tag without a separate per-row request. None = never
+    # requested. progress_* are batch counts (completed/total) while active, 0/0 otherwise.
+    ai_analysis_status: Literal["queued", "in_progress", "completed", "failed"] | None = None
+    ai_analysis_started_at: datetime | None = None
+    ai_analysis_progress_completed: int = 0
+    ai_analysis_progress_total: int = 0
 
 
 # --- Scanner-facing (api-key-authed) contract, matches the Go scanner's internal/portal client ---

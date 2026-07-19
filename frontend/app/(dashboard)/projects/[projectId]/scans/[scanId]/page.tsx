@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Download, RefreshCw, Sparkles, Wand2 } from "lucide-react";
+import { ChevronRight, Download, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
+import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -17,6 +18,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { StatCard } from "@/components/common/stat-card";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -33,12 +35,34 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
 import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
+import {
+  getAiStatus,
+  getFindingAnalysis,
+  getScanAnalysis,
+  triggerFindingAnalysis,
+  triggerScanAnalysis,
+  type AiAnalysisResult,
+  type FindingInsight,
+  type ScanInsight,
+} from "@/lib/api/ai";
 import { listFindings, type Finding, type FindingKind, type Severity } from "@/lib/api/findings";
 import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
 import { createCloudScan, getScan, type Scan } from "@/lib/api/scans";
+
+// Client-side verdict derivation -- the backend has no separate `verdict` enum, only
+// is_false_positive/false_positive_confidence (see docs/ARCHITECTURE_REVIEW_AND_AI_ROADMAP.md).
+function findingVerdict(insight: FindingInsight | null | undefined): {
+  label: string;
+  variant: "secondary" | "destructive" | "outline";
+} | null {
+  if (!insight) return null;
+  if (insight.is_false_positive === true) return { label: "Possible false positive", variant: "secondary" };
+  if (insight.is_false_positive === false) return { label: "Likely valid", variant: "destructive" };
+  return { label: "Needs review", variant: "outline" };
+}
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const KINDS: FindingKind[] = ["sast", "secret", "sca", "config"];
@@ -48,9 +72,10 @@ function fileLine(file: string, line: number | null) {
   return line ? `${file}:${line}` : file;
 }
 
-// No AI provider is configured anywhere in this app yet (see Settings > AI Provider /
-// Auto-fix) — these buttons stay visible per the design, but honestly say so instead
-// of pretending to call a model that doesn't exist.
+// Auto-fix (fix proposals / diff viewer) isn't built yet (see Settings > Auto-fix) — these
+// buttons stay visible per the design, but honestly say so instead of pretending to call
+// a model that doesn't exist. AI *analysis* (the other button in each pair) is wired for
+// real below.
 function notifyComingSoon(feature: string) {
   toast.info(`${feature} isn't available yet`, {
     description: "Configure an AI provider in Settings → AI Provider to enable this.",
@@ -136,16 +161,58 @@ function RescanDialog({
   );
 }
 
-function FindingItem({
+// Exported (rather than kept file-private) solely so it has a stable import path for its
+// own test file -- it still has exactly one real call site, below in ScanDetailPage.
+export function FindingItem({
   finding,
   expanded,
   onToggle,
+  aiEnabled,
 }: {
   finding: Finding;
   expanded: boolean;
   onToggle: () => void;
+  /** From the page-level GET /ai/status query -- whether an AI provider is configured at all. */
+  aiEnabled: boolean;
 }) {
   const snippet = finding.evidence[0]?.snippet;
+  const queryClient = useQueryClient();
+  const canAnalyze = aiEnabled && finding.fingerprint != null;
+
+  const { data: analysis } = useQuery({
+    queryKey: queryKeys.ai.findingInsight(finding.id),
+    queryFn: () => getFindingAnalysis(finding.id),
+    enabled: expanded && canAnalyze,
+    refetchInterval: refetchWhileStatusActive<AiAnalysisResult<FindingInsight>>(),
+  });
+
+  const trigger = useMutation({
+    mutationFn: (opts: { force?: boolean }) => triggerFindingAnalysis(finding.id, opts),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.ai.findingInsight(finding.id), result);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start AI analysis"),
+  });
+
+  const status = analysis?.status ?? "not_requested";
+  const isAnalyzing = trigger.isPending || status === "queued" || status === "in_progress";
+  // Once there's a terminal result, the top trigger button is replaced by the Re-analyze/
+  // Retry button living inside the result subsection below -- but it stays visible (showing
+  // a spinner) while a request is in flight, per the loading state in the spec.
+  const hideTriggerButton = status === "completed" || status === "failed";
+  const showResultSection = isAnalyzing || hideTriggerButton;
+  const verdict = findingVerdict(analysis?.insight);
+  // Display-only AI severity overlay: only when the AI actually differs from the scanner.
+  const adjustedSeverity =
+    analysis?.insight?.adjusted_severity && analysis.insight.adjusted_severity !== finding.severity
+      ? analysis.insight.adjusted_severity
+      : null;
+  const hint = !aiEnabled
+    ? "Configure an AI provider in Settings → AI Provider to enable this."
+    : !canAnalyze
+      ? "AI analysis isn't available for this finding."
+      : undefined;
+
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       <button
@@ -157,6 +224,15 @@ function FindingItem({
           className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
         />
         {finding.severity && <SeverityBadge severity={finding.severity} />}
+        {adjustedSeverity && (
+          <span
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            title={analysis?.insight?.severity_reasoning || "AI-adjusted severity"}
+          >
+            <span className="font-mono font-semibold">AI→</span>
+            <SeverityBadge severity={adjustedSeverity} />
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{finding.rule_name || finding.rule_id || "Finding"}</p>
           <p className="truncate font-mono text-xs text-muted-foreground">
@@ -215,15 +291,90 @@ function FindingItem({
               </div>
             )}
             <div className="flex flex-col gap-2 border-t border-border pt-4">
-              <Button variant="outline" size="sm" onClick={() => notifyComingSoon("AI analysis")}>
-                <Sparkles />
-                Analyze with AI
-              </Button>
+              {!hideTriggerButton && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canAnalyze || isAnalyzing}
+                  title={hint}
+                  onClick={() => trigger.mutate({ force: false })}
+                >
+                  {isAnalyzing ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                  {isAnalyzing ? "Analyzing…" : "Analyze with AI"}
+                </Button>
+              )}
               <Button size="sm" onClick={() => notifyComingSoon("Auto-fix")}>
                 <Wand2 />
                 Apply Auto-Fix
               </Button>
             </div>
+            {/* Deliberately a separate, visually distinct block from Vulnerability Details/
+                Recommendation above -- a security tool's raw scanner output must stay separable
+                from AI-generated content. */}
+            {showResultSection && (
+              <div className="space-y-2 border-t border-border pt-4">
+                <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  AI Analysis
+                </h6>
+                {isAnalyzing && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-1/3" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                )}
+                {status === "completed" && analysis?.insight && (
+                  <div className="space-y-2 rounded-lg border border-border bg-background p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {verdict && <Badge variant={verdict.variant}>{verdict.label}</Badge>}
+                      {analysis.insight.false_positive_confidence != null && (
+                        <span className="text-xs text-muted-foreground">
+                          {Math.round(analysis.insight.false_positive_confidence * 100)}% confidence
+                        </span>
+                      )}
+                    </div>
+                    {analysis.insight.adjusted_severity &&
+                      analysis.insight.adjusted_severity !== finding.severity && (
+                        <p className="text-sm">
+                          <span className="font-medium">AI severity: </span>
+                          <span className="uppercase">{finding.severity ?? "—"}</span>
+                          {" → "}
+                          <span className="font-semibold uppercase">{analysis.insight.adjusted_severity}</span>
+                          {analysis.insight.severity_reasoning ? ` — ${analysis.insight.severity_reasoning}` : ""}
+                        </p>
+                      )}
+                    {analysis.insight.explanation && <p className="text-sm">{analysis.insight.explanation}</p>}
+                    {analysis.insight.improved_description && (
+                      <p className="text-sm text-muted-foreground">{analysis.insight.improved_description}</p>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={trigger.isPending}
+                      onClick={() => trigger.mutate({ force: true })}
+                    >
+                      <RefreshCw />
+                      Re-analyze
+                    </Button>
+                  </div>
+                )}
+                {status === "failed" && (
+                  <>
+                    <Alert variant="destructive">
+                      <AlertTitle>AI analysis failed</AlertTitle>
+                      <AlertDescription>{analysis?.error_message || "Something went wrong."}</AlertDescription>
+                    </Alert>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={trigger.isPending}
+                      onClick={() => trigger.mutate({ force: false })}
+                    >
+                      Retry
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -316,6 +467,31 @@ export default function ScanDetailPage() {
     retry: false,
   });
 
+  const { data: aiStatus } = useQuery({
+    queryKey: queryKeys.ai.status(),
+    queryFn: getAiStatus,
+  });
+  const aiEnabled = aiStatus?.enabled ?? false;
+
+  const { data: scanAnalysis } = useQuery({
+    queryKey: queryKeys.ai.scanInsight(scanId),
+    queryFn: () => getScanAnalysis(scanId),
+    enabled: completed,
+    refetchInterval: refetchWhileStatusActive<AiAnalysisResult<ScanInsight>>(),
+    retry: false,
+  });
+
+  const triggerScan = useMutation({
+    mutationFn: (opts: { force?: boolean }) => triggerScanAnalysis(scanId, opts),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.ai.scanInsight(scanId), result);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start AI analysis"),
+  });
+  const scanAnalysisStatus = scanAnalysis?.status ?? "not_requested";
+  const scanAnalysisLoading =
+    triggerScan.isPending || scanAnalysisStatus === "queued" || scanAnalysisStatus === "in_progress";
+
   const owaspData = useMemo(() => owaspChartData(report?.stats.by_owasp), [report]);
 
   const visibleFindings = useMemo(() => {
@@ -346,6 +522,12 @@ export default function ScanDetailPage() {
             <h1 className="text-2xl font-semibold tracking-tight">{scan.scan_label || "Scan"}</h1>
             <ScanTypeBadge scanType={scan.scan_type} />
             <ScanStatusBadge status={scan.status} />
+            <AiStatusBadge
+              status={scanAnalysis?.status}
+              startedAt={scanAnalysis?.started_at}
+              progressCompleted={scanAnalysis?.progress_completed}
+              progressTotal={scanAnalysis?.progress_total}
+            />
           </div>
           <p className="text-sm text-muted-foreground">
             Created {new Date(scan.created_at).toLocaleString()}
@@ -370,9 +552,14 @@ export default function ScanDetailPage() {
                 <Download />
                 {downloadingPdf ? "Preparing…" : "Generate Report"}
               </Button>
-              <Button variant="outline" onClick={() => notifyComingSoon("AI Analysis")}>
-                <Sparkles />
-                AI Analysis
+              <Button
+                variant="outline"
+                disabled={!aiEnabled || scanAnalysisLoading}
+                title={!aiEnabled ? "Configure an AI provider in Settings → AI Provider to enable this." : undefined}
+                onClick={() => triggerScan.mutate({ force: scanAnalysisStatus !== "not_requested" })}
+              >
+                {scanAnalysisLoading ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                {scanAnalysisLoading ? "Analyzing…" : "AI Analysis"}
               </Button>
               <Button onClick={() => notifyComingSoon("Auto AI Fix")}>
                 <Wand2 />
@@ -441,6 +628,74 @@ export default function ScanDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Only rendered once AI analysis has actually been requested for this scan --
+              otherwise this page looks exactly as it does today. */}
+          {scanAnalysis && scanAnalysisStatus !== "not_requested" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-normal text-muted-foreground">AI Analysis</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {scanAnalysisLoading && (
+                  <Alert>
+                    <AlertTitle>Analyzing findings…</AlertTitle>
+                    <AlertDescription>
+                      This runs in the background — this page updates automatically.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {scanAnalysisStatus === "completed" && scanAnalysis.insight && (
+                  <>
+                    <Alert>
+                      <AlertTitle>Summary</AlertTitle>
+                      <AlertDescription>{scanAnalysis.insight.summary || "No summary available."}</AlertDescription>
+                    </Alert>
+                    <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                      <StatCard
+                        size="sm"
+                        label="Findings Analyzed"
+                        value={scanAnalysis.insight.total_findings_analyzed ?? "—"}
+                      />
+                      <StatCard
+                        size="sm"
+                        label="Possible False Positives"
+                        value={scanAnalysis.insight.false_positive_count ?? "—"}
+                      />
+                    </div>
+                    {scanAnalysis.insight.top_recommendations.length > 0 && (
+                      <div>
+                        <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                          Top Recommendations
+                        </h6>
+                        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+                          {scanAnalysis.insight.top_recommendations.map((rec, i) => (
+                            <li key={i}>{rec}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+                {scanAnalysisStatus === "failed" && (
+                  <>
+                    <Alert variant="destructive">
+                      <AlertTitle>AI analysis failed</AlertTitle>
+                      <AlertDescription>{scanAnalysis.error_message || "Something went wrong."}</AlertDescription>
+                    </Alert>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={triggerScan.isPending}
+                      onClick={() => triggerScan.mutate({ force: false })}
+                    >
+                      Retry
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <FilterBar
             search={search}
             onSearchChange={setSearch}
@@ -496,7 +751,13 @@ export default function ScanDetailPage() {
           >
             <div className="space-y-2">
               {visibleFindings.map((f) => (
-                <FindingItem key={f.id} finding={f} expanded={expanded.has(f.id)} onToggle={() => toggleExpanded(f.id)} />
+                <FindingItem
+                  key={f.id}
+                  finding={f}
+                  expanded={expanded.has(f.id)}
+                  onToggle={() => toggleExpanded(f.id)}
+                  aiEnabled={aiEnabled}
+                />
               ))}
             </div>
           </DataTableCard>

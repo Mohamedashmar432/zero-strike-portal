@@ -9,7 +9,9 @@ import { EmptyState } from "@/components/common/empty-state";
 import { StatCard } from "@/components/common/stat-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
+import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
+import { refetchWhileAnyRecentScanActive } from "@/lib/api/polling";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { projectRiskStatus, SeverityCountPills, SEVERITY_PILL_CLASS } from "@/components/severity/severity-count-pills";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,9 @@ export default function DashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard", "stats"],
     queryFn: getDashboardStats,
+    // Poll while any recent scan is running or mid-AI-analysis, so status + the "AI analyzing"
+    // tag update live here too.
+    refetchInterval: refetchWhileAnyRecentScanActive(),
   });
   // Same query key as the Projects list page, so this reuses that cache instead of
   // re-fetching — only used here for project descriptions on the Pinned Projects cards.
@@ -222,7 +227,15 @@ export default function DashboardPage() {
                       <ScanTypeBadge scanType={scan.scan_type} />
                     </TableCell>
                     <TableCell>
-                      <ScanStatusBadge status={scan.status} />
+                      <div className="flex flex-col items-start gap-1">
+                        <ScanStatusBadge status={scan.status} />
+                        <AiStatusBadge
+                          status={scan.ai_analysis_status}
+                          startedAt={scan.ai_analysis_started_at}
+                          progressCompleted={scan.ai_analysis_progress_completed}
+                          progressTotal={scan.ai_analysis_progress_total}
+                        />
+                      </div>
                     </TableCell>
                     <TableCell>
                       <SeverityCountPills counts={scan.findings_by_severity} showLabel={false} />
