@@ -220,11 +220,18 @@ async def _persist_insight(
 
 
 @retry_transient((llm_client.LLMMalformedResponseError,), max_attempts=2, base_delay=1.0)
-async def _enrich_completion(messages: list[dict]) -> dict:
+async def _enrich_completion(
+    messages: list[dict], *, project_id: str | None = None, scan_id: str | None = None
+) -> dict:
     """One enrichment call, capped by max_tokens so a small local model can't run past its own
     output limit mid-JSON and truncate. A malformed/garbled response is retried once (the model
     often produces valid JSON on a second pass) before it counts as a coverage gap."""
-    return await llm_client.get_completion(messages, max_tokens=settings.ai_analysis_max_output_tokens)
+    return await llm_client.get_completion(
+        messages,
+        max_tokens=settings.ai_analysis_max_output_tokens,
+        project_id=project_id,
+        scan_id=scan_id,
+    )
 
 
 async def _group_cached(members: list[Finding], project_id: str) -> list[AIFindingInsight] | None:
@@ -250,6 +257,7 @@ async def _enrich_group_chunk(
     chunk_groups: list[tuple[str, list[Finding]]],
     project_id: str,
     config,
+    scan_id: str | None = None,
 ) -> tuple[list[AIFindingInsight], int]:
     """Enrich up to batch_size RULE GROUPS in one LLM call: send one representative per group,
     then fan each rule's verdict out to every member of its group. Returns (saved insights,
@@ -273,7 +281,7 @@ async def _enrich_group_chunk(
             {"role": "system", "content": _ENRICH_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps({"findings": payload_reps})},
         ]
-        raw = await _enrich_completion(messages)
+        raw = await _enrich_completion(messages, project_id=project_id, scan_id=scan_id)
         by_fingerprint = _parse_enrichments(raw)
 
         now = datetime.now(timezone.utc)
@@ -308,6 +316,8 @@ async def analyze_findings_batch(
     if not findings:
         return []
     project_id = findings[0].project_id
+    # All findings in a batch come from one scan (run_job fetches per-scan); attribute usage to it.
+    scan_id = findings[0].scan_id
     # Only needed for batch sizing + stamping provider/model. Don't hard-fail if absent: a fully-cached
     # batch short-circuits without any LLM call, and an actual enrichment call raises
     # LLMNotConfiguredError from get_completion itself when there's no provider.
@@ -348,7 +358,9 @@ async def analyze_findings_batch(
 
     async def _run(chunk_groups: list[tuple[str, list[Finding]]]):
         nonlocal completed
-        insights, covered = await _enrich_group_chunk(semaphore, chunk_groups, project_id, config)
+        insights, covered = await _enrich_group_chunk(
+            semaphore, chunk_groups, project_id, config, scan_id=scan_id
+        )
         completed += covered  # advance only by groups actually enriched (honest partial signal)
         if progress_cb:
             await progress_cb(completed, total)
@@ -446,7 +458,9 @@ async def synthesize_scan(
     # summary on ANY LLM error (malformed JSON, wrong shape, or a permanent error such as a
     # small local model exceeding its context on the summary prompt).
     try:
-        raw = await llm_client.get_completion(messages)
+        raw = await llm_client.get_completion(
+            messages, project_id=scan.project_id, scan_id=str(scan.id)
+        )
         parsed = _ScanSynthesisResponse.model_validate(raw)
         summary = parsed.summary
         recommendations = parsed.top_recommendations

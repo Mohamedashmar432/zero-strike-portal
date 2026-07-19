@@ -12,8 +12,10 @@ from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.project import (
     OwaspSummaryResponse,
+    ProjectAiUsageResponse,
     ProjectCreateRequest,
     ProjectResponse,
+    ProjectScanActivityResponse,
     ProjectStatsItem,
     ProjectStatsResponse,
     ProjectUpdateRequest,
@@ -26,7 +28,13 @@ from app.schemas.project_repo import (
     ProjectRepoResponse,
     ProjectRepoUpdateRequest,
 )
-from app.services import audit_service, project_repo_service, project_service, project_stats_service
+from app.services import (
+    ai_provider_config_service,
+    audit_service,
+    project_repo_service,
+    project_service,
+    project_stats_service,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -369,3 +377,17 @@ async def get_project_owasp_summary(
     await project_service.require_member(project_id, user)
     by_owasp = await project_stats_service.get_owasp_summary(project_id, project_repo_id)
     return OwaspSummaryResponse(project_id=project_id, project_repo_id=project_repo_id, by_owasp=by_owasp)
+
+
+@router.get("/{project_id}/scan-activity", response_model=ProjectScanActivityResponse)
+async def get_project_scan_activity(project_id: str, user: User = Depends(get_current_user)):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await project_stats_service.get_project_scan_activity(project_id)
+
+
+@router.get("/{project_id}/ai-usage", response_model=ProjectAiUsageResponse)
+async def get_project_ai_usage(project_id: str, user: User = Depends(get_current_user)):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return ProjectAiUsageResponse(**await ai_provider_config_service.get_project_usage(project_id))

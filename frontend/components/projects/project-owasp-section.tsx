@@ -30,7 +30,12 @@ export function ProjectOwaspSection({ projectId }: { projectId: string }) {
     <div className="space-y-3">
       <Select value={scope} onValueChange={(v) => setScope(v ?? ALL_REPOS)}>
         <SelectTrigger size="sm" className="w-full sm:w-64">
-          <SelectValue />
+          <SelectValue>
+            {scope === ALL_REPOS
+              ? "All repositories"
+              : repos?.find((r) => r.id === scope)?.label ||
+                repos?.find((r) => r.id === scope)?.repo_full_name}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL_REPOS}>All repositories</SelectItem>

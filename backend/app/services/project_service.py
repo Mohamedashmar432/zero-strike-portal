@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 
+from app.models.ai_usage_event import AIUsageEvent
 from app.models.api_key import ApiKey
 from app.models.finding import Finding
 from app.models.project import Project
@@ -51,4 +52,5 @@ async def delete_project_cascade(project: Project) -> None:
     await Scan.find(Scan.project_id == project_id).delete()
     await Finding.find(Finding.project_id == project_id).delete()
     await Report.find(Report.project_id == project_id).delete()
+    await AIUsageEvent.find(AIUsageEvent.project_id == project_id).delete()
     await project.delete()

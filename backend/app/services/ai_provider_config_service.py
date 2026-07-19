@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 
 from app.core import security
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider, AIProviderConfig
+from app.models.ai_usage_event import AIUsageEvent
 
 
 async def list_configs() -> list[AIProviderConfig]:
@@ -158,10 +159,17 @@ async def record_usage(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     cost_usd: float = 0.0,
+    provider: str | None = None,
+    model_name: str | None = None,
+    project_id: str | None = None,
+    scan_id: str | None = None,
 ) -> None:
     """Atomic $inc so concurrent llm_client calls (analyze_findings_batch runs one call per
     rule_id group, gathered concurrently under a semaphore) against the same active
-    provider never lose increments to a read-modify-write race."""
+    provider never lose increments to a read-modify-write race.
+
+    When project_id is given for a successful call with tokens, also drops one AIUsageEvent
+    so usage can later be sliced per project (the global totals can't be)."""
     now = datetime.now(timezone.utc)
     if success:
         inc = Inc(
@@ -182,3 +190,47 @@ async def record_usage(
     await AIProviderConfig.find_one(AIProviderConfig.id == PydanticObjectId(config_id)).update(
         inc, Set({AIProviderConfig.last_used_at: now})
     )
+
+    if success and project_id and (prompt_tokens or completion_tokens):
+        await AIUsageEvent(
+            project_id=project_id,
+            scan_id=scan_id,
+            provider=provider or "",
+            model_name=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+            created_at=now,
+        ).insert()
+
+
+async def get_project_usage(project_id: str) -> dict:
+    """Per-project token/cost totals summed from AIUsageEvent (the global AIProviderConfig
+    totals can't be sliced per project) plus the active provider's identity for display."""
+    cursor = AIUsageEvent.get_pymongo_collection().aggregate(
+        [
+            {"$match": {"project_id": project_id}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_requests": {"$sum": 1},
+                    "total_prompt_tokens": {"$sum": "$prompt_tokens"},
+                    "total_completion_tokens": {"$sum": "$completion_tokens"},
+                    "total_cost_usd": {"$sum": "$cost_usd"},
+                }
+            },
+        ]
+    )
+    rows = await cursor.to_list(length=1)
+    agg = rows[0] if rows else {}
+
+    active = await get_active_config()
+    return {
+        "enabled": active is not None and await is_ready(active),
+        "active_provider": active.provider if active else None,
+        "active_model": active.model_name if active else None,
+        "total_requests": agg.get("total_requests", 0),
+        "total_prompt_tokens": agg.get("total_prompt_tokens", 0),
+        "total_completion_tokens": agg.get("total_completion_tokens", 0),
+        "total_cost_usd": round(agg.get("total_cost_usd", 0.0), 6),
+    }

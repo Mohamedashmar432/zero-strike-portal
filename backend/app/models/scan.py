@@ -7,12 +7,13 @@ from pymongo import IndexModel
 # Single source of truth for the status enum — import this everywhere a Scan status
 # is typed (schemas, etc.) instead of repeating the Literal, which used to drift.
 ScanStatus = Literal["pending", "queued", "running", "completed", "failed"]
+ScanType = Literal["local", "cloud", "cicd"]
 
 
 class Scan(Document):
     project_id: str
     api_key_id: str | None = None
-    scan_type: Literal["local", "cloud", "cicd"]
+    scan_type: ScanType
     triggered_by: Literal["cli", "ci", "cloud", "manual"] = "cli"
     status: ScanStatus = "pending"
     scanner_version: str | None = None

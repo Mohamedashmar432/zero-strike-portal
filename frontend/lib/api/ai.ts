@@ -122,8 +122,22 @@ export type ScanInsight = {
   updated_at: string;
 };
 
+export type ProjectAiUsage = {
+  enabled: boolean;
+  active_provider: string | null;
+  active_model: string | null;
+  total_requests: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_cost_usd: number;
+};
+
 export function getAiStatus() {
   return apiFetch<AiStatus>("/ai/status");
+}
+
+export function getProjectAiUsage(projectId: string) {
+  return apiFetch<ProjectAiUsage>(`/projects/${projectId}/ai-usage`);
 }
 
 export function listAiProviders() {

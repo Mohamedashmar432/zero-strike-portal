@@ -7,6 +7,7 @@ from app.models.ai_finding_insight import AIFindingInsight
 from app.models.ai_fix_proposal import AIFixProposal
 from app.models.ai_provider_config import AIProviderConfig
 from app.models.ai_scan_insight import AIScanInsight
+from app.models.ai_usage_event import AIUsageEvent
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.finding import Finding
@@ -54,6 +55,7 @@ async def connect_to_mongo() -> None:
             AIFixProposal,
             AIProviderConfig,
             AIAnalysisJob,
+            AIUsageEvent,
         ],
     )
 

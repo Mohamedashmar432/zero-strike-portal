@@ -1,6 +1,6 @@
 import { apiFetch } from "./client";
 import type { SeverityCounts } from "./dashboard";
-import type { ScanStatus } from "./scans";
+import type { ScanStatus, ScanType } from "./scans";
 import type { Page } from "./users";
 
 export type ScanStatusCounts = Record<ScanStatus, number>;
@@ -41,12 +41,29 @@ export type ScanHistoryItem = {
   completed_at: string | null;
   total_findings: number;
   findings_by_severity: SeverityCounts;
+  // Populated by scan-activity: scan kind + who/what started it (member name, CI provider, host).
+  scan_type: ScanType | null;
+  scanned_by: string | null;
 };
 
 export type OwaspSummary = {
   project_id: string;
   project_repo_id: string | null;
   by_owasp: Record<string, number>;
+};
+
+export type RepoScanGroup = {
+  repo_id: string | null; // null = the synthetic "Unlinked scans" group
+  repo_label: string;
+  provider: string | null;
+  scans: ScanHistoryItem[]; // newest -> oldest
+};
+
+export type ProjectScanActivity = {
+  repos: RepoScanGroup[];
+  // Live posture: sum of each repo's most recent completed scan (not the all-time total).
+  current_findings: SeverityCounts;
+  current_findings_total: number;
 };
 
 export function listProjects(page = 1, pageSize = 20) {
@@ -64,6 +81,10 @@ export function getProject(id: string) {
 
 export function getRepoScanHistory(projectId: string, repoId: string, limit = 30) {
   return apiFetch<ScanHistoryItem[]>(`/projects/${projectId}/repos/${repoId}/scan-history?limit=${limit}`);
+}
+
+export function getProjectScanActivity(projectId: string) {
+  return apiFetch<ProjectScanActivity>(`/projects/${projectId}/scan-activity`);
 }
 
 export function getProjectOwaspSummary(projectId: string, projectRepoId?: string) {
