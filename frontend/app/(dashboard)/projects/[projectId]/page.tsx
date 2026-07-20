@@ -50,6 +50,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/common/stat-card";
 import { ProjectHistoryTab } from "@/components/projects/project-history-tab";
 import { ProjectComplianceTab } from "@/components/projects/project-compliance-tab";
+import { ProjectAutoFixTab } from "@/components/projects/project-auto-fix-tab";
 import { ProjectSettingsTab } from "@/components/projects/project-settings-tab";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
@@ -787,7 +788,7 @@ export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const TAB_VALUES = ["scans", "repos", "history", "compliance", "members", "keys", "settings"];
+  const TAB_VALUES = ["scans", "repos", "history", "compliance", "auto-fix", "members", "keys", "settings"];
   const initialTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
   const { data: project } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
@@ -814,6 +815,7 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="repos">Repositories</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
+          <TabsTrigger value="auto-fix">Auto-Fix</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="keys">Project Tokens</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -832,6 +834,9 @@ export default function ProjectDetailPage() {
         </TabsContent>
         <TabsContent value="compliance">
           <ProjectComplianceTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="auto-fix">
+          <ProjectAutoFixTab />
         </TabsContent>
         <TabsContent value="members">
           <MembersTab projectId={projectId} myRole={project?.my_role} />
