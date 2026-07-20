@@ -1,5 +1,6 @@
 import type { AiAnalysisStatus } from "./ai";
 import { apiFetch } from "./client";
+import type { SeverityCounts } from "./dashboard";
 import type { Page } from "./users";
 
 export type ScanType = "local" | "cloud" | "cicd";
@@ -33,6 +34,9 @@ export type Scan = {
   ai_analysis_started_at: string | null;
   ai_analysis_progress_completed: number;
   ai_analysis_progress_total: number;
+  // Batched per-scan severity breakdown (see project_stats_service.get_severity_by_scan_ids) --
+  // avoids a per-row report fetch for the scans list.
+  findings_by_severity: SeverityCounts | null;
 };
 
 export function listScans(projectId: string, page = 1, pageSize = 20) {
