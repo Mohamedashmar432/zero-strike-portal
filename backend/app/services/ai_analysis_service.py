@@ -234,7 +234,9 @@ async def _enrich_completion(
     )
 
 
-async def _group_cached(members: list[Finding], project_id: str) -> list[AIFindingInsight] | None:
+def _group_cached(
+    members: list[Finding], insights_by_fp: dict[str, AIFindingInsight]
+) -> list[AIFindingInsight] | None:
     """If every fingerprinted member already has an insight, return them (no LLM call needed).
     A single missing member returns None so the whole group is re-enriched -- which is exactly
     what makes a partial run re-runnable: rerun with force=False backfills only the gaps."""
@@ -243,9 +245,7 @@ async def _group_cached(members: list[Finding], project_id: str) -> list[AIFindi
         return []  # nothing keyable in this group -- treat as resolved, no insight to store
     cached: list[AIFindingInsight] = []
     for f in fingerprinted:
-        existing = await AIFindingInsight.find_one(
-            AIFindingInsight.fingerprint == f.fingerprint, AIFindingInsight.project_id == project_id
-        )
+        existing = insights_by_fp.get(f.fingerprint)
         if existing is None:
             return None
         cached.append(existing)
@@ -341,10 +341,21 @@ async def analyze_findings_batch(
     all_insights: list[AIFindingInsight] = []
     to_enrich: list[tuple[str, list[Finding]]] = []
 
+    # One batched lookup for every fingerprint in this scan, instead of a per-finding query
+    # inside the cache-check loop below (which was O(findings) DB round trips per scan).
+    insights_by_fp: dict[str, AIFindingInsight] = {}
+    if not force:
+        fingerprints = [f.fingerprint for f in findings if f.fingerprint]
+        if fingerprints:
+            existing = await AIFindingInsight.find(
+                In(AIFindingInsight.fingerprint, fingerprints), AIFindingInsight.project_id == project_id
+            ).to_list()
+            insights_by_fp = {i.fingerprint: i for i in existing}
+
     # Cache pass: fully-cached groups resolve with no LLM call (and count toward progress).
     for rule_id, members in group_items:
         if not force:
-            cached = await _group_cached(members, project_id)
+            cached = _group_cached(members, insights_by_fp)
             if cached is not None:
                 all_insights.extend(cached)
                 completed += 1

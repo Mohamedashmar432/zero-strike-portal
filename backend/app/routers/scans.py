@@ -8,6 +8,7 @@ from app.models.report import Report
 from app.models.scan import Scan
 from app.models.user import User
 from app.schemas.common import Page
+from app.schemas.dashboard import SeverityCounts
 from app.schemas.report import FindingResponse, ReportResponse
 from app.schemas.scan import ScanCreateRequest, ScanResponse
 from app.services import (
@@ -17,6 +18,7 @@ from app.services import (
     pdf_report_service,
     project_repo_service,
     project_service,
+    project_stats_service,
     report_template_service,
     scan_queue_service,
     scan_service,
@@ -59,7 +61,11 @@ def _to_finding_response(f: Finding) -> FindingResponse:
     )
 
 
-def _to_response(scan: Scan, ai: ai_analysis_service.ScanAiStatus | None = None) -> ScanResponse:
+def _to_response(
+    scan: Scan,
+    ai: ai_analysis_service.ScanAiStatus | None = None,
+    severity: SeverityCounts | None = None,
+) -> ScanResponse:
     return ScanResponse(
         id=str(scan.id),
         project_id=scan.project_id,
@@ -85,6 +91,7 @@ def _to_response(scan: Scan, ai: ai_analysis_service.ScanAiStatus | None = None)
         ai_analysis_started_at=ai.started_at if ai else None,
         ai_analysis_progress_completed=ai.progress_completed if ai else 0,
         ai_analysis_progress_total=ai.progress_total if ai else 0,
+        findings_by_severity=severity,
     )
 
 
@@ -181,7 +188,8 @@ async def list_scans(
     total = await query.count()
     scans = await query.sort("-created_at").skip((page - 1) * page_size).limit(page_size).to_list()
     ai_status = await ai_analysis_service.latest_scan_ai_status([str(s.id) for s in scans])
-    items = [_to_response(s, ai_status.get(str(s.id))) for s in scans]
+    severity = await project_stats_service.get_severity_by_scan_ids([str(s.id) for s in scans])
+    items = [_to_response(s, ai_status.get(str(s.id)), severity.get(str(s.id))) for s in scans]
     return Page(items=items, total=total, page=page, page_size=page_size)
 
 

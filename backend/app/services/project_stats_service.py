@@ -77,6 +77,21 @@ def _severity_counts_from_groups(groups: list[dict], key: str) -> dict[str, Seve
     return by_key
 
 
+async def get_severity_by_scan_ids(scan_ids: list[str]) -> dict[str, SeverityCounts]:
+    """Batched per-scan severity breakdown for a page of scans -- avoids the scans list
+    endpoint needing a per-row report fetch (see frontend ScansTab)."""
+    if not scan_ids:
+        return {}
+    groups = await _aggregate(
+        Finding,
+        [
+            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$group": {"_id": {"scan_id": "$scan_id", "severity": "$severity"}, "count": {"$sum": 1}}},
+        ],
+    )
+    return _severity_counts_from_groups(groups, "scan_id")
+
+
 async def _resolve_project_ids(user: User, project_ids: list[str] | None) -> list[str]:
     if user.role == "admin":
         if project_ids is not None:
@@ -218,7 +233,15 @@ async def get_project_scan_activity(project_id: str, limit_per_repo: int = 50) -
     all repos), not the all-time total. Scans matching no connected repo land in an "Unlinked
     scans" group so nothing is silently dropped."""
     repos = await project_repo_service.list_repos(project_id)
-    scans = await Scan.find(Scan.project_id == project_id).sort(-Scan.created_at).to_list()
+    # Heuristic cap, not a strict per-repo guarantee: bounds a pathological all-time scan count
+    # while comfortably covering the realistic case (repos in one project scan at similar
+    # cadence). Revisit only if a real project shows an imbalanced-repo gap in this view.
+    scans = (
+        await Scan.find(Scan.project_id == project_id)
+        .sort(-Scan.created_at)
+        .limit(limit_per_repo * (len(repos) + 1) * 3)  # +1 = unlinked bucket; x3 = safety margin
+        .to_list()
+    )
 
     # repo resolution: exact project_repo_id, else clone_url match for un-stamped legacy scans.
     by_id = {str(r.id): r for r in repos}

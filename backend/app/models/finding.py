@@ -89,7 +89,7 @@ class Finding(Document):
     class Settings:
         name = "findings"
         indexes = [
-            IndexModel([("scan_id", 1)]),
+            IndexModel([("scan_id", 1), ("priority_score", -1)]),
             IndexModel([("project_id", 1), ("severity", 1), ("created_at", -1)]),
             IndexModel([("project_id", 1), ("project_repo_id", 1), ("severity", 1)]),
             IndexModel([("fingerprint", 1), ("project_id", 1)]),

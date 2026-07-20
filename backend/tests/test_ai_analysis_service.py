@@ -250,6 +250,35 @@ def test_cached_finding_force_false_skips_llm_call(client, monkeypatch):
     asyncio.run(run())
 
 
+def test_cache_check_batches_lookup_across_findings(client, monkeypatch):
+    """The cache-check must be one batched query for the whole call, not one query per
+    finding -- regression test for the N+1 fixed in analyze_findings_batch."""
+    find_calls = {"n": 0}
+    real_find = AIFindingInsight.find
+
+    def counting_find(*args, **kwargs):
+        find_calls["n"] += 1
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(AIFindingInsight, "find", counting_find)
+
+    async def fake_get_completion(messages, **kwargs):
+        raise AssertionError("fully-cached batch must not call the LLM")
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+
+    async def run():
+        findings = [_make_finding(f"fp-{i}", f"rule-{i}") for i in range(5)]
+        for f in findings:
+            await AIFindingInsight(fingerprint=f.fingerprint, project_id="proj-1", explanation="cached").insert()
+
+        insights = await ai_analysis_service.analyze_findings_batch(findings, force=False)
+        assert len(insights) == 5
+        assert find_calls["n"] == 1  # one $in query for all 5 fingerprints, not 5 find_one calls
+
+    asyncio.run(run())
+
+
 def test_force_true_overwrites_cached_insight(client, monkeypatch):
     calls = {"n": 0}
 

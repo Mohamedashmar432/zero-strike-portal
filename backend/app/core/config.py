@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     max_concurrent_ai_jobs: int = 3
     ai_job_timeout_seconds: int = 300
     ai_queue_stuck_multiplier: int = 3
+    # Per-attempt cap passed to litellm.acompletion — without this, a hung/slow provider
+    # connection blocks the request indefinitely (litellm/httpx default to no timeout).
+    ai_llm_request_timeout_seconds: int = 60
     # Bounds concurrent per-rule-group LLM calls within a single job (ai_analysis_service).
     ai_analysis_concurrency: int = 3
     # Caps how many of a scan's findings (sorted by priority_score desc) get analyzed per scan-level job.

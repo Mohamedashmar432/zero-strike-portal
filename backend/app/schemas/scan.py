@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, model_validator
 
 from app.models.scan import ScanStatus
+from app.schemas.dashboard import SeverityCounts
 
 
 class ScanCreateRequest(BaseModel):
@@ -61,6 +62,9 @@ class ScanResponse(BaseModel):
     ai_analysis_started_at: datetime | None = None
     ai_analysis_progress_completed: int = 0
     ai_analysis_progress_total: int = 0
+    # Denormalized (read-side join) per-scan severity breakdown, batched for the whole list page
+    # (see project_stats_service.get_severity_by_scan_ids) -- avoids a per-row report fetch.
+    findings_by_severity: SeverityCounts | None = None
 
 
 # --- Scanner-facing (api-key-authed) contract, matches the Go scanner's internal/portal client ---

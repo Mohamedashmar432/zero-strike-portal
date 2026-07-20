@@ -187,6 +187,21 @@ def test_list_scans_scoped_to_project(client):
     assert body["items"][0]["project_id"] == project["id"]
 
 
+def test_scan_list_carries_findings_by_severity(client):
+    owner = register_and_login(client, email="sseverity@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    report = client.get(f"/api/v1/scans/{scan_id}/report", headers=_headers(owner)).json()
+    expected = report["stats"]["by_severity"]
+
+    listed = client.get(f"/api/v1/projects/{project['id']}/scans", headers=_headers(owner)).json()
+    severity = listed["items"][0]["findings_by_severity"]
+    assert severity is not None
+    for key, count in expected.items():
+        assert severity.get(key, 0) == count
+
+
 def test_scan_list_and_detail_carry_ai_analysis_status(client):
     from datetime import datetime, timezone
 

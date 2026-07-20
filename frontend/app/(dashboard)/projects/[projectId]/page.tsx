@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -15,7 +15,6 @@ import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/ap
 import { getProject, getProjectScanActivity } from "@/lib/api/projects";
 import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
-import { getReport } from "@/lib/api/reports";
 import { createCloudScan, listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
 import {
   createApiKeySchema,
@@ -372,15 +371,6 @@ function ScansTab({ projectId }: { projectId: string }) {
     return s.repo_url ?? "—";
   }
 
-  const reportQueries = useQueries({
-    queries: (data?.items ?? []).map((s) => ({
-      queryKey: queryKeys.scans.report(s.id),
-      queryFn: () => getReport(s.id),
-      enabled: s.status === "completed",
-      retry: false,
-    })),
-  });
-
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ScanStatus>();
   const [typeFilter, setTypeFilter] = useState<ScanType>();
@@ -454,18 +444,9 @@ function ScansTab({ projectId }: { projectId: string }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((s, i) => {
+            {data?.items.map((s) => {
               if (!matchesFilter(s)) return null;
-              const stats = reportQueries[i]?.data?.stats.by_severity;
-              const counts: SeverityCounts = stats
-                ? {
-                    critical: stats.critical ?? 0,
-                    high: stats.high ?? 0,
-                    medium: stats.medium ?? 0,
-                    low: stats.low ?? 0,
-                    info: stats.info ?? 0,
-                  }
-                : EMPTY_SEVERITY_COUNTS;
+              const counts: SeverityCounts = s.findings_by_severity ?? EMPTY_SEVERITY_COUNTS;
               return (
                 <TableRow key={s.id}>
                   <TableCell>

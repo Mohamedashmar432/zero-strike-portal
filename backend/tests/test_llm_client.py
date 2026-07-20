@@ -4,6 +4,7 @@ import litellm
 import pytest
 
 import app.services.llm_client as llm_client
+from app.core.config import settings
 from app.models.ai_provider_config import AIProviderConfig
 from app.services import ai_provider_config_service
 
@@ -190,6 +191,7 @@ def test_get_completion_resolves_active_config_when_two_exist(client, monkeypatc
         assert result == {"ok": True}
         assert captured_kwargs["model"] == "claude-haiku-4-5"
         assert captured_kwargs["api_key"] == "sk-second"
+        assert captured_kwargs["timeout"] == settings.ai_llm_request_timeout_seconds
 
         reloaded = await AIProviderConfig.get(active.id)
         assert reloaded.total_requests == 1

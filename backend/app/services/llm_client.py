@@ -10,6 +10,7 @@ import json
 import litellm
 import structlog
 
+from app.core.config import settings
 from app.core.retry import retry_transient
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider
 from app.services import ai_provider_config_service
@@ -144,7 +145,7 @@ _PERMANENT_EXCEPTIONS = (
 )
 
 
-@retry_transient(_TRANSIENT_EXCEPTIONS, max_attempts=3, base_delay=5.0)
+@retry_transient(_TRANSIENT_EXCEPTIONS, max_attempts=3)
 async def _call_acompletion(**kwargs):
     return await litellm.acompletion(**kwargs)
 
@@ -208,6 +209,7 @@ async def get_completion(
         "messages": messages,
         "temperature": config.temperature,
         "api_key": api_key,
+        "timeout": settings.ai_llm_request_timeout_seconds,
     }
     if api_base:
         kwargs["api_base"] = api_base
@@ -281,6 +283,7 @@ async def test_connection(
         "temperature": temperature,
         "api_key": _resolve_api_key(provider, api_key),
         "max_tokens": 5,
+        "timeout": settings.ai_llm_request_timeout_seconds,
     }
     if api_base:
         kwargs["api_base"] = api_base
