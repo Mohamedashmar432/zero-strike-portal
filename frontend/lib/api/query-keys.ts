@@ -62,6 +62,11 @@ export const queryKeys = {
     status: () => ["ai", "status"] as const,
     findingInsight: (findingId: string) => ["ai", "finding", findingId] as const,
     scanInsight: (scanId: string) => ["ai", "scan", scanId] as const,
+    autofix: {
+      scan: (scanId: string) => ["ai", "autofix", "scan", scanId] as const,
+      finding: (findingId: string) => ["ai", "autofix", "finding", findingId] as const,
+      proposal: (proposalId: string) => ["ai", "autofix", "proposal", proposalId] as const,
+    },
   },
   repoCredentials: {
     all: () => ["repo-credentials"] as const,

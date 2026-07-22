@@ -10,10 +10,9 @@ const CLASS: Record<"queued" | "in_progress" | "failed", string> = {
   failed: "bg-severity-critical/15 text-severity-critical",
 };
 
-const LABEL: Record<"queued" | "in_progress" | "failed", string> = {
-  queued: "AI QUEUED",
-  in_progress: "AI ANALYZING",
-  failed: "AI FAILED",
+const LABEL: Record<"analysis" | "autofix", Record<"queued" | "in_progress" | "failed", string>> = {
+  analysis: { queued: "AI QUEUED", in_progress: "AI ANALYZING", failed: "AI FAILED" },
+  autofix: { queued: "FIX QUEUED", in_progress: "GENERATING FIXES", failed: "FIX FAILED" },
 };
 
 function formatEta(ms: number): string {
@@ -45,12 +44,15 @@ export function AiStatusBadge({
   startedAt,
   progressCompleted = 0,
   progressTotal = 0,
+  kind = "analysis",
   className,
 }: {
   status: AiAnalysisStatus | null | undefined;
   startedAt?: string | null;
   progressCompleted?: number;
   progressTotal?: number;
+  // Swaps the label set: "analysis" (default) or "autofix" (fix-generation job).
+  kind?: "analysis" | "autofix";
   className?: string;
 }) {
   if (status !== "queued" && status !== "in_progress" && status !== "failed") return null;
@@ -64,7 +66,7 @@ export function AiStatusBadge({
       )}
     >
       {status === "in_progress" && <span className="size-1.5 animate-pulse rounded-sm bg-current" />}
-      {LABEL[status]}
+      {LABEL[kind][status]}
       {progress && <span className="normal-case opacity-80">· {progress}</span>}
     </span>
   );

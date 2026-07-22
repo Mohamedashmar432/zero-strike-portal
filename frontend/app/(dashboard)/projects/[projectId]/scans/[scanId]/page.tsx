@@ -46,6 +46,7 @@ import {
   type FindingInsight,
   type ScanInsight,
 } from "@/lib/api/ai";
+import { triggerFindingAutoFix, triggerScanAutoFix } from "@/lib/api/auto-fix";
 import { listFindings, type Finding, type FindingKind, type Severity } from "@/lib/api/findings";
 import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
@@ -73,16 +74,6 @@ const PAGE_SIZE_OPTIONS = [15, 20, 25, 30];
 
 function fileLine(file: string, line: number | null) {
   return line ? `${file}:${line}` : file;
-}
-
-// Auto-fix (fix proposals / diff viewer) isn't built yet (see Settings > Auto-fix) — these
-// buttons stay visible per the design, but honestly say so instead of pretending to call
-// a model that doesn't exist. AI *analysis* (the other button in each pair) is wired for
-// real below.
-function notifyComingSoon(feature: string) {
-  toast.info(`${feature} isn't available yet`, {
-    description: "Configure an AI provider in Settings → AI Provider to enable this.",
-  });
 }
 
 function timeAgo(dateStr: string) {
@@ -180,7 +171,21 @@ export function FindingItem({
 }) {
   const snippet = finding.evidence[0]?.snippet;
   const queryClient = useQueryClient();
+  const router = useRouter();
   const canAnalyze = aiEnabled && finding.fingerprint != null;
+
+  // Kick off a single-finding fix job, then jump to the project's Auto-Fix tab (deep-linked to
+  // this finding) where the diff is reviewed. Nothing is applied here — review happens there.
+  const autoFix = useMutation({
+    mutationFn: () => triggerFindingAutoFix(finding.id),
+    onSuccess: () => {
+      toast.success("Generating a fix…");
+      router.push(
+        `/projects/${finding.project_id}?tab=auto-fix&scan=${finding.scan_id}&finding=${finding.id}`
+      );
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start Auto-Fix"),
+  });
 
   const { data: analysis } = useQuery({
     queryKey: queryKeys.ai.findingInsight(finding.id),
@@ -306,9 +311,14 @@ export function FindingItem({
                   {isAnalyzing ? "Analyzing…" : "Analyze with AI"}
                 </Button>
               )}
-              <Button size="sm" onClick={() => notifyComingSoon("Auto-fix")}>
+              <Button
+                size="sm"
+                disabled={!aiEnabled || autoFix.isPending}
+                title={!aiEnabled ? "Configure an AI provider in Settings → AI Provider to enable this." : undefined}
+                onClick={() => autoFix.mutate()}
+              >
                 <Wand2 />
-                Apply Auto-Fix
+                {autoFix.isPending ? "Starting…" : "Generate Fix"}
               </Button>
             </div>
             {/* Deliberately a separate, visually distinct block from Vulnerability Details/
@@ -465,6 +475,17 @@ export default function ScanDetailPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start re-scan"),
   });
 
+  // Scan-level Auto-Fix: enqueue a fix-generation job for the scan's findings, then jump to the
+  // project's Auto-Fix tab (scoped to this scan) to review the proposed diffs.
+  const autoFix = useMutation({
+    mutationFn: () => triggerScanAutoFix(scanId),
+    onSuccess: () => {
+      toast.success("Generating fixes…");
+      router.push(`/projects/${projectId}?tab=auto-fix&scan=${scanId}`);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start Auto-Fix"),
+  });
+
   const completed = scan?.status === "completed";
 
   const { data: report } = useQuery({
@@ -601,9 +622,13 @@ export default function ScanDetailPage() {
                 {scanAnalysisLoading ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {scanAnalysisLoading ? "Analyzing…" : "AI Analysis"}
               </Button>
-              <Button onClick={() => notifyComingSoon("Auto AI Fix")}>
+              <Button
+                disabled={!aiEnabled || autoFix.isPending}
+                title={!aiEnabled ? "Configure an AI provider in Settings → AI Provider to enable this." : undefined}
+                onClick={() => autoFix.mutate()}
+              >
                 <Wand2 />
-                Auto AI Fix
+                {autoFix.isPending ? "Starting…" : "Auto AI Fix"}
               </Button>
             </>
           )}

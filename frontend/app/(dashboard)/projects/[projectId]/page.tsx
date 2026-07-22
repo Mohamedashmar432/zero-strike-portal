@@ -836,7 +836,7 @@ export default function ProjectDetailPage() {
           <ProjectComplianceTab projectId={projectId} />
         </TabsContent>
         <TabsContent value="auto-fix">
-          <ProjectAutoFixTab />
+          <ProjectAutoFixTab canApprove={canManage(project?.my_role)} />
         </TabsContent>
         <TabsContent value="members">
           <MembersTab projectId={projectId} myRole={project?.my_role} />
