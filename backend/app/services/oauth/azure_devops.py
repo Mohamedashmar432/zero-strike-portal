@@ -32,7 +32,11 @@ def authorize_url(state: str) -> str:
     params = {
         "client_id": settings.azure_devops_client_id,
         "response_type": "Assertion",
-        "scope": "vso.code vso.profile",
+        # vso.code_write (not vso.code) so AI Auto-Fix can push a branch + open a PR. Read-only
+        # repo import works under this too. NOTE: an OAuth grant's scope is fixed at consent and
+        # preserved across refresh, so connections made before this change must re-consent before
+        # they can be used for a write (ai_remediation_apply_service fails them to manual_review).
+        "scope": "vso.code_write vso.profile",
         "redirect_uri": redirect_uri(),
         "state": state,
     }

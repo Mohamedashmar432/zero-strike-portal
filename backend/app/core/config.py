@@ -52,6 +52,36 @@ class Settings(BaseSettings):
     # endpoint) — get the smaller batch size above.
     ai_analysis_local_providers: set[str] = {"lmstudio", "custom"}
 
+    # AI Auto-Fix / remediation (see ai_remediation_service / ai_remediation_apply_service, docs/AI_AUTOFIX_DESIGN.md).
+    # A third Mongo-backed queue peer of the scan + AI-analysis queues; heavier than analysis (a
+    # multi-step tool-calling loop, plus a clone + double scan on apply), so its own conservative knobs.
+    max_concurrent_remediation_jobs: int = 1
+    remediation_job_timeout_seconds: int = 600  # whole-job wall clock; the reap window uses this * multiplier
+    remediation_queue_stuck_multiplier: int = 3
+    # Agent loop bounds (per finding). Any exhaustion yields a can_fix=False proposal, never a job failure.
+    remediation_agent_max_steps: int = 12  # tool-call iterations
+    remediation_agent_token_budget: int = 60000  # cumulative prompt+completion per finding run
+    remediation_agent_wall_clock_seconds: int = 180  # per-finding asyncio.wait_for
+    remediation_max_invalid_steps: int = 2  # consecutive no-tool/bad-arg responses before fail-fast
+    remediation_max_findings_per_job: int = 20
+    # Only can_fix=True AND confidence_score >= this surfaces as actionable (CLI parity, gate at read time).
+    remediation_confidence_threshold: float = 80.0
+    remediation_max_file_bytes: int = 200_000  # read_file cap
+    remediation_max_excerpt_lines: int = 400
+    remediation_llm_request_timeout_seconds: int = 90  # per acompletion; tool calls run longer than analysis
+    remediation_max_output_tokens: int = 4000  # per-call max_tokens
+    # Providers whose tool-calling is reliable enough to drive the agent. Excludes lmstudio/custom
+    # (local models routinely ignore `tools` and just emit prose). The trigger 409s if the active
+    # provider isn't here or litellm.supports_function_calling() is False for its model.
+    remediation_tool_capable_providers: set[str] = {
+        "anthropic",
+        "openai",
+        "openrouter",
+        "groq",
+        "kimi",
+        "nvidia_nim",
+    }
+
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""
     github_client_secret: str = ""

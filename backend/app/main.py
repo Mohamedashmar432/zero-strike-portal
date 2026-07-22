@@ -16,6 +16,7 @@ from app.routers import (
     admin_scanner_status,
     ai_analysis,
     ai_provider_config,
+    ai_remediation,
     api_keys,
     audit_logs,
     auth,
@@ -32,6 +33,7 @@ from app.routers import (
 )
 from app.services import (
     ai_job_queue_service,
+    ai_remediation_queue_service,
     cloud_scan_service,
     project_stats_service,
     scan_queue_service,
@@ -62,13 +64,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Project findings-counter reconciliation failed on startup", exc_info=True)
     poll_task = asyncio.create_task(scan_queue_service.poll_loop())
     ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
+    remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())
     yield
     poll_task.cancel()
     ai_poll_task.cancel()
+    remediation_poll_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await poll_task
     with contextlib.suppress(asyncio.CancelledError):
         await ai_poll_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await remediation_poll_task
     await close_mongo_connection()
 
 
@@ -104,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_analysis.router, prefix="/api/v1")
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")
     app.include_router(ai_provider_config.router, prefix="/api/v1")
+    app.include_router(ai_remediation.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

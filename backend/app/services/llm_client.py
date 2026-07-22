@@ -9,6 +9,7 @@ import json
 
 import litellm
 import structlog
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.retry import retry_transient
@@ -262,6 +263,128 @@ async def get_completion(
 
     content = response.choices[0].message.content or ""
     return _extract_json(content)
+
+
+class LLMToolCall(BaseModel):
+    id: str
+    name: str
+    arguments: str  # raw JSON string exactly as the provider returned it (parsed by the caller)
+
+
+class LLMToolResponse(BaseModel):
+    """Provider-agnostic shape of one assistant turn in a tool-calling loop. Hides litellm's
+    per-provider message.tool_calls differences (Anthropic vs OpenAI, None vs [], parallel calls)
+    from ai_remediation_agent."""
+
+    content: str | None = None
+    tool_calls: list[LLMToolCall] = []
+    finish_reason: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+async def active_provider_supports_tools() -> bool:
+    """Whether the active AI provider may drive the tool-calling remediation agent. Authoritative
+    gate is the admin-tunable settings.remediation_tool_capable_providers allowlist -- litellm's
+    supports_function_calling() is unreliable for the OpenAI-compatible-routed providers (kimi etc.),
+    and a provider that accepts `tools` but silently emits prose is caught anyway by the agent loop's
+    repeated-invalid fail-fast (see ai_remediation_agent)."""
+    config = await ai_provider_config_service.get_active_config()
+    if config is None or not await ai_provider_config_service.is_ready(config):
+        return False
+    return config.provider in settings.remediation_tool_capable_providers
+
+
+def _normalize_tool_calls(message) -> list[LLMToolCall]:
+    raw = getattr(message, "tool_calls", None) or []
+    calls: list[LLMToolCall] = []
+    for tc in raw:
+        fn = getattr(tc, "function", None)
+        name = getattr(fn, "name", None)
+        args = getattr(fn, "arguments", None)
+        if name is None:
+            continue
+        calls.append(LLMToolCall(id=getattr(tc, "id", "") or "", name=name, arguments=args or "{}"))
+    return calls
+
+
+async def get_tool_completion(
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    tool_choice: str | dict = "auto",
+    max_tokens: int | None = None,
+    project_id: str | None = None,
+    scan_id: str | None = None,
+) -> LLMToolResponse:
+    """One tool-calling turn against the active provider. Same config resolution, error taxonomy,
+    retry, and usage accounting as get_completion -- but returns the raw assistant message
+    (content + normalized tool_calls) instead of parsed JSON, and never sets response_format
+    (json_object + tools conflict on several providers). Callers should preflight
+    active_provider_supports_tools() so a non-tool provider fails as a clean 409, not mid-loop."""
+    config = await ai_provider_config_service.get_active_config()
+    if config is None or not await ai_provider_config_service.is_ready(config):
+        raise LLMNotConfiguredError("No AI provider is configured and active")
+
+    model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
+    api_key = _resolve_api_key(config.provider, ai_provider_config_service.decrypt_api_key(config))
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": config.temperature,
+        "api_key": api_key,
+        "tools": tools,
+        "tool_choice": tool_choice,
+        "timeout": settings.remediation_llm_request_timeout_seconds,
+    }
+    if api_base:
+        kwargs["api_base"] = api_base
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+
+    try:
+        response = await _call_acompletion(**kwargs)
+    except _PERMANENT_EXCEPTIONS as exc:
+        logger.warning("llm tool call failed permanently", error=str(exc))
+        await _record_usage_safe(config.id, success=False)
+        raise LLMPermanentError(str(exc)) from exc
+    except _TRANSIENT_EXCEPTIONS as exc:
+        logger.error("llm tool call exhausted retries", error=str(exc))
+        await _record_usage_safe(config.id, success=False)
+        raise LLMTransientError(str(exc)) from exc
+    except litellm.APIError as exc:
+        logger.warning("llm tool call failed with unmapped api error", error=str(exc))
+        await _record_usage_safe(config.id, success=False)
+        raise LLMPermanentError(str(exc)) from exc
+
+    usage = getattr(response, "usage", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+    try:
+        cost_usd = litellm.completion_cost(completion_response=response)
+    except Exception:
+        cost_usd = 0.0
+    await _record_usage_safe(
+        config.id,
+        success=True,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost_usd,
+        provider=config.provider,
+        model_name=config.model_name,
+        project_id=project_id,
+        scan_id=scan_id,
+    )
+
+    choice = response.choices[0]
+    message = choice.message
+    return LLMToolResponse(
+        content=getattr(message, "content", None),
+        tool_calls=_normalize_tool_calls(message),
+        finish_reason=getattr(choice, "finish_reason", None),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
 
 
 async def test_connection(
