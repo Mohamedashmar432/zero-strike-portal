@@ -71,7 +71,14 @@ export function FixProposalCard({
 
   const rs = proposal.review_state;
   const inFlight = rs === "approved" || rs === "applying" || approve.isPending;
-  const canApproveNow = canApprove && proposal.can_fix && (rs === "proposed" || rs === "validated" || rs === "failed");
+  // Mirror the backend's confidence gate (remediation_confidence_threshold, default 80). The backend
+  // is authoritative and rejects a below-threshold approve with a 400; this just hides the button.
+  const CONFIDENCE_THRESHOLD = 80;
+  const canApproveNow =
+    canApprove &&
+    proposal.can_fix &&
+    proposal.confidence_score >= CONFIDENCE_THRESHOLD &&
+    (rs === "proposed" || rs === "validated" || rs === "failed");
   const canDismiss = rs !== "dismissed" && rs !== "pr_open";
   const hasPatch = !!(proposal.original_code && proposal.patched_code);
 

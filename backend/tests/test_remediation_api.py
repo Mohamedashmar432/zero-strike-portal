@@ -197,11 +197,11 @@ def test_trigger_forbidden_for_non_member(client, monkeypatch):
     assert r.status_code == 403
 
 
-def _insert_proposal(project_id, scan_id, finding_id, can_fix=True):
+def _insert_proposal(project_id, scan_id, finding_id, can_fix=True, confidence=95):
     async def _do():
         p = AIFixProposal(
             finding_id=finding_id, scan_id=scan_id, project_id=project_id, can_fix=can_fix,
-            confidence_score=95, original_code="a", patched_code="b", file_path="app.py",
+            confidence_score=confidence, original_code="a", patched_code="b", file_path="app.py",
             explanation="e", review_state="proposed",
         )
         await p.insert()
@@ -237,3 +237,24 @@ def test_approve_requires_owner_and_enqueues_apply(client, monkeypatch):
         ).count()
 
     assert asyncio.run(_apply_jobs()) == 1
+
+
+def test_approve_below_confidence_threshold_is_rejected(client, monkeypatch):
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(ai_remediation_queue_service, "drain_queue", _noop)
+
+    owner = register_and_login(client, email="fix-owner-lowconf@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    fid = _insert_finding(project["id"], scan_id, "fp-lowconf")
+    pid = _insert_proposal(project["id"], scan_id, fid, confidence=40)  # below the 80 default
+
+    r = client.post(f"/api/v1/fix-proposals/{pid}/approve", json={}, headers=_headers(owner))
+    assert r.status_code == 400
+
+    async def _apply_jobs():
+        return await RemediationJob.find(RemediationJob.kind == "apply").count()
+
+    assert asyncio.run(_apply_jobs()) == 0  # no write job enqueued

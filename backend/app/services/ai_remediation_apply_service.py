@@ -142,6 +142,10 @@ async def _save(proposal: AIFixProposal) -> None:
 
 
 async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
+    # Idempotent: a concurrent/duplicate approve must never open a second PR (defends the
+    # check-then-insert window in the approve endpoint).
+    if proposal.review_state == "pr_open" and proposal.pr_url:
+        return
     proposal.review_state = "applying"
     await _save(proposal)
 
@@ -210,10 +214,19 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         )
 
         branch_name = proposal.branch_name or f"zerostrike/fix-{proposal.finding_id[:8]}-{uuid.uuid4().hex[:8]}"
+        # Never commit onto the base/default branch. If the (owner-overridable) branch name equals
+        # base, `git checkout -b` would fail and the commit would land on base and fast-forward-push
+        # straight to it -- defeating the PR-only invariant. Reject up front and verify the checkout.
+        if branch_name == base:
+            raise _ManualReview("The fix branch name must differ from the base branch.")
         rc, _o, err = await git_workspace.git(["rev-parse", base], workdir)
         base_sha = _o.strip() if rc == 0 else None
-        await git_workspace.git(["checkout", "-b", branch_name], workdir)
-        await git_workspace.git(["add", "--", proposal.file_path], workdir)
+        rc, _co, cberr = await git_workspace.git(["checkout", "-b", branch_name], workdir)
+        if rc != 0:
+            raise _ManualReview(f"Could not create the fix branch {branch_name!r}: {cberr[:200]}")
+        rc, _ao, aerr = await git_workspace.git(["add", "--", proposal.file_path], workdir)
+        if rc != 0:
+            raise _ManualReview(f"Could not stage the patch: {aerr[:200]}")
         rule = finding.rule_name or "security finding"
         commit_msg = f"Fix {rule} in {proposal.file_path}\n\nZeroStrike AI Auto-Fix (human-approved). {proposal.explanation or ''}".strip()
         rc, _o, cerr = await git_workspace.git(
@@ -258,6 +271,11 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
             target_id=str(proposal.id),
             metadata={"pr_url": pr["pr_url"], "pr_number": pr["pr_number"], "branch": branch_name, "base": base, "credential": source},
         )
+    except _ManualReview:
+        raise
+    except Exception as exc:
+        # Scrub the write token from any unexpected error before it propagates to the proposal/job.
+        raise RuntimeError(git_workspace.sanitize(str(exc), token)) from exc
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

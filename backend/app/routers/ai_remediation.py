@@ -378,6 +378,12 @@ async def approve_fix_proposal(
         return _to_out(proposal, {proposal.finding_id: finding} if finding else {})
     if not proposal.can_fix:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This proposal is not auto-fixable")
+    if proposal.confidence_score < settings.remediation_confidence_threshold:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Confidence {proposal.confidence_score:.0f} is below the {settings.remediation_confidence_threshold:.0f} "
+            "threshold required to auto-create a PR.",
+        )
 
     scope_key = f"apply:{proposal_id}"
     if await _active_job(scope_key) is not None:

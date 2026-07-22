@@ -31,14 +31,20 @@ from app.services.remediation_tools import SubmitFixProposalArgs, ToolContext
 logger = structlog.get_logger(__name__)
 
 
+def _r(text: str | None) -> str | None:
+    """Secret-redact any repo-derived free text before it enters the prompt."""
+    return secret_redaction.redact(text) if text else text
+
+
 def _issue_bundle(finding: Finding, redacted_snippet: str | None) -> dict:
     loc = finding.location
     taint = None
     if finding.taint_context:
+        # source_expr/source_var are code lifted from the repo -- redact like any other repo content.
         taint = {
-            "source_var": finding.taint_context.source_var,
-            "source_expr": finding.taint_context.source_expr,
-            "sink": finding.taint_context.sink,
+            "source_var": _r(finding.taint_context.source_var),
+            "source_expr": _r(finding.taint_context.source_expr),
+            "sink": _r(finding.taint_context.sink),
         }
     return {
         "finding_id": str(finding.id),
@@ -47,15 +53,15 @@ def _issue_bundle(finding: Finding, redacted_snippet: str | None) -> dict:
         "rule_name": finding.rule_name,
         "kind": finding.kind,
         "severity": finding.severity,
-        "message": finding.message,
+        "message": _r(finding.message),
         "location": {"file": loc.file, "start_line": loc.start_line, "end_line": loc.end_line},
         "language": finding.language,
         "evidence_snippet": redacted_snippet,
         "taint_context": taint,
         "cwe": finding.cwe,
         "owasp": finding.owasp,
-        "rationale": finding.rationale,
-        "scanner_remediation": finding.remediation,
+        "rationale": _r(finding.rationale),
+        "scanner_remediation": _r(finding.remediation),
     }
 
 

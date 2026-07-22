@@ -11,12 +11,14 @@ tests) import cleanly regardless of build order.
 """
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import structlog
+from beanie.operators import In
 
 from app.core.config import settings
 from app.core.job_queue import claim_next, reap_stuck
+from app.models.ai_fix_proposal import AIFixProposal
 from app.models.ai_remediation_job import RemediationJob
 
 logger = structlog.get_logger(__name__)
@@ -88,11 +90,31 @@ async def reap_stuck_remediation_jobs() -> None:
     )
 
 
+async def reconcile_stranded_proposals() -> None:
+    """A proposal is flipped to review_state="applying" while its apply job runs. If the worker
+    dies mid-apply, reap_stuck dead-letters the JOB (apply has max_attempts=1) but never touches
+    the proposal -- it would sit "applying" forever, un-actionable in the UI. Mark any "applying"
+    proposal whose apply job is no longer queued/running as failed so it can be dismissed/retried."""
+    stuck = await AIFixProposal.find(AIFixProposal.review_state == "applying").to_list()
+    for proposal in stuck:
+        active = await RemediationJob.find(
+            RemediationJob.kind == "apply",
+            RemediationJob.proposal_id == str(proposal.id),
+            In(RemediationJob.status, ["queued", "running"]),
+        ).first_or_none()
+        if active is None:
+            proposal.review_state = "failed"
+            proposal.failure_reason = "The apply worker did not finish (reclaimed after a crash/restart)."
+            proposal.updated_at = datetime.now(timezone.utc)
+            await proposal.save()
+
+
 async def poll_loop() -> None:
     while True:
         await asyncio.sleep(settings.queue_poll_interval_seconds)
         try:
             await reap_stuck_remediation_jobs()
+            await reconcile_stranded_proposals()
             await drain_queue()
         except Exception:
             logger.exception("remediation job queue poll tick failed")

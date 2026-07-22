@@ -173,6 +173,41 @@ def test_apply_push_denied_is_manual_review(client, monkeypatch):
     asyncio.run(run())
 
 
+def test_apply_refuses_branch_equal_to_base(client, monkeypatch):
+    # An owner-supplied branch name equal to base must never let the commit land on base.
+    _install_git_mocks(monkeypatch, post_findings=[])
+
+    async def run():
+        proposal, job = await _seed()
+        proposal.branch_name = "main"  # base resolves to "main" too
+        await proposal.save()
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "manual_review"
+        assert "base branch" in reloaded.manual_review_reason
+        assert reloaded.pr_url is None
+
+    asyncio.run(run())
+
+
+def test_reconcile_marks_stranded_applying_proposal_failed(client, monkeypatch):
+    from app.services import ai_remediation_queue_service as q
+
+    async def run():
+        proposal, job = await _seed()
+        # Simulate a crash mid-apply: proposal stuck "applying", its apply job no longer active.
+        proposal.review_state = "applying"
+        await proposal.save()
+        job.status = "failed"
+        await job.save()
+        await q.reconcile_stranded_proposals()
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "failed"
+        assert reloaded.failure_reason
+
+    asyncio.run(run())
+
+
 def test_apply_source_changed_is_manual_review(client, monkeypatch):
     # clone writes a file whose content no longer contains original_code.
     _install_git_mocks(monkeypatch, post_findings=[])
