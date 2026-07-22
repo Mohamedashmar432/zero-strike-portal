@@ -205,24 +205,26 @@ async def get_scan(scan_id: str, user: User = Depends(get_current_user)):
 async def get_scan_report(scan_id: str, user: User = Depends(get_current_user)):
     scan = await scan_service.get_scan_or_404(scan_id)
     await project_service.require_member(scan.project_id, user)
-    report = await Report.find_one(Report.scan_id == scan_id)
-    if not report:
+    # Exclude raw_json (the full report blob, up to ~10 MB) — this metadata response never uses it.
+    # raw_html is kept only for the html_available presence check (null for cloud scans).
+    doc = await Report.get_pymongo_collection().find_one({"scan_id": scan_id}, {"raw_json": 0})
+    if not doc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No report for this scan yet")
     return ReportResponse(
-        scan_id=report.scan_id,
-        project_id=report.project_id,
-        scanner_scan_id=report.scanner_scan_id,
-        scanner_version=report.scanner_version,
-        started_at=report.started_at,
-        duration_ms=report.duration_ms,
-        root_path=report.root_path,
-        git_commit=report.git_commit,
-        branch=report.branch,
-        hostname=report.hostname,
-        stats=report.stats,
-        diagnostics=report.diagnostics,
-        html_available=report.raw_html is not None,
-        generated_at=report.generated_at,
+        scan_id=doc["scan_id"],
+        project_id=doc["project_id"],
+        scanner_scan_id=doc.get("scanner_scan_id"),
+        scanner_version=doc.get("scanner_version"),
+        started_at=doc.get("started_at"),
+        duration_ms=doc.get("duration_ms"),
+        root_path=doc.get("root_path"),
+        git_commit=doc.get("git_commit"),
+        branch=doc.get("branch"),
+        hostname=doc.get("hostname"),
+        stats=doc["stats"],
+        diagnostics=doc.get("diagnostics", []),
+        html_available=doc.get("raw_html") is not None,
+        generated_at=doc["generated_at"],
     )
 
 

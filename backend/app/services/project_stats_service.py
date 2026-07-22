@@ -28,6 +28,7 @@ from app.services import project_repo_service
 _UNLINKED = "__unlinked__"
 
 _RISK_SEVERITIES = ["critical", "high"]
+_ALL_SEVERITIES = {"critical", "high", "medium", "low", "info"}
 _CI_LABELS = {
     "github_actions": "GitHub Actions",
     "gitlab_ci": "GitLab CI",
@@ -92,6 +93,37 @@ async def get_severity_by_scan_ids(scan_ids: list[str]) -> dict[str, SeverityCou
     return _severity_counts_from_groups(groups, "scan_id")
 
 
+async def reconcile_project_finding_counts() -> int:
+    """Recompute the denormalized per-project findings rollup from the findings collection and
+    write it onto each Project whose stored counters are stale. Run once at startup: backfills
+    projects created before denormalization existed and self-heals any drift. Idempotent — after
+    the first boot it writes nothing (no changes to make). Returns the number of projects updated."""
+    groups = await _aggregate(
+        Finding,
+        [{"$group": {"_id": {"project_id": "$project_id", "severity": "$severity"}, "count": {"$sum": 1}}}],
+    )
+    totals: dict[str, int] = {}
+    by_sev: dict[str, dict[str, int]] = {}
+    for g in groups:
+        pid = g["_id"]["project_id"]
+        sev = g["_id"].get("severity")
+        totals[pid] = totals.get(pid, 0) + g["count"]
+        if sev in _ALL_SEVERITIES:
+            by_sev.setdefault(pid, {})[sev] = g["count"]
+
+    updated = 0
+    async for p in Project.find_all():
+        pid = str(p.id)
+        new_total = totals.get(pid, 0)
+        new_counts = by_sev.get(pid, {})
+        if p.total_findings != new_total or (p.finding_severity_counts or {}) != new_counts:
+            p.total_findings = new_total
+            p.finding_severity_counts = new_counts
+            await p.save()
+            updated += 1
+    return updated
+
+
 async def _resolve_project_ids(user: User, project_ids: list[str] | None) -> list[str]:
     if user.role == "admin":
         if project_ids is not None:
@@ -110,23 +142,26 @@ async def get_projects_stats(user: User, project_ids: list[str] | None = None) -
     if not ids:
         return {}
 
-    total_groups = await _aggregate(
-        Finding,
-        [
-            {"$match": {"project_id": {"$in": ids}}},
-            {"$group": {"_id": "$project_id", "count": {"$sum": 1}}},
-        ],
-    )
-    total_by_project = {g["_id"]: g["count"] for g in total_groups}
-
-    severity_groups = await _aggregate(
-        Finding,
-        [
-            {"$match": {"project_id": {"$in": ids}}},
-            {"$group": {"_id": {"project_id": "$project_id", "severity": "$severity"}, "count": {"$sum": 1}}},
-        ],
-    )
-    severity_by_project = _severity_counts_from_groups(severity_groups, "project_id")
+    # total_findings + findings_by_severity come from the denormalized rollup on the Project doc
+    # (maintained by report_ingestion_service.ingest), not a per-request aggregation over the whole
+    # findings collection. One indexed doc read instead of two full-collection $groups.
+    oids = []
+    for i in ids:
+        try:
+            oids.append(PydanticObjectId(i))
+        except Exception:
+            pass  # skip non-ObjectId ids (synthetic test data) — they have no Project doc
+    projects = await Project.find(In(Project.id, oids)).to_list()
+    total_by_project: dict[str, int] = {}
+    severity_by_project: dict[str, SeverityCounts] = {}
+    for p in projects:
+        pid = str(p.id)
+        total_by_project[pid] = p.total_findings
+        counts = SeverityCounts()
+        for sev, n in (p.finding_severity_counts or {}).items():
+            if hasattr(counts, sev):
+                setattr(counts, sev, n)
+        severity_by_project[pid] = counts
 
     risk_groups = await _aggregate(
         Finding,

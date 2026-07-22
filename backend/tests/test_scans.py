@@ -258,6 +258,83 @@ def test_get_unknown_scan_is_404(client):
     assert r.status_code == 404
 
 
+# --- non-member is forbidden on EVERY scan-data read path (not just GET detail) ---
+# Regression guard: authorization must be enforced consistently across detail/report/pdf/
+# findings. A 200 here would mean a project-scope check was dropped from one of the routes.
+
+
+def test_get_scan_report_forbidden_for_non_member(client):
+    owner = register_and_login(client, email="sowner-rpt-forbid@zerostrike.dev")
+    outsider = register_and_login(client, email="soutsider-rpt@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    r = client.get(f"/api/v1/scans/{scan_id}/report", headers=_headers(outsider))
+    assert r.status_code == 403
+
+
+def test_get_scan_report_pdf_forbidden_for_non_member(client):
+    owner = register_and_login(client, email="sowner-pdf-forbid@zerostrike.dev")
+    outsider = register_and_login(client, email="soutsider-pdf@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    r = client.get(f"/api/v1/scans/{scan_id}/report/pdf", headers=_headers(outsider))
+    assert r.status_code == 403
+
+
+def test_list_scan_findings_forbidden_for_non_member(client):
+    owner = register_and_login(client, email="sowner-find-forbid@zerostrike.dev")
+    outsider = register_and_login(client, email="soutsider-find@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    r = client.get(f"/api/v1/scans/{scan_id}/findings", headers=_headers(outsider))
+    assert r.status_code == 403
+
+
+def test_scan_response_never_leaks_repo_token(client, monkeypatch):
+    """The private-repo token is stored transiently on the queued Scan doc, but must never be
+    serialized into any API response. drain_queue is stubbed so the scan stays 'queued' with the
+    token still set — the strongest state in which to prove the token can't leak."""
+    monkeypatch.setattr(scan_queue_service, "drain_queue", _noop)
+    owner = register_and_login(client, email="sowner-tokleak@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    secret_token = "super-secret-repo-token-abc123"
+
+    scan_id = client.post(
+        f"/api/v1/projects/{project['id']}/scans",
+        json={"scan_type": "cloud", "repo_url": "https://github.com/example/repo", "repo_token": secret_token},
+        headers=_headers(owner),
+    ).json()["id"]
+
+    detail = client.get(f"/api/v1/scans/{scan_id}", headers=_headers(owner))
+    listed = client.get(f"/api/v1/projects/{project['id']}/scans", headers=_headers(owner))
+    assert secret_token not in detail.text
+    assert secret_token not in listed.text
+
+
+def test_secret_findings_expose_only_redacted(client):
+    """A kind='secret' finding must surface only the scanner's masked value, never a raw secret.
+    Fixture f-002 is an AWS key redacted to 'AKIA****'."""
+    owner = register_and_login(client, email="sowner-secmask@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _scanner_scan(client, _headers(owner), project["id"], upload=True)
+
+    findings = client.get(f"/api/v1/scans/{scan_id}/findings?kind=secret", headers=_headers(owner)).json()
+    assert findings["total"] == 1
+    secret_finding = findings["items"][0]
+
+    assert secret_finding["secret"]["redacted"] == "AKIA****"
+    # The masked value is the only representation of the key anywhere on the finding: no evidence
+    # snippet, and the message is a generic label — no full-length AKIA... key leaks through.
+    import re
+
+    serialized = str(secret_finding)
+    assert not re.search(r"AKIA[A-Z0-9]{12,}", serialized)
+    assert not secret_finding["evidence"]
+
+
 def test_scan_report_and_findings_readable(client):
     owner = register_and_login(client, email="sowner8@zerostrike.dev")
     project = _create_project(client, _headers(owner))

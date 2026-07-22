@@ -60,4 +60,8 @@ class Scan(Document):
             IndexModel([("project_id", 1), ("created_at", -1)]),
             IndexModel([("project_id", 1), ("scan_type", 1)]),
             IndexModel([("project_repo_id", 1), ("created_at", 1)]),
+            # scans-list filter (project_id [+status]) + sort (-created_at) in one index
+            IndexModel([("project_id", 1), ("status", 1), ("created_at", -1)]),
+            # scanner_status_service.queue_status: (status, scan_type[, updated_at])
+            IndexModel([("status", 1), ("scan_type", 1), ("updated_at", 1)]),
         ]

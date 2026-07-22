@@ -4,7 +4,10 @@ Consumed by both the scanner upload endpoint and the server-side cloud scan
 service — the single place the Go PascalCase report becomes portal data.
 """
 
+from collections import Counter
 from datetime import datetime, timezone
+
+from beanie import PydanticObjectId
 
 from app.core.owasp import OWASP_CODES_ORDERED
 from app.core.priority import compute_priority
@@ -17,6 +20,7 @@ from app.models.finding import (
     SecretEmbedded,
     TaintContextEmbedded,
 )
+from app.models.project import Project
 from app.models.report import DiagnosticEmbedded, Report, ScanStatsEmbedded
 from app.models.scan import Scan
 from app.schemas.report import (
@@ -163,6 +167,48 @@ def _diagnostic(d: GoDiagnosticIn) -> DiagnosticEmbedded:
     )
 
 
+async def _scan_finding_counts(scan_id: str) -> tuple[int, dict[str, int]]:
+    """(total findings, per-severity counts) for one scan — a single scan_id-indexed $group.
+    Only the five real severities land in the dict (null severity counts toward total only),
+    matching how project_stats_service reports findings_by_severity."""
+    cursor = Finding.get_pymongo_collection().aggregate(
+        [
+            {"$match": {"scan_id": scan_id}},
+            {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
+        ]
+    )
+    total = 0
+    by_severity: dict[str, int] = {}
+    for g in await cursor.to_list(length=None):
+        total += g["count"]
+        if g["_id"] in _SEVERITIES:
+            by_severity[g["_id"]] = g["count"]
+    return total, by_severity
+
+
+async def _apply_finding_delta(
+    project_id: str, old_total: int, old_by_sev: dict[str, int], findings: list[Finding]
+) -> None:
+    """$inc the project's denormalized findings rollup by (new - old) for this scan. Single
+    mutation point for the counters — keeps them exact across rescans without a full recompute."""
+    new_total = len(findings)
+    new_by_sev = Counter(f.severity for f in findings if f.severity in _SEVERITIES)
+    inc: dict[str, int] = {}
+    if new_total != old_total:
+        inc["total_findings"] = new_total - old_total
+    for sev in _SEVERITIES:
+        delta = new_by_sev.get(sev, 0) - old_by_sev.get(sev, 0)
+        if delta:
+            inc[f"finding_severity_counts.{sev}"] = delta
+    if not inc:
+        return
+    try:
+        oid = PydanticObjectId(project_id)
+    except Exception:
+        return  # non-ObjectId project_id (e.g. a synthetic test scan) — no Project doc to update
+    await Project.get_pymongo_collection().update_one({"_id": oid}, {"$inc": inc})
+
+
 async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     """Write findings + report for `scan` from a parsed Go report, mark the scan completed.
 
@@ -173,6 +219,10 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     scan_id = str(scan.id)
     project_id = scan.project_id
 
+    # Capture the outgoing scan's counts before deleting so the project rollup moves by delta,
+    # not by overwrite (a rescan with fewer findings must decrement).
+    old_total, old_by_sev = await _scan_finding_counts(scan_id)
+
     await Finding.find(Finding.scan_id == scan_id).delete()
     await Report.find(Report.scan_id == scan_id).delete()
 
@@ -182,6 +232,8 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     ]
     if findings:
         await Finding.insert_many(findings)
+
+    await _apply_finding_delta(project_id, old_total, old_by_sev, findings)
 
     now = datetime.now(timezone.utc)
     duration_ms = round(report.duration_ns / 1_000_000) if report.duration_ns is not None else None

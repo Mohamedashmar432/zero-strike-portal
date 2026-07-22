@@ -96,4 +96,10 @@ class Finding(Document):
             IndexModel([("rule_id", 1)]),
             IndexModel([("language", 1)]),
             IndexModel([("kind", 1)]),
+            # findings-list ?severity= filter + per-scan severity $group
+            IndexModel([("scan_id", 1), ("severity", 1)]),
+            # findings-list ?kind= filter scoped to a scan
+            IndexModel([("scan_id", 1), ("kind", 1)]),
+            # multikey — backs the $unwind $owasp OWASP summary aggregation
+            IndexModel([("project_id", 1), ("owasp", 1)]),
         ]

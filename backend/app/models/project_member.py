@@ -19,4 +19,6 @@ class ProjectMember(Document):
         indexes = [
             IndexModel([("project_id", 1), ("invited_email", 1)], unique=True),
             IndexModel([("user_id", 1)]),
+            # get_membership(project_id, user_id) runs on nearly every project-scoped request.
+            IndexModel([("project_id", 1), ("user_id", 1)]),
         ]

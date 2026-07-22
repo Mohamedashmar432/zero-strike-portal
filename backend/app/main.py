@@ -30,7 +30,12 @@ from app.routers import (
     scans,
     users,
 )
-from app.services import ai_job_queue_service, cloud_scan_service, scan_queue_service
+from app.services import (
+    ai_job_queue_service,
+    cloud_scan_service,
+    project_stats_service,
+    scan_queue_service,
+)
 from app.services.oauth import OAuthProviderError
 
 logger = structlog.get_logger(__name__)
@@ -49,6 +54,12 @@ async def lifespan(app: FastAPI):
             "is fixed and the backend is restarted.",
             settings.scanner_binary_path,
         )
+    # Backfill/reconcile the denormalized per-project findings counters (no-op after first boot).
+    # Non-fatal: stats degrade to stale counters if it fails, the app still boots.
+    try:
+        await project_stats_service.reconcile_project_finding_counts()
+    except Exception:
+        logger.warning("Project findings-counter reconciliation failed on startup", exc_info=True)
     poll_task = asyncio.create_task(scan_queue_service.poll_loop())
     ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
     yield

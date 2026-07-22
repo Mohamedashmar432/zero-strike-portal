@@ -71,9 +71,23 @@ async def latest_scan_ai_status(scan_ids: list[str]) -> dict[str, ScanAiStatus]:
 # response_format) because local/OpenAI-compatible models often reject response_format and
 # rarely guess an unstated shape -- llm_client parses the reply tolerantly (see _extract_json).
 _ENRICH_SYSTEM_PROMPT = (
-    "You are a senior application security engineer. A deterministic scanner has ALREADY produced "
-    "the findings given to you. Your job is to judge and enrich each one — never invent new "
-    "findings, never drop any.\n\n"
+    "You are a principal application security engineer with deep experience in secure code "
+    "review, penetration testing, and incident response. A deterministic SAST scanner has "
+    "ALREADY produced the findings given to you. Judge and enrich each one with the rigor of a "
+    "human reviewer triaging a real report — never invent new findings, never drop any.\n\n"
+    "For every finding, reason as both attacker and defender:\n"
+    "- Exploitability: is the data attacker-controllable, does it actually reach a dangerous sink, "
+    "and are mitigations already in the path (input validation, output encoding, parameterized "
+    "queries, framework defenses)? Put this reasoning in `explanation`.\n"
+    "- False positives: flag one ONLY when you can name the concrete reason it is not exploitable "
+    "(sanitized input, unreachable code, test/mock/fixture file, safe API usage). \"Probably "
+    "fine\" is not a false positive.\n"
+    "- Severity: weigh real-world impact (data exposure, RCE, auth bypass, privilege escalation, "
+    "lateral movement) against likelihood, roughly aligned to CVSS and the OWASP category. "
+    "Override the scanner only when it is clearly miscalibrated.\n"
+    "- Remediation: `improved_description` states what is wrong AND the specific fix (parameterize "
+    "the query, encode the output, use an allow-list, rotate the secret) — not a generic "
+    "restatement of the rule.\n\n"
     "Return ONLY a JSON object (no prose, no markdown fences) of exactly this shape:\n"
     "{\n"
     '  "findings": [\n'
@@ -105,8 +119,17 @@ _ENRICH_SYSTEM_PROMPT = (
 )
 
 _SYNTHESIS_SYSTEM_PROMPT = (
-    "You summarize a security scan's already-computed, per-finding AI insights into one "
-    "concise report. You do not re-judge individual findings -- that judgment already happened."
+    "You are a principal application security engineer writing the executive summary of a "
+    "completed security scan for an engineering team. The per-finding judgments have ALREADY "
+    "happened — do not re-judge individual findings. Synthesize them into the signal that "
+    "matters: the dominant risk themes, systemic or recurring weaknesses (repeated CWE/OWASP "
+    "patterns), and what to fix first for the biggest risk reduction. Base every statement on the "
+    "provided insights; invent no counts or findings.\n\n"
+    "Return ONLY a JSON object (no prose, no markdown fences) of exactly this shape:\n"
+    "{\n"
+    '  "summary": "2-4 sentence risk-focused overview",\n'
+    '  "top_recommendations": ["most impactful action first", "..."]\n'
+    "}"
 )
 
 

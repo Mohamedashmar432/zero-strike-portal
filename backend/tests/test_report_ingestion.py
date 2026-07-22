@@ -3,8 +3,11 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.models.finding import Finding
+from app.models.project import Project
 from app.models.scan import Scan
 from app.schemas.report import GoFindingIn, GoLocationIn, GoReportIn, GoStatsIn
+from app.services import project_stats_service as stats_svc
 from app.services import report_ingestion_service as ingest_svc
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
@@ -172,5 +175,95 @@ def test_ingest_writes_findings_report_and_completes_scan(client):
         await ingest_svc.ingest(scan, _load(), raw_json=raw)
         assert await Finding.find(Finding.scan_id == str(scan.id)).count() == 4
         assert await Report.find(Report.scan_id == str(scan.id)).count() == 1
+
+    asyncio.run(run())
+
+
+def test_ingest_maintains_project_severity_counters(client):
+    """Core denormalization test: ingest writes exact per-project rollups, and a rescan with
+    fewer findings decrements by delta (not overwrite), never going negative."""
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        project = Project(name="P", owner_id="o1", created_at=now, updated_at=now)
+        await project.insert()
+        scan = Scan(project_id=str(project.id), scan_type="local", created_at=now, updated_at=now)
+        await scan.insert()
+
+        # fixture: sast=critical, secret=high, sca=medium, config=low -> 1 each, total 4
+        await ingest_svc.ingest(scan, _load(), raw_json="{}")
+        p = await Project.get(project.id)
+        assert p.total_findings == 4
+        assert p.finding_severity_counts == {"critical": 1, "high": 1, "medium": 1, "low": 1}
+
+        # Rescan the SAME scan with only the critical finding -> decrement the rest to 0.
+        fewer = _load()
+        fewer.findings = [f for f in fewer.findings if f.kind == "sast"]
+        await ingest_svc.ingest(scan, fewer, raw_json="{}")
+        p = await Project.get(project.id)
+        assert p.total_findings == 1
+        assert p.finding_severity_counts == {"critical": 1, "high": 0, "medium": 0, "low": 0}
+        assert all(v >= 0 for v in p.finding_severity_counts.values())
+
+    asyncio.run(run())
+
+
+def test_project_counters_accumulate_across_scans_and_match_aggregation(client):
+    """Counters sum across a project's scans, and stay exactly equal to a fresh aggregation
+    (reconcile finds nothing to fix = the delta path kept them authoritative)."""
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        project = Project(name="P2", owner_id="o1", created_at=now, updated_at=now)
+        await project.insert()
+        pid = str(project.id)
+        scan_a = Scan(project_id=pid, scan_type="local", created_at=now, updated_at=now)
+        scan_b = Scan(project_id=pid, scan_type="local", created_at=now, updated_at=now)
+        await scan_a.insert()
+        await scan_b.insert()
+
+        await ingest_svc.ingest(scan_a, _load(), raw_json="{}")  # 4 findings, 1 high
+        rep = _load()
+        rep.findings = [
+            GoFindingIn(severity="high", message="x", location=GoLocationIn(file="a.py")),
+            GoFindingIn(severity="high", message="y", location=GoLocationIn(file="b.py")),
+        ]
+        await ingest_svc.ingest(scan_b, rep, raw_json="{}")
+
+        p = await Project.get(project.id)
+        assert p.total_findings == 6
+        assert p.finding_severity_counts["high"] == 3  # 1 from A + 2 from B
+        assert p.finding_severity_counts["critical"] == 1
+
+        # Delta maintenance already matches the authoritative aggregation -> nothing to reconcile.
+        assert await stats_svc.reconcile_project_finding_counts() == 0
+
+    asyncio.run(run())
+
+
+def test_reconcile_backfills_preexisting_findings_and_is_idempotent(client):
+    """Projects created before denormalization (findings present, counters at 0) get backfilled
+    by the startup reconcile, which is a no-op on the second run."""
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        project = Project(name="P3", owner_id="o1", created_at=now, updated_at=now)
+        await project.insert()
+        pid = str(project.id)
+        await Finding.insert_many(
+            [
+                ingest_svc._map_finding("sX", pid, GoFindingIn(severity="critical", message="x", location=GoLocationIn(file="a.py"))),
+                ingest_svc._map_finding("sX", pid, GoFindingIn(severity="low", message="y", location=GoLocationIn(file="b.py"))),
+            ]
+        )
+
+        assert (await Project.get(project.id)).total_findings == 0  # not yet reconciled
+
+        assert await stats_svc.reconcile_project_finding_counts() == 1
+        p = await Project.get(project.id)
+        assert p.total_findings == 2
+        assert p.finding_severity_counts == {"critical": 1, "low": 1}
+
+        assert await stats_svc.reconcile_project_finding_counts() == 0  # idempotent
 
     asyncio.run(run())
