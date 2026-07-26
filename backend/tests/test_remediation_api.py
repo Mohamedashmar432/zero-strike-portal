@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import app.services.ai_remediation_agent as ai_remediation_agent
 from app.models.ai_fix_proposal import AIFixProposal
 from app.models.ai_remediation_job import RemediationJob
-from app.models.finding import EvidenceEmbedded, Finding, LocationEmbedded
+from app.models.finding import DependencyEmbedded, EvidenceEmbedded, Finding, LocationEmbedded
 from app.models.scan import Scan
 from app.services import ai_remediation_queue_service
 from app.services.remediation_tools import SubmitFixProposalArgs
@@ -109,7 +109,7 @@ def test_trigger_409_when_active_provider_not_tool_capable(client):
 
 
 def test_scan_trigger_polls_to_completed_with_proposal_and_patch(client, monkeypatch):
-    async def fake_run_agent(issue_bundle, ctx, budgets):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"],
             can_fix=True,
@@ -157,7 +157,7 @@ def test_scan_trigger_polls_to_completed_with_proposal_and_patch(client, monkeyp
 
 
 def test_cannot_fix_becomes_manual_review(client, monkeypatch):
-    async def fake_run_agent(issue_bundle, ctx, budgets):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"],
             can_fix=False,
@@ -239,7 +239,183 @@ def test_approve_requires_owner_and_enqueues_apply(client, monkeypatch):
     assert asyncio.run(_apply_jobs()) == 1
 
 
-def test_approve_below_confidence_threshold_is_rejected(client, monkeypatch):
+def test_project_auto_fix_list_and_breakdown(client):
+    owner = register_and_login(client, email="fix-owner-list@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    f1 = _insert_finding(project["id"], scan_id, "fp-l1")
+    f2 = _insert_finding(project["id"], scan_id, "fp-l2")
+    f3 = _insert_finding(project["id"], scan_id, "fp-l3")
+    _insert_proposal(project["id"], scan_id, f1, can_fix=True, confidence=95)  # ai_fixable
+    _insert_proposal(project["id"], scan_id, f2, can_fix=True, confidence=40)  # needs_review_on_fix
+
+    async def _mr():
+        p = AIFixProposal(
+            finding_id=f3, scan_id=scan_id, project_id=project["id"], can_fix=False,
+            confidence_score=0, review_state="manual_review", explanation="e",
+        )
+        await p.insert()
+
+    asyncio.run(_mr())  # cannot_fix
+
+    r = client.get(f"/api/v1/projects/{project['id']}/auto-fix/scans", headers=_headers(owner))
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["scan_id"] == scan_id
+    assert item["status"] == "completed"
+    s = item["summary"]
+    assert s["total_findings"] == 3
+    assert s["ai_fixable"] == 1
+    assert s["needs_review_on_fix"] == 1
+    assert s["cannot_fix"] == 1
+    assert s["risk_rating"] == "high"  # findings are severity "high"
+
+    outsider = register_and_login(client, email="fix-outsider-list@zs.dev")
+    r = client.get(f"/api/v1/projects/{project['id']}/auto-fix/scans", headers=_headers(outsider))
+    assert r.status_code == 403
+
+
+def test_finding_comments_and_scan_summary(client):
+    owner = register_and_login(client, email="fix-owner-comments@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    f1 = _insert_finding(project["id"], scan_id, "fp-c1")
+    f2 = _insert_finding(project["id"], scan_id, "fp-c2")
+
+    r = client.post(f"/api/v1/findings/{f1}/comments", json={"body": "Looks right to me"}, headers=_headers(owner))
+    assert r.status_code == 200
+    assert r.json()["body"] == "Looks right to me"
+    assert r.json()["author_email"] == "fix-owner-comments@zs.dev"
+
+    client.post(f"/api/v1/findings/{f1}/comments", json={"body": "second"}, headers=_headers(owner))
+
+    lst = client.get(f"/api/v1/findings/{f1}/comments", headers=_headers(owner))
+    assert len(lst.json()["items"]) == 2
+
+    summary = client.get(f"/api/v1/scans/{scan_id}/comments/summary", headers=_headers(owner)).json()
+    assert summary["total"] == 2
+    by = {row["finding_id"]: row["count"] for row in summary["by_finding"]}
+    assert by == {f1: 2}
+    assert f2 not in by
+
+    # empty body rejected; non-member forbidden
+    assert client.post(f"/api/v1/findings/{f1}/comments", json={"body": "  "}, headers=_headers(owner)).status_code == 400
+    outsider = register_and_login(client, email="fix-outsider-comments@zs.dev")
+    assert client.get(f"/api/v1/findings/{f1}/comments", headers=_headers(outsider)).status_code == 403
+
+
+def test_auto_fix_activity_timeline(client, monkeypatch):
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(ai_remediation_queue_service, "drain_queue", _noop)
+
+    owner = register_and_login(client, email="fix-owner-activity@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    fid = _insert_finding(project["id"], scan_id, "fp-act")
+    pid = _insert_proposal(project["id"], scan_id, fid)
+
+    # Approve records an "AI Fix Approved" audit event against this proposal.
+    r = client.post(f"/api/v1/fix-proposals/{pid}/approve", json={}, headers=_headers(owner))
+    assert r.status_code == 200
+
+    act = client.get(f"/api/v1/scans/{scan_id}/auto-fix/activity", headers=_headers(owner))
+    assert act.status_code == 200
+    actions = [e["action"] for e in act.json()["items"]]
+    assert "AI Fix Approved" in actions
+
+
+def test_dependency_update_from_sca_finding():
+    from app.services.ai_remediation_service import _dependency_update
+
+    f = Finding(
+        scan_id="s", project_id="p", fingerprint="fp", rule_id="CVE-x", rule_name="Vulnerable dependency",
+        message="lodash is vulnerable", location=LocationEmbedded(file="package.json", start_line=1, end_line=1),
+        severity="high", kind="sca", language="json", created_at=datetime.now(timezone.utc),
+        dependency=DependencyEmbedded(
+            ecosystem="npm", package="lodash", installed_version="4.17.11", fixed_version="4.17.21",
+            manifest="package.json",
+        ),
+    )
+    du = _dependency_update(f)
+    assert du is not None
+    assert du["package"] == "lodash"
+    assert du["current_version"] == "4.17.11"
+    assert du["recommended_version"] == "4.17.21"
+    assert du["available_versions"] == ["4.17.21"]
+
+    f.kind = "sast"  # non-SCA -> no picker
+    assert _dependency_update(f) is None
+
+
+def test_ask_appends_qa_to_conversation(client, monkeypatch):
+    import app.services.ai_remediation_service as svc
+
+    async def fake_ask(proposal, finding, question):
+        return "Use a parameterized query."
+
+    monkeypatch.setattr(svc, "ask_about_fix", fake_ask)
+
+    owner = register_and_login(client, email="fix-owner-ask@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    fid = _insert_finding(project["id"], scan_id, "fp-ask")
+    pid = _insert_proposal(project["id"], scan_id, fid)
+
+    r = client.post(
+        f"/api/v1/fix-proposals/{pid}/ask", json={"question": "How do I fix this?"}, headers=_headers(owner)
+    )
+    assert r.status_code == 200
+    msgs = r.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "user" and msgs[0]["kind"] == "qa"
+    assert msgs[1]["role"] == "assistant" and "parameterized" in msgs[1]["body"]
+
+    # persisted and readable by another member
+    g = client.get(f"/api/v1/fix-proposals/{pid}/conversation", headers=_headers(owner))
+    assert len(g.json()["messages"]) == 2
+
+
+def test_revise_enqueues_propose_with_note_and_records_conversation(client, monkeypatch):
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(ai_remediation_queue_service, "drain_queue", _noop)
+
+    admin = _admin_headers(client, email="fix-admin-revise@zs.dev")
+    _enable_ai(client, admin)  # anthropic is tool-capable
+    owner = register_and_login(client, email="fix-owner-revise@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    fid = _insert_finding(project["id"], scan_id, "fp-revise")
+    pid = _insert_proposal(project["id"], scan_id, fid)
+
+    r = client.post(
+        f"/api/v1/fix-proposals/{pid}/revise", json={"instruction": "use bcrypt instead"}, headers=_headers(owner)
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] in ("queued", "in_progress", "completed")
+
+    async def _job():
+        return await RemediationJob.find(
+            RemediationJob.kind == "propose", RemediationJob.revision_note == "use bcrypt instead"
+        ).first_or_none()
+
+    job = asyncio.run(_job())
+    assert job is not None
+    assert job.finding_ids == [fid]
+
+    g = client.get(f"/api/v1/fix-proposals/{pid}/conversation", headers=_headers(owner))
+    msgs = g.json()["messages"]
+    assert any(m["kind"] == "revision" and "bcrypt" in m["body"] for m in msgs)
+
+
+def test_owner_can_approve_below_confidence_threshold(client, monkeypatch):
+    # Confidence gates *auto*-approval only; a human owner who reviewed the diff may approve a
+    # low-confidence fix. The apply job's re-scan remains the real safety gate.
     async def _noop():
         return None
 
@@ -252,9 +428,10 @@ def test_approve_below_confidence_threshold_is_rejected(client, monkeypatch):
     pid = _insert_proposal(project["id"], scan_id, fid, confidence=40)  # below the 80 default
 
     r = client.post(f"/api/v1/fix-proposals/{pid}/approve", json={}, headers=_headers(owner))
-    assert r.status_code == 400
+    assert r.status_code == 200
+    assert r.json()["review_state"] == "approved"
 
     async def _apply_jobs():
         return await RemediationJob.find(RemediationJob.kind == "apply").count()
 
-    assert asyncio.run(_apply_jobs()) == 0  # no write job enqueued
+    assert asyncio.run(_apply_jobs()) == 1  # human approval enqueues the write job

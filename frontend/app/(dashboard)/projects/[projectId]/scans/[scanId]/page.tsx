@@ -180,9 +180,7 @@ export function FindingItem({
     mutationFn: () => triggerFindingAutoFix(finding.id),
     onSuccess: () => {
       toast.success("Generating a fix…");
-      router.push(
-        `/projects/${finding.project_id}?tab=auto-fix&scan=${finding.scan_id}&finding=${finding.id}`
-      );
+      router.push(`/projects/${finding.project_id}/auto-fix/${finding.scan_id}?finding=${finding.id}`);
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start Auto-Fix"),
   });
@@ -481,7 +479,7 @@ export default function ScanDetailPage() {
     mutationFn: () => triggerScanAutoFix(scanId),
     onSuccess: () => {
       toast.success("Generating fixes…");
-      router.push(`/projects/${projectId}?tab=auto-fix&scan=${scanId}`);
+      router.push(`/projects/${projectId}/auto-fix/${scanId}`);
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start Auto-Fix"),
   });
@@ -628,7 +626,7 @@ export default function ScanDetailPage() {
                 onClick={() => autoFix.mutate()}
               >
                 <Wand2 />
-                {autoFix.isPending ? "Starting…" : "Auto AI Fix"}
+                {autoFix.isPending ? "Starting…" : "Auto-Fix All"}
               </Button>
             </>
           )}

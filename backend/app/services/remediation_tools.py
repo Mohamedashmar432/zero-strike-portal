@@ -6,18 +6,26 @@ The WRITE tool schemas (create_branch/commit_patch/open_pr) are declared here as
 interface contract but are NOT dispatched by this module and are NOT offered to the agent --
 writes happen deterministically in ai_remediation_apply_service after human approval.
 
-The propose phase has no clone (docs: no-clone propose), so the READ tools serve the bounded,
-already-secret-redacted finding context carried in ToolContext -- not a live filesystem. Repo,
-branch, and allowed paths are pinned in ToolContext (never model-chosen) for scope + cross-tenant
-control. dispatch() never raises: bad input returns {"error": ...} so one bad tool call can't
-crash the loop.
+The READ tools serve one of two backends, chosen per ToolContext:
+- ctx.workdir set  -> a real cloned worktree (clone-on-propose): the agent may read ANY repo file
+  for exploration, path-guarded to the repo root and secret-redacted on the way out.
+- ctx.workdir None -> the bounded, already-secret-redacted single-finding excerpt carried in
+  ToolContext (the original no-clone behavior).
+Either way the terminal submit_fix_proposal is scope-checked against allowed_paths by the agent
+(_finalize), so a patch still targets exactly the finding's file. dispatch() never raises: bad
+input returns {"error": ...} so one bad tool call can't crash the loop.
 """
 
 import difflib
 import json
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
+
+from app.core.config import settings
+from app.services.secret_redaction import redact
 
 
 @dataclass
@@ -32,6 +40,8 @@ class ToolContext:
     # Bounded, redacted context for the single finding under repair. Keys: file_path, language,
     # original_code (the flagged excerpt), start_line, end_line.
     finding_context: dict = field(default_factory=dict)
+    # When set (clone-on-propose), the READ tools read this real worktree instead of the excerpt.
+    workdir: str | None = None
 
 
 class SubmitFixProposalArgs(BaseModel):
@@ -199,6 +209,38 @@ def _path_ok(path: str, ctx: ToolContext) -> bool:
     return path in ctx.allowed_paths
 
 
+# Directories never worth exploring — noise + weight (deps, VCS, build output).
+_SKIP_DIRS = {
+    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+    ".next", "target", ".idea", ".mypy_cache", ".pytest_cache", ".gradle", "vendor",
+}
+
+
+def _resolve_in_workdir(workdir: str, path: str) -> Path | None:
+    """Resolve a repo-relative path inside the cloned worktree, rejecting absolute paths and any
+    `..`/symlink escape (via resolve() + containment check). Returns None if it escapes the root."""
+    if not path or path.startswith("/") or path.startswith("\\"):
+        return None
+    root = Path(workdir).resolve()
+    target = (root / path).resolve()
+    if target != root and root not in target.parents:
+        return None
+    return target
+
+
+def _list_repo_files(workdir: str, limit: int = 2000) -> tuple[list[str], bool]:
+    root = Path(workdir).resolve()
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for fn in sorted(filenames):
+            rel = os.path.relpath(os.path.join(dirpath, fn), root).replace("\\", "/")
+            out.append(rel)
+            if len(out) >= limit:
+                return out, True
+    return out, False
+
+
 async def dispatch(name: str, arguments_json: str, ctx: ToolContext) -> dict:
     """Execute one READ tool. Returns a JSON-serializable dict result, or {"error": ...} on any
     unknown tool / unparseable args / scope violation -- never raises."""
@@ -215,6 +257,9 @@ async def dispatch(name: str, arguments_json: str, ctx: ToolContext) -> dict:
         return {"branches": [{"name": ctx.branch, "is_default": True}]}
 
     if name == "list_files":
+        if ctx.workdir:
+            files, truncated = _list_repo_files(ctx.workdir)
+            return {"entries": [{"path": p, "type": "file"} for p in files], "truncated": truncated}
         return {"entries": [{"path": p, "type": "file"} for p in ctx.allowed_paths], "truncated": False}
 
     if name == "read_file":
@@ -222,13 +267,28 @@ async def dispatch(name: str, arguments_json: str, ctx: ToolContext) -> dict:
             a = _PathArgs(**args)
         except ValidationError as e:
             return {"error": f"invalid arguments: {e.errors()}"}
+        if ctx.workdir:
+            target = _resolve_in_workdir(ctx.workdir, a.path)
+            if target is None or not target.is_file():
+                return {"error": f"path not allowed or not found: {a.path}"}
+            raw = target.read_text(encoding="utf-8", errors="replace")
+            cap = settings.remediation_max_file_bytes
+            truncated = len(raw) > cap
+            content = redact(raw[:cap] if truncated else raw)  # repo content is untrusted -> redact secrets
+            return {
+                "path": a.path,
+                "content": content,
+                "lines": len(content.splitlines()),
+                "truncated": truncated,
+                "language": fc.get("language"),
+            }
         if not _path_ok(a.path, ctx):
             return {"error": f"path not allowed: {a.path}"}
         return {
             "path": a.path,
             "content": original,
             "lines": len(original.splitlines()),
-            "truncated": True,  # only the flagged excerpt is available in the propose phase
+            "truncated": True,  # only the flagged excerpt is available without a clone
             "language": fc.get("language"),
         }
 
@@ -237,6 +297,20 @@ async def dispatch(name: str, arguments_json: str, ctx: ToolContext) -> dict:
             a = _ExcerptArgs(**args)
         except ValidationError as e:
             return {"error": f"invalid arguments: {e.errors()}"}
+        if ctx.workdir:
+            target = _resolve_in_workdir(ctx.workdir, a.path)
+            if target is None or not target.is_file():
+                return {"error": f"path not allowed or not found: {a.path}"}
+            all_lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+            lo = max(0, a.start_line - 1)  # real file: line numbers are absolute (1-based)
+            hi = min(len(all_lines), max(lo, a.end_line))
+            hi = min(hi, lo + settings.remediation_max_excerpt_lines)
+            return {
+                "path": a.path,
+                "start_line": a.start_line,
+                "end_line": a.end_line,
+                "content": redact("\n".join(all_lines[lo:hi])),
+            }
         if not _path_ok(a.path, ctx):
             return {"error": f"path not allowed: {a.path}"}
         lines = original.splitlines()

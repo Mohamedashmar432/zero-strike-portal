@@ -50,6 +50,10 @@ class AIFixProposal(Document):
     # step applies an exact-match replacement of original_code in exactly this file.
     file_path: str | None = None
     risk_notes: str | None = None
+    # For SCA (dependency) findings: the version-bump context the UI renders as a picker, sourced
+    # from the scanner's SCA data only (no external registry calls). Shape:
+    # {package, ecosystem, current_version, available_versions[], recommended_version, manifest}.
+    dependency_update: dict | None = None
 
     provider: str | None = None
     model_name: str | None = None

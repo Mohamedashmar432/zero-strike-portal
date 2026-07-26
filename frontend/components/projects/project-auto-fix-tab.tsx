@@ -4,11 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Wand2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/common/empty-state";
+import { ProjectAutoFixList } from "@/components/projects/project-auto-fix-list";
 import { ProjectAutoFixSection } from "@/components/projects/project-auto-fix-section";
 import { getAiStatus } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 
-export function ProjectAutoFixTab({ canApprove }: { canApprove: boolean }) {
+export function ProjectAutoFixTab({ projectId, canApprove }: { projectId: string; canApprove: boolean }) {
   const params = useSearchParams();
   const scanId = params.get("scan");
   const focusFindingId = params.get("finding");
@@ -24,14 +25,9 @@ export function ProjectAutoFixTab({ canApprove }: { canApprove: boolean }) {
       />
     );
   }
-  if (!scanId) {
-    return (
-      <EmptyState
-        icon={Wand2}
-        title="Auto-Fix"
-        description="Open a completed scan and click “Auto AI Fix” to generate reviewable patch proposals here. You review every diff — nothing auto-commits."
-      />
-    );
+  // Deep-link back-compat: ?scan= renders that scan's proposals inline; otherwise the section list.
+  if (scanId) {
+    return <ProjectAutoFixSection scanId={scanId} canApprove={canApprove} focusFindingId={focusFindingId} />;
   }
-  return <ProjectAutoFixSection scanId={scanId} canApprove={canApprove} focusFindingId={focusFindingId} />;
+  return <ProjectAutoFixList projectId={projectId} />;
 }

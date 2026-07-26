@@ -30,6 +30,27 @@ class ApproveRequest(BaseModel):
     branch_name: str | None = None
 
 
+class AskRequest(BaseModel):
+    question: str
+
+
+class ReviseRequest(BaseModel):
+    instruction: str
+
+
+class ConversationMessageOut(BaseModel):
+    role: Literal["user", "assistant"]
+    body: str
+    author_user_id: str | None = None
+    kind: Literal["qa", "revision"] = "qa"
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    proposal_id: str
+    messages: list["ConversationMessageOut"] = Field(default_factory=list)
+
+
 class FixProposalOut(BaseModel):
     id: str
     finding_id: str
@@ -52,6 +73,7 @@ class FixProposalOut(BaseModel):
     patch_scope: str | None
     file_path: str | None
     risk_notes: str | None
+    dependency_update: dict | None = None
     manual_review_reason: str | None
 
     branch_name: str | None = None
@@ -62,9 +84,13 @@ class FixProposalOut(BaseModel):
     updated_at: datetime
 
 
+# Coarse repo-level risk read for the auto-fix report header (highest finding severity in scope).
+AutoFixRiskRating = Literal["none", "low", "medium", "high", "critical"]
+
+
 class AutoFixSummary(BaseModel):
     total_findings: int = 0
-    auto_fixable: int = 0
+    auto_fixable: int = 0  # can_fix (any confidence) — kept for back-compat
     manual_review: int = 0
     proposed: int = 0
     approved: int = 0
@@ -72,11 +98,90 @@ class AutoFixSummary(BaseModel):
     pr_created: int = 0
     dismissed: int = 0
     failed: int = 0
+    # The 3-way breakdown the report page renders (can_fix x confidence threshold):
+    ai_fixable: int = 0  # can_fix AND confidence >= remediation_confidence_threshold
+    needs_review_on_fix: int = 0  # can_fix but confidence below threshold — a human should review the fix
+    cannot_fix: int = 0  # can_fix == False — AI couldn't produce a safe fix, needs manual remediation
+    risk_rating: AutoFixRiskRating = "none"
 
 
 class AutoFixInsight(BaseModel):
     summary: AutoFixSummary
     proposals: list[FixProposalOut] = Field(default_factory=list)
+
+
+class ProjectAutoFixScanItem(BaseModel):
+    """One row in the dedicated Auto-Fix section list (mirrors a scans-list row)."""
+
+    scan_id: str
+    project_repo_id: str | None = None
+    repo_url: str | None = None
+    scan_label: str | None = None
+    scan_type: str | None = None
+    branch: str | None = None
+    scan_created_at: datetime | None = None
+    status: RemediationStatus = "not_requested"
+    started_at: datetime | None = None
+    progress_completed: int = 0
+    progress_total: int = 0
+    summary: AutoFixSummary = Field(default_factory=AutoFixSummary)
+
+
+class ProjectAutoFixListResponse(BaseModel):
+    items: list[ProjectAutoFixScanItem] = Field(default_factory=list)
+
+
+class ProjectOverviewOut(BaseModel):
+    """The AI remediation project overview (markdown) for a scan's repo, if one has been generated."""
+
+    markdown: str | None = None
+    generated_at: datetime | None = None
+    model_name: str | None = None
+
+
+# --- team controls: per-finding comments + activity timeline -----------------------------
+
+
+class CommentCreate(BaseModel):
+    body: str
+
+
+class CommentOut(BaseModel):
+    id: str
+    finding_id: str
+    author_user_id: str
+    author_name: str | None = None
+    author_email: str | None = None
+    body: str
+    created_at: datetime
+
+
+class CommentListResponse(BaseModel):
+    items: list[CommentOut] = Field(default_factory=list)
+
+
+class FindingCommentCount(BaseModel):
+    finding_id: str
+    count: int
+
+
+class CommentSummaryResponse(BaseModel):
+    total: int = 0
+    by_finding: list[FindingCommentCount] = Field(default_factory=list)
+
+
+class ActivityEvent(BaseModel):
+    action: str
+    actor_user_id: str | None = None
+    actor_name: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
+    metadata: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ActivityResponse(BaseModel):
+    items: list[ActivityEvent] = Field(default_factory=list)
 
 
 class ScanAutoFixResponse(BaseModel):

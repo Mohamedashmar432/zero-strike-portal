@@ -295,6 +295,36 @@ async def active_provider_supports_tools() -> bool:
     return config.provider in settings.remediation_tool_capable_providers
 
 
+def _recover_rejected_tool_name(exc: Exception) -> LLMToolResponse | None:
+    """Observed live against Groq hosting openai/gpt-oss-120b: the model sometimes emits its
+    final answer as a tool call under a synthetic name (seen: "json") instead of one of the
+    declared tools, and Groq's API rejects the WHOLE request with a 400 for calling an
+    undeclared tool -- even though the error body's `failed_generation` field carries the
+    exact well-formed tool-call the model intended. Without this, that's a silent false
+    negative: a valid answer (e.g. a real patch) is discarded and the caller sees no tool
+    call at all. Recovers it as a normal single-tool-call response under whatever name the
+    model used; ai_remediation_agent decides whether that name's arguments match a tool it
+    recognizes. Best-effort and narrowly scoped to this exact error shape -- any failure to
+    parse falls through to the original error untouched."""
+    text = str(exc)
+    if "attempted to call tool" not in text:
+        return None
+    try:
+        outer = _extract_json(text)
+        inner = json.loads(outer["error"]["failed_generation"])
+        name = inner.get("name")
+        arguments = inner.get("arguments")
+        if not name or arguments is None:
+            return None
+        return LLMToolResponse(
+            content=None,
+            tool_calls=[LLMToolCall(id="recovered-0", name=name, arguments=json.dumps(arguments))],
+            finish_reason="tool_calls",
+        )
+    except Exception:
+        return None
+
+
 def _normalize_tool_calls(message) -> list[LLMToolCall]:
     raw = getattr(message, "tool_calls", None) or []
     calls: list[LLMToolCall] = []
@@ -345,8 +375,12 @@ async def get_tool_completion(
     try:
         response = await _call_acompletion(**kwargs)
     except _PERMANENT_EXCEPTIONS as exc:
-        logger.warning("llm tool call failed permanently", error=str(exc))
+        recovered = _recover_rejected_tool_name(exc)
         await _record_usage_safe(config.id, success=False)
+        if recovered is not None:
+            logger.warning("recovered a tool call from a rejected-tool-name error", error=str(exc)[:300])
+            return recovered
+        logger.warning("llm tool call failed permanently", error=str(exc))
         raise LLMPermanentError(str(exc)) from exc
     except _TRANSIENT_EXCEPTIONS as exc:
         logger.error("llm tool call exhausted retries", error=str(exc))

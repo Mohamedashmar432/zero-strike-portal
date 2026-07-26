@@ -25,6 +25,7 @@ from app.routers import (
     downloads,
     projects,
     public_repos,
+    remediation_settings,
     repo_credentials,
     report_templates,
     scanner_scans,
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")
     app.include_router(ai_provider_config.router, prefix="/api/v1")
     app.include_router(ai_remediation.router, prefix="/api/v1")
+    app.include_router(remediation_settings.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

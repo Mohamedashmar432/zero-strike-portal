@@ -66,6 +66,12 @@ export const queryKeys = {
       scan: (scanId: string) => ["ai", "autofix", "scan", scanId] as const,
       finding: (findingId: string) => ["ai", "autofix", "finding", findingId] as const,
       proposal: (proposalId: string) => ["ai", "autofix", "proposal", proposalId] as const,
+      projectList: (projectId: string) => ["ai", "autofix", "project", projectId] as const,
+      conversation: (proposalId: string) => ["ai", "autofix", "conversation", proposalId] as const,
+      comments: (findingId: string) => ["ai", "autofix", "comments", findingId] as const,
+      commentSummary: (scanId: string) => ["ai", "autofix", "commentSummary", scanId] as const,
+      activity: (scanId: string) => ["ai", "autofix", "activity", scanId] as const,
+      settings: () => ["ai", "autofix", "settings"] as const,
     },
   },
   repoCredentials: {

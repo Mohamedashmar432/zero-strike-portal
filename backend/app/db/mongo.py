@@ -12,10 +12,14 @@ from app.models.ai_usage_event import AIUsageEvent
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.finding import Finding
+from app.models.finding_comment import FindingComment
+from app.models.fix_conversation import FixConversation
 from app.models.oauth_connection import OAuthConnection
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_repo import ProjectRepo
+from app.models.remediation_project_doc import RemediationProjectDoc
+from app.models.remediation_settings import RemediationSettings
 from app.models.report import Report
 from app.models.repo_credential import RepoCredential
 from app.models.scan import Scan
@@ -58,6 +62,10 @@ async def connect_to_mongo() -> None:
             AIAnalysisJob,
             AIUsageEvent,
             RemediationJob,
+            FixConversation,
+            RemediationProjectDoc,
+            FindingComment,
+            RemediationSettings,
         ],
     )
 

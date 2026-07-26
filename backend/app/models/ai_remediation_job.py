@@ -35,6 +35,9 @@ class RemediationJob(Document):
     # kind="apply": the AIFixProposal being applied. None for kind="propose".
     proposal_id: str | None = None
     target_ref: str = ""  # base branch to propose against / branch from
+    # kind="propose" only: a developer's "change the fix to X" instruction from the review UI. Threaded
+    # (as trusted input) into the agent so the re-proposed patch honors it. None for a first proposal.
+    revision_note: str | None = None
     scope_key: str  # dedup key, e.g. f"{scan_id}:{kind}:{proposal_id or hash(finding_ids)}"
 
     status: RemediationJobStatus = "queued"

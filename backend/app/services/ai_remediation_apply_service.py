@@ -22,13 +22,21 @@ from app.models.finding import Finding
 from app.models.project_repo import ProjectRepo
 from app.models.scan import Scan
 from app.models.user import User
-from app.services import audit_service, connection_service, git_workspace, project_repo_service
+from app.services import (
+    audit_service,
+    connection_service,
+    git_workspace,
+    project_repo_service,
+    remediation_settings_service,
+)
 from app.services.repo_write import RepoWriteError
 from app.services.repo_write import azure_devops as ado_write
 from app.services.repo_write import github as gh_write
 
 logger = structlog.get_logger(__name__)
 
+# Fallback default; the effective set is admin-configurable via RemediationSettings
+# (remediation_settings_service) and read per-apply in _apply.
 _BLOCKING_SEVERITIES = {"critical", "high", "medium"}
 
 
@@ -87,11 +95,11 @@ def _fingerprints(report) -> set[str]:
     return {f.fingerprint for f in report.findings if f.fingerprint}
 
 
-def _new_blocking(report, new_fps: set[str]) -> int:
+def _new_blocking(report, new_fps: set[str], blocking_severities: set[str]) -> int:
     return sum(
         1
         for f in report.findings
-        if f.fingerprint in new_fps and (f.severity or "").lower() in _BLOCKING_SEVERITIES
+        if f.fingerprint in new_fps and (f.severity or "").lower() in blocking_severities
     )
 
 
@@ -190,7 +198,9 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         post_report, _ = await git_workspace.run_scanner(workdir)
         post_fps = _fingerprints(post_report)
         new_fps = post_fps - baseline_fps
-        new_blocking = _new_blocking(post_report, new_fps)
+        cfg = await remediation_settings_service.get_settings()
+        blocking = {s.lower() for s in cfg.blocking_severities} or _BLOCKING_SEVERITIES
+        new_blocking = _new_blocking(post_report, new_fps, blocking)
         target_cleared = target_fp not in post_fps
         proposal.validation = {
             "scope_ok": True,
@@ -205,12 +215,16 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         if not target_cleared:
             raise _ManualReview("The fix did not clear the finding on re-scan.")
         if new_blocking > 0:
-            raise _ManualReview(f"The fix introduced {new_blocking} new finding(s) of medium+ severity.")
+            sev_label = "/".join(sorted(blocking))
+            raise _ManualReview(
+                f"The fix introduced {new_blocking} new {sev_label} finding(s)."
+            )
         proposal.review_state = "validated"
         await _save(proposal)
         await audit_service.record(
-            "AI Fix Validation Passed", project_id=proposal.project_id, target_type="ai_fix_proposal",
-            target_id=str(proposal.id), metadata={"target_cleared": True, "new_finding_count": len(new_fps)},
+            "AI Fix Validation Passed", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
+            target_type="ai_fix_proposal", target_id=str(proposal.id),
+            metadata={"target_cleared": True, "new_finding_count": len(new_fps)},
         )
 
         branch_name = proposal.branch_name or f"zerostrike/fix-{proposal.finding_id[:8]}-{uuid.uuid4().hex[:8]}"
@@ -228,7 +242,13 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         if rc != 0:
             raise _ManualReview(f"Could not stage the patch: {aerr[:200]}")
         rule = finding.rule_name or "security finding"
-        commit_msg = f"Fix {rule} in {proposal.file_path}\n\nZeroStrike AI Auto-Fix (human-approved). {proposal.explanation or ''}".strip()
+        # Commit/PR use the "zero-strike/security fix: <name>" convention so teammates can spot
+        # ZeroStrike-authored security fixes at a glance in git history / the PR list.
+        commit_msg = (
+            f"zero-strike/security fix: {rule}\n\n"
+            f"Fixes {rule} in {proposal.file_path}. ZeroStrike AI Auto-Fix (human-approved). "
+            f"{proposal.explanation or ''}"
+        ).strip()
         rc, _o, cerr = await git_workspace.git(
             ["-c", "user.name=ZeroStrike Bot", "-c", "user.email=noreply@zerostrike.dev", "commit", "-m", commit_msg],
             workdir,
@@ -240,11 +260,12 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
 
         branch_name = await _push_with_recovery(workdir, branch_name, token, git_scheme)
         await audit_service.record(
-            "AI Fix Branch Pushed", project_id=proposal.project_id, target_type="ai_fix_proposal",
-            target_id=str(proposal.id), metadata={"branch": branch_name, "commit": commit_sha},
+            "AI Fix Branch Pushed", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
+            target_type="ai_fix_proposal", target_id=str(proposal.id),
+            metadata={"branch": branch_name, "commit": commit_sha},
         )
 
-        title = f"[ZeroStrike] Fix {rule} in {proposal.file_path}"
+        title = f"zero-strike/security fix: {rule}"
         body = (
             f"AI-generated fix (confidence {proposal.confidence_score:.0f}/100), reviewed and approved by a "
             f"human before this PR was opened.\n\n**Finding:** {rule}\n**File:** `{proposal.file_path}`\n\n"
@@ -267,8 +288,8 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         proposal.pr_provider = repo.provider
         await _save(proposal)
         await audit_service.record(
-            "AI Fix PR Opened", project_id=proposal.project_id, target_type="ai_fix_proposal",
-            target_id=str(proposal.id),
+            "AI Fix PR Opened", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
+            target_type="ai_fix_proposal", target_id=str(proposal.id),
             metadata={"pr_url": pr["pr_url"], "pr_number": pr["pr_number"], "branch": branch_name, "base": base, "credential": source},
         )
     except _ManualReview:
@@ -304,8 +325,8 @@ async def run_job(job: RemediationJob) -> None:
         proposal.manual_review_reason = str(mr)
         await _save(proposal)
         await audit_service.record(
-            "AI Fix Marked Manual Review", project_id=proposal.project_id, target_type="ai_fix_proposal",
-            target_id=str(proposal.id), metadata={"reason": str(mr)},
+            "AI Fix Marked Manual Review", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
+            target_type="ai_fix_proposal", target_id=str(proposal.id), metadata={"reason": str(mr)},
         )
     except Exception as exc:
         logger.exception("remediation apply job failed", job_id=str(job.id))
@@ -318,8 +339,8 @@ async def run_job(job: RemediationJob) -> None:
         job.updated_at = datetime.now(timezone.utc)
         await job.save()
         await audit_service.record(
-            "AI Fix Failed", project_id=proposal.project_id, target_type="remediation_job",
-            target_id=str(job.id), metadata={"error": str(exc)[:500]},
+            "AI Fix Failed", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
+            target_type="remediation_job", target_id=str(job.id), metadata={"error": str(exc)[:500]},
         )
         structlog.contextvars.clear_contextvars()
         return
