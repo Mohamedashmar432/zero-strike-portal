@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     scanner_binary_path: str = "zerostrike"
     scan_timeout_seconds: int = 900
     max_concurrent_cloud_scans: int = 2
+    # Caps scanner goroutine parallelism (default is NumCPU). Two concurrent cloud scans each
+    # spawning NumCPU workers can push peak memory past a constrained container's limit and get
+    # SIGKILL'd by the OOM killer ("scanner exited -9") on large/vendor-heavy repos. Lower this
+    # if that still happens on your deployment's container size; raise it if scans are slow and
+    # memory headroom is available.
+    scanner_max_workers: int = 2
     clone_workdir_path: str = ""  # empty => OS temp dir/zs-clones (cross-platform)
 
     # Mongo-backed cloud-scan queue (see scan_queue_service).

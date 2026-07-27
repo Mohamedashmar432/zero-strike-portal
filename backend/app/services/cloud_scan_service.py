@@ -173,6 +173,12 @@ async def _clone(
     await _do_clone()
 
 
+# Vendored/generated content inflates parse + taint-analysis memory without adding real
+# findings (it's third-party or machine-generated, not code the user owns) -- excluded by
+# default on every cloud scan. --exclude-dir matches directory names anywhere in the tree.
+_DEFAULT_EXCLUDE_DIRS = ("node_modules", "vendor", "dist", "build", ".git", "bin", "obj", "target")
+
+
 async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
     cmd = [
         settings.scanner_binary_path,
@@ -183,10 +189,24 @@ async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
         "--enable-secrets",
         "--enable-sca",
         "--enable-framework-checks",
+        "--workers",
+        str(settings.scanner_max_workers),
     ]
+    for d in _DEFAULT_EXCLUDE_DIRS:
+        cmd += ["--exclude-dir", d]
     rc, out, err = await _run(cmd, settings.scan_timeout_seconds)
     # Scanner exit codes: 0 clean, 1 findings found — both are successful runs with a report on stdout.
     if rc not in (0, 1):
+        if rc == -9:
+            # subprocess.run reports a POSIX kill-by-signal as -signum. -9 is SIGKILL, which the
+            # scanner never sends itself -- this is the container's OOM killer (or a runner-enforced
+            # hard kill). Distinct message so it's diagnosable from the scan's error_message alone,
+            # without cross-referencing infra logs.
+            raise CloudScanError(
+                "scanner was killed (out of memory) -- the repository is likely too large or "
+                "contains huge generated/vendored files for the scanner's available memory. Try "
+                "excluding additional large directories or increasing the scan container's memory."
+            )
         raise CloudScanError(f"scanner exited {rc}: {err.decode(errors='replace')}")
     report = GoReportIn.model_validate_json(out)
     await report_ingestion_service.ingest(scan, report, out.decode("utf-8", errors="replace"))
