@@ -83,6 +83,17 @@ def test_download_invalid_os_arch_is_400(client):
     assert r.status_code == 400
 
 
+def test_publish_prunes_versions_beyond_retention(client):
+    headers = _admin_headers(client, email="dlAdmin5@zerostrike.dev")
+    _publish(client, headers, "v1.0.0", "linux", "amd64", b"v1-bytes")
+    _publish(client, headers, "v2.0.0", "linux", "amd64", b"v2-bytes")
+    _publish(client, headers, "v3.0.0", "linux", "amd64", b"v3-bytes")
+
+    assert client.get("/api/v1/downloads/zerostrike/v1.0.0/linux-amd64").status_code == 404
+    assert client.get("/api/v1/downloads/zerostrike/v2.0.0/linux-amd64").status_code == 200
+    assert client.get("/api/v1/downloads/zerostrike/v3.0.0/linux-amd64").status_code == 200
+
+
 def test_publish_requires_admin(client):
     tokens = register_and_login(client, email="notadmin@zerostrike.dev")
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
