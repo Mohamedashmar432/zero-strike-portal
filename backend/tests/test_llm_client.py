@@ -339,6 +339,9 @@ def test_connection_fails_with_transient_error_after_retries(client, monkeypatch
         ("openrouter", "openai/gpt-4o", None, "openrouter/openai/gpt-4o", None),
         # groq: litellm's native provider prefix, key required, no base_url needed.
         ("groq", "llama-3.3-70b-versatile", None, "groq/llama-3.3-70b-versatile", None),
+        # gemini: litellm's native provider prefix (Google AI Studio), key required, no base_url.
+        ("gemini", "gemini-2.5-flash", None, "gemini/gemini-2.5-flash", None),
+        ("gemini", "gemini/gemini-2.5-flash", None, "gemini/gemini-2.5-flash", None),
         # already-prefixed by the admin themselves -- must not be double-prefixed.
         ("nvidia_nim", "nvidia_nim/meta/llama-3.1-70b-instruct", None,
          "nvidia_nim/meta/llama-3.1-70b-instruct", None),
@@ -379,6 +382,7 @@ def test_resolve_model_and_base(provider, model_in, base_in, model_out, base_out
         ("commandcode", None, None),
         ("anthropic", None, None),
         ("nvidia_nim", None, None),
+        ("gemini", None, None),
         # an explicitly supplied key is always passed through untouched.
         ("lmstudio", "sk-real", "sk-real"),
         ("openai", "sk-real", "sk-real"),
@@ -427,6 +431,28 @@ def test_connection_prefixes_model_for_nvidia_nim(client, monkeypatch):
             model_name="kimi-k2.6",
             api_key="test-key",
             base_url="https://integrate.api.nvidia.com/v1",
+        )
+
+    asyncio.run(run())
+
+
+def test_connection_prefixes_model_for_gemini(client, monkeypatch):
+    """Same shape as the nvidia_nim regression above: provider=gemini + a bare model name
+    must reach litellm as gemini/<model>, not unprefixed."""
+
+    async def fake_acompletion(**kwargs):
+        assert kwargs["model"] == "gemini/gemini-2.5-flash"
+        assert "api_base" not in kwargs
+        return _FakeResponse("pong")
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        await llm_client.test_connection(
+            provider="gemini",
+            model_name="gemini-2.5-flash",
+            api_key="test-key",
+            base_url=None,
         )
 
     asyncio.run(run())

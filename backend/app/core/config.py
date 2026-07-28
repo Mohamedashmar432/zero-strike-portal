@@ -86,6 +86,7 @@ class Settings(BaseSettings):
         "groq",
         "kimi",
         "nvidia_nim",
+        "gemini",
     }
 
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).

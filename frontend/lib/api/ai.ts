@@ -15,7 +15,8 @@ export type AiProvider =
   | "openrouter"
   | "custom"
   | "commandcode"
-  | "groq";
+  | "groq"
+  | "gemini";
 
 export type AiStatus = { enabled: boolean };
 
