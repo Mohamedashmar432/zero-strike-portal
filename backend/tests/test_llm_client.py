@@ -521,3 +521,115 @@ def test_connection_never_records_usage(client, monkeypatch):
         assert reloaded.total_requests == 0  # test pings never count toward usage totals
 
     asyncio.run(run())
+
+
+# --- provider failover -----------------------------------------------------------------------
+#
+# Free tiers hit quotas routinely (observed live: Gemini free tier is 20 requests/DAY), which took
+# the whole AI feature down while other configured keys sat idle. On a transient failure the call
+# now walks the remaining ready providers.
+
+
+async def _create_second_config(name="Secondary", provider="groq", model_name="llama-3.3-70b"):
+    cfg = await ai_provider_config_service.create_config(
+        name=name, provider=provider, model_name=model_name, base_url=None,
+        temperature=0.0, api_key="sk-second", created_by=None,
+    )
+    # create_config auto-activates the first config only; make sure this one is a non-active fallback.
+    if cfg.is_active:
+        cfg.is_active = False
+        await cfg.save()
+    return cfg
+
+
+def test_rate_limited_provider_fails_over_to_the_next_ready_provider(client, monkeypatch):
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+    seen: list[str] = []
+
+    async def fake_acompletion(**kwargs):
+        seen.append(kwargs["model"])
+        if "gpt-4o" in kwargs["model"]:
+            raise litellm.RateLimitError(message="quota exceeded", llm_provider="openai", model="gpt-4o")
+        return _FakeResponse('{"ok": true}')
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        primary = await _create_active_config()
+        fallback = await _create_second_config()
+        result = await llm_client.get_completion([{"role": "user", "content": "hi"}])
+        assert result == {"ok": True}
+        # 3 exhausted attempts on the primary, then the fallback served it.
+        assert seen.count("gpt-4o") == 3
+        assert any("llama-3.3-70b" in m for m in seen)
+
+        # Usage is attributed to whoever actually served the call.
+        assert (await AIProviderConfig.get(primary.id)).total_failed_requests == 1
+        reloaded_fallback = await AIProviderConfig.get(fallback.id)
+        assert reloaded_fallback.total_requests == 1
+        assert reloaded_fallback.total_failed_requests == 0
+
+    asyncio.run(run())
+
+
+def test_failover_gives_up_with_a_transient_error_when_every_provider_is_exhausted(client, monkeypatch):
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+
+    async def fake_acompletion(**kwargs):
+        raise litellm.RateLimitError(message="quota exceeded", llm_provider="x", model=kwargs["model"])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        await _create_active_config()
+        await _create_second_config()
+        with pytest.raises(llm_client.LLMTransientError):
+            await llm_client.get_completion([{"role": "user", "content": "hi"}])
+
+    asyncio.run(run())
+
+
+def test_permanent_errors_do_not_fail_over(client, monkeypatch):
+    """A bad key or malformed request fails identically everywhere — failing over would mask a
+    misconfiguration the admin needs to see, and would spend a second provider's quota to do it."""
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+    seen: list[str] = []
+
+    async def fake_acompletion(**kwargs):
+        seen.append(kwargs["model"])
+        raise litellm.AuthenticationError(message="bad key", llm_provider="openai", model="gpt-4o")
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        await _create_active_config()
+        await _create_second_config()
+        with pytest.raises(llm_client.LLMPermanentError):
+            await llm_client.get_completion([{"role": "user", "content": "hi"}])
+        assert len(seen) == 1, "no retry, and no failover, on a permanent error"
+
+    asyncio.run(run())
+
+
+def test_tool_failover_skips_providers_that_are_not_tool_capable(client, monkeypatch):
+    """Handing an agent turn to a provider that ignores `tools` returns prose and burns the loop's
+    invalid-step budget, so the tool path only ever falls over to tool-capable providers."""
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+    seen: list[str] = []
+
+    async def fake_acompletion(**kwargs):
+        seen.append(kwargs["model"])
+        raise litellm.RateLimitError(message="quota", llm_provider="x", model=kwargs["model"])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        await _create_active_config()  # openai — tool-capable
+        await _create_second_config(name="Local", provider="lmstudio", model_name="tiny-4b")
+        with pytest.raises(llm_client.LLMTransientError):
+            await llm_client.get_tool_completion(
+                [{"role": "user", "content": "hi"}], tools=[{"type": "function"}]
+            )
+        assert all("tiny-4b" not in m for m in seen), "lmstudio is not tool-capable; must be skipped"
+
+    asyncio.run(run())

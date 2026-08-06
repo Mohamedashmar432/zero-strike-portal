@@ -6,7 +6,14 @@ from pathlib import Path
 from app.models.finding import Finding
 from app.models.project import Project
 from app.models.scan import Scan
-from app.schemas.report import GoFindingIn, GoLocationIn, GoReportIn, GoStatsIn
+from app.schemas.report import (
+    GoConfigIn,
+    GoDependencyIn,
+    GoFindingIn,
+    GoLocationIn,
+    GoReportIn,
+    GoStatsIn,
+)
 from app.services import project_stats_service as stats_svc
 from app.services import report_ingestion_service as ingest_svc
 
@@ -267,3 +274,72 @@ def test_reconcile_backfills_preexisting_findings_and_is_idempotent(client):
         assert await stats_svc.reconcile_project_finding_counts() == 0  # idempotent
 
     asyncio.run(run())
+
+
+def test_dependency_manifest_and_config_file_are_relativized_like_location(client):
+    """Regression: location.file was normalized but dependency.manifest and config.config_file were
+    not, so the SAME file appeared repo-relative in one field and as an absolute server temp path in
+    the others — leaking the clone workdir into API responses, the dependency picker, and the
+    generated remediation brief."""
+    root = "/tmp/zs-clones/abc"
+    dep_finding = GoFindingIn(
+        message="vulnerable dep",
+        kind="sca",
+        location=GoLocationIn(file=f"{root}/requirements.txt"),
+        dependency=GoDependencyIn(
+            package="Flask", installed_version="0.12.2", fixed_version="0.12.3",
+            manifest=f"{root}/requirements.txt",
+        ),
+    )
+    mapped = ingest_svc._map_finding("s1", "p1", dep_finding, root_path=root)
+    assert mapped.location.file == "requirements.txt"
+    assert mapped.dependency.manifest == "requirements.txt"
+
+    cfg_finding = GoFindingIn(
+        message="missing helmet",
+        kind="config",
+        location=GoLocationIn(file=f"{root}/server.js"),
+        config=GoConfigIn(framework="express", config_file=f"{root}/server.js", key="helmet"),
+    )
+    mapped_cfg = ingest_svc._map_finding("s1", "p1", cfg_finding, root_path=root)
+    assert mapped_cfg.config.config_file == "server.js"
+
+
+def test_absent_manifest_and_config_file_stay_none(client):
+    """Normalizing must not turn a missing value into an empty string."""
+    f = GoFindingIn(
+        message="dep", kind="sca", location=GoLocationIn(file="requirements.txt"),
+        dependency=GoDependencyIn(package="Flask", fixed_version="1.0"),
+        config=GoConfigIn(framework="express"),
+    )
+    mapped = ingest_svc._map_finding("s1", "p1", f, root_path="/tmp/zs-clones/abc")
+    assert mapped.dependency.manifest is None
+    assert mapped.config.config_file is None
+
+
+def test_absolute_paths_are_scrubbed_from_scanner_free_text(client):
+    """Regression: some rules interpolate the absolute file path into their message, e.g.
+    "Express app in C:\...\zs-clones\zs-clone-ab12\server.js calls .listen() ...". Normalizing
+    only the structured path fields left the server's temp directory visible in the findings list,
+    the remediation brief, the PR body, and the LLM prompt."""
+    root = r"C:\Temp\zs-clones\zs-clone-ab12"
+    f = GoFindingIn(
+        message=rf"Express app in {root}\server.js calls .listen() with no helmet()",
+        rationale=rf"see {root}/server.js",
+        remediation=rf"edit {root}\server.js",
+        location=GoLocationIn(file=rf"{root}\server.js"),
+    )
+    mapped = ingest_svc._map_finding("s1", "p1", f, root_path=root)
+    for text in (mapped.message, mapped.rationale, mapped.remediation):
+        assert "zs-clones" not in text
+        assert "Temp" not in text
+    # The sentence stays readable, with the path now repo-relative.
+    assert mapped.message == "Express app in server.js calls .listen() with no helmet()"
+    assert mapped.location.file == "server.js"
+
+
+def test_scrub_leaves_text_alone_when_there_is_no_root(client):
+    assert ingest_svc.scrub_root_from_text("plain message", None) == "plain message"
+    assert ingest_svc.scrub_root_from_text(None, "/tmp/x") is None
+    # A relative root (CLI uploads) must not mangle ordinary words.
+    assert ingest_svc.scrub_root_from_text("app/db.py is fine", ".") == "app/db.py is fine"

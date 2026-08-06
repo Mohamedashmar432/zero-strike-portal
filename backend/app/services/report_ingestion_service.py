@@ -56,6 +56,32 @@ def normalize_finding_path(file: str, root_path: str | None) -> str:
     return file
 
 
+def scrub_root_from_text(text: str | None, root_path: str | None) -> str | None:
+    """Strip the clone-workdir prefix out of scanner *free text*, not just path fields.
+
+    Some rules interpolate the absolute file path into their human-readable message, e.g.
+    "Express app in C:\\...\\zs-clones\\zs-clone-ab12\\server.js calls .listen() ...". Normalizing
+    only the structured path fields left those strings intact, so the server's temp directory
+    surfaced in the findings list, the generated remediation brief, the PR body, and the LLM prompt.
+
+    Replaces the root prefix in place (keeping the rest of the sentence readable) for both separator
+    styles, since the report echoes the exact invocation string back — the same assumption
+    normalize_finding_path relies on.
+    """
+    if not text or not root_path:
+        return text
+    # Only ever scrub a genuine absolute clone root. A CLI/CI upload passes a relative root such as
+    # "." — substring-replacing that would corrupt ordinary text ("app/db.py" -> "app/dbpy").
+    norm_root = root_path.replace("\\", "/").rstrip("/")
+    is_absolute = norm_root.startswith("/") or (len(norm_root) > 1 and norm_root[1] == ":")
+    if not is_absolute:
+        return text
+    out = text
+    for variant in {norm_root, norm_root.replace("/", "\\")}:
+        out = out.replace(variant + "/", "").replace(variant + "\\", "").replace(variant, "")
+    return out
+
+
 def _location(loc: GoLocationIn, root_path: str | None = None) -> LocationEmbedded:
     return LocationEmbedded(
         file=normalize_finding_path(loc.file or "", root_path),
@@ -88,7 +114,9 @@ def _map_finding(
         confidence=f.confidence,
         priority_score=priority_score,
         priority_tier=priority_tier,
-        message=f.message or f.rule_name or "(no message)",
+        # Free text can carry the absolute clone path interpolated by a rule — scrub it like the
+        # structured path fields, so the workdir never reaches the UI, a brief, or a prompt.
+        message=scrub_root_from_text(f.message, root_path) or f.rule_name or "(no message)",
         location=_location(f.location, root_path),
         language=f.language or None,
         evidence=[
@@ -113,19 +141,28 @@ def _map_finding(
                 vulnerable_range=f.dependency.vulnerable_range,
                 fixed_version=f.dependency.fixed_version,
                 advisory_ids=f.dependency.advisory_ids,
-                manifest=f.dependency.manifest,
+                # Normalized like location.file: the scanner echoes back the absolute clone-workdir
+                # prefix here too, and leaving it raw leaked the server's temp path into the API, the
+                # UI's dependency picker, and the generated remediation brief — while the SAME file
+                # showed as repo-relative under location.file.
+                manifest=normalize_finding_path(f.dependency.manifest or "", root_path) or None,
                 direct=f.dependency.direct,
             )
             if f.dependency
             else None
         ),
         config=(
-            ConfigEmbedded(framework=f.config.framework, config_file=f.config.config_file, key=f.config.key)
+            ConfigEmbedded(
+                framework=f.config.framework,
+                # Same absolute-prefix leak as dependency.manifest above.
+                config_file=normalize_finding_path(f.config.config_file or "", root_path) or None,
+                key=f.config.key,
+            )
             if f.config
             else None
         ),
-        rationale=f.rationale,
-        remediation=f.remediation,
+        rationale=scrub_root_from_text(f.rationale, root_path),
+        remediation=scrub_root_from_text(f.remediation, root_path),
         taint_context=(
             TaintContextEmbedded(
                 source_var=f.taint_context.source_var,

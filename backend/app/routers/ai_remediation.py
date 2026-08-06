@@ -3,7 +3,6 @@ async-job envelope + app-level active-job dedup). Generation requires a tool-cap
 (409 otherwise). The approve/apply write endpoint is added alongside the apply service.
 """
 
-import difflib
 import uuid
 from datetime import datetime, timezone
 
@@ -48,8 +47,10 @@ from app.services import (
     ai_remediation_queue_service,
     ai_remediation_service,
     audit_service,
+    fix_pattern_service,
     llm_client,
     project_service,
+    remediation_brief_service,
     remediation_project_doc_service,
     remediation_settings_service,
     scan_service,
@@ -97,15 +98,9 @@ async def _active_job(scope_key: str) -> RemediationJob | None:
     ).first_or_none()
 
 
-def _unified_diff(original: str | None, patched: str | None, file_path: str | None) -> str | None:
-    if original is None or patched is None:
-        return None
-    fp = file_path or "file"
-    diff = difflib.unified_diff(
-        original.splitlines(), patched.splitlines(), fromfile=f"a/{fp}", tofile=f"b/{fp}", lineterm=""
-    )
-    text = "\n".join(diff)
-    return text or None
+# Single implementation, shared with the brief renderer, so the diff shown in the UI, the one the
+# /patch endpoint serves, and the one embedded in a brief are byte-identical.
+_unified_diff = remediation_brief_service.unified_diff
 
 
 def _to_out(p: AIFixProposal, fmap: dict[str, Finding]) -> FixProposalOut:
@@ -135,6 +130,8 @@ def _to_out(p: AIFixProposal, fmap: dict[str, Finding]) -> FixProposalOut:
         branch_name=p.branch_name,
         pr_url=p.pr_url,
         pr_number=p.pr_number,
+        triage=p.triage,
+        critique=p.critique,
         validation=p.validation,
         created_at=p.created_at,
         updated_at=p.updated_at,
@@ -154,7 +151,7 @@ def _risk_rating(outs: list[FixProposalOut]) -> str:
 
 
 def _summary(outs: list[FixProposalOut], total_findings: int, threshold: float) -> AutoFixSummary:
-    s = AutoFixSummary(total_findings=total_findings)
+    s = AutoFixSummary(total_findings=total_findings, confidence_threshold=threshold)
     for o in outs:
         if o.can_fix:
             s.auto_fixable += 1
@@ -323,6 +320,25 @@ async def _project_list_item(scan: Scan) -> ProjectAutoFixScanItem:
     )
 
 
+@router.get("/scans/{scan_id}/auto-fix/brief")
+async def download_scan_brief(scan_id: str, user: User = Depends(get_current_user)):
+    """The remediation brief for this scan as Markdown, rendered deterministically from MongoDB.
+
+    Unlike /auto-fix/overview (an LLM summary of the cloned repo), this is a pure function of the
+    stored documents: regenerating it costs nothing and always produces the same bytes, so it is
+    rendered on request rather than cached.
+    """
+    await _get_scan_or_404_and_authorize(scan_id, user)
+    markdown = await remediation_brief_service.render_scan_brief(scan_id)
+    if markdown is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="zerostrike-remediation-{scan_id}.md"'},
+    )
+
+
 @router.get("/scans/{scan_id}/auto-fix/overview", response_model=ProjectOverviewOut)
 async def get_scan_auto_fix_overview(scan_id: str, user: User = Depends(get_current_user)):
     """The AI-generated project remediation overview (markdown) for this scan's repo, if the propose
@@ -469,6 +485,10 @@ async def dismiss_fix_proposal(
         metadata={"finding_id": proposal.finding_id},
     )
     finding = await Finding.get(proposal.finding_id)
+    # Negative signal for the fix memory. Recorded for analytics only -- dismissed patterns are
+    # never read back into a prompt (see fix_pattern_service.recent_accepted).
+    if proposal.can_fix:
+        await fix_pattern_service.record(proposal, finding, "dismissed")
     return _to_out(proposal, {proposal.finding_id: finding} if finding else {})
 
 
@@ -608,6 +628,14 @@ async def ask_fix_proposal(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "No AI provider is configured. Configure one in Settings → AI Provider.",
+        )
+    except llm_client.LLMTransientError:
+        # Reached only after llm_client retried AND failed over across every configured provider —
+        # so name that, and avoid promising a quick retry (free-tier quotas are often per-day).
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Every configured AI provider is rate-limited or unavailable right now. Free-tier "
+            "quotas can be per-day — check Settings → AI Provider, or add another provider.",
         )
     except llm_client.LLMError:
         raise HTTPException(

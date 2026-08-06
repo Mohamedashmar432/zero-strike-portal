@@ -25,6 +25,14 @@ RemediationJobKind = Literal["propose", "apply"]
 RemediationJobStatus = Literal["queued", "running", "completed", "failed"]
 CredentialSource = Literal["pat", "oauth"]
 
+# Observability-only sub-phase of status="running" (see RemediationJob.stage).
+# propose: cloning -> triage -> proposing -> critiquing -> finalizing
+# apply:   cloning -> baseline_scan -> patching -> rescan -> pushing -> opening_pr
+RemediationJobStage = Literal[
+    "cloning", "triage", "proposing", "critiquing", "finalizing",
+    "baseline_scan", "patching", "rescan", "pushing", "opening_pr",
+]
+
 
 class RemediationJob(Document):
     kind: RemediationJobKind
@@ -41,6 +49,14 @@ class RemediationJob(Document):
     scope_key: str  # dedup key, e.g. f"{scan_id}:{kind}:{proposal_id or hash(finding_ids)}"
 
     status: RemediationJobStatus = "queued"
+    # Coarse phase within status="running", for observability only -- app.core.job_queue claims and
+    # reaps on `status`, so that stays exactly as it was. Advisory: never gate logic on `stage`.
+    #
+    # Deliberately job-level and coarse. A propose job handles up to max_findings_per_job findings,
+    # so a per-finding stage would be lying about which finding it refers to -- per-finding progress
+    # is progress_completed/progress_total, and per-finding stage *artifacts* live on the
+    # AIFixProposal (triage/critique/validation).
+    stage: RemediationJobStage | None = None
     retry_count: int = 0
     # propose=2 (an LLM blip is safe to retry); apply=1 (a partially-applied write must NOT auto-retry).
     max_attempts: int = 2

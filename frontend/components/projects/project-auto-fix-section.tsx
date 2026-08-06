@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Wand2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Download, MessageSquare, Wand2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/auto-fix/activity-timeline";
+import { AutoFixWorkspace } from "@/components/auto-fix/auto-fix-workspace";
 import { CommentsDrawer } from "@/components/auto-fix/comments-drawer";
-import { FixProposalCard } from "@/components/auto-fix/fix-proposal-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatCard } from "@/components/common/stat-card";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
@@ -15,12 +16,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  type AutoFixRiskRating,
+  downloadScanBrief,
   getScanAutoFix,
   getScanCommentSummary,
+  saveBlob,
   triggerScanAutoFix,
-  type AutoFixRiskRating,
 } from "@/lib/api/auto-fix";
 import { ApiError } from "@/lib/api/client";
+import { refetchWhileAutoFixActive } from "@/lib/api/polling";
 import { queryKeys } from "@/lib/api/query-keys";
 
 const RISK_TONE: Record<AutoFixRiskRating, string> = {
@@ -40,8 +44,6 @@ function RiskBadge({ rating }: { rating: AutoFixRiskRating }) {
   );
 }
 
-const ACTIVE = new Set(["queued", "in_progress"]);
-
 export function ProjectAutoFixSection({
   scanId,
   canApprove,
@@ -52,28 +54,28 @@ export function ProjectAutoFixSection({
   focusFindingId?: string | null;
 }) {
   const qc = useQueryClient();
+  const router = useRouter();
+  const params = useSearchParams();
   const key = queryKeys.ai.autofix.scan(scanId);
 
   const { data, isLoading } = useQuery({
     queryKey: key,
     queryFn: () => getScanAutoFix(scanId),
-    // Poll while the propose job is active OR any proposal is mid-apply (approved/applying), so the
-    // page reflects a PR being opened without a manual refresh.
-    refetchInterval: (query) => {
-      const d = query.state.data;
-      const active = ACTIVE.has(d?.status ?? "");
-      const applying = (d?.insight?.proposals ?? []).some(
-        (p) => p.review_state === "approved" || p.review_state === "applying"
-      );
-      if (!active && !applying) return false;
-      return (query.state.dataUpdateCount ?? 0) < 12 ? 5000 : 10000;
-    },
+    refetchInterval: refetchWhileAutoFixActive(),
   });
 
   const trigger = useMutation({
     mutationFn: () => triggerScanAutoFix(scanId),
     onSuccess: (job) => qc.setQueryData(key, job),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed to start Auto-Fix"),
+  });
+
+  const brief = useMutation({
+    mutationFn: async () => {
+      const blob = await downloadScanBrief(scanId);
+      saveBlob(blob, `zerostrike-remediation-${scanId}.md`);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not generate the brief"),
   });
 
   const { data: commentSummary } = useQuery({
@@ -87,30 +89,21 @@ export function ProjectAutoFixSection({
   const status = data?.status;
   const active = status === "queued" || status === "in_progress";
 
-  // Collapsible cards. Expansion is DERIVED (no setState-in-effect): a card is open if the user
-  // explicitly toggled it, else if it's the auto-open target (deep-linked finding, else the first).
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const autoOpenId = focusFindingId ?? proposals[0]?.finding_id ?? null;
-  const isExpanded = (id: string) => (id in overrides ? overrides[id] : id === autoOpenId);
-  const toggle = (id: string) =>
-    setOverrides((o) => ({ ...o, [id]: !(id in o ? o[id] : id === autoOpenId) }));
-  const expandAndScroll = (findingId: string) => {
-    setOverrides((o) => ({ ...o, [findingId]: true }));
-    requestAnimationFrame(() =>
-      document.getElementById(`fix-${findingId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
-    );
-  };
-
-  // Deep-link: scroll to the focused finding once it renders (it's auto-expanded via autoOpenId).
-  useEffect(() => {
-    if (!focusFindingId) return;
-    requestAnimationFrame(() =>
-      document.getElementById(`fix-${focusFindingId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
-    );
-  }, [focusFindingId]);
-
-  const [drawer, setDrawer] = useState<{ open: boolean; findingId: string | null }>({ open: false, findingId: null });
+  const [drawer, setDrawer] = useState<{ open: boolean; findingId: string | null }>({
+    open: false,
+    findingId: null,
+  });
   const openComments = (findingId: string | null) => setDrawer({ open: true, findingId });
+
+  // The workspace reads its selection from ?finding=, so "jump to this finding" from the comments
+  // drawer means updating the query param through the router — a raw history.replaceState would not
+  // notify useSearchParams, and the detail pane would silently not move.
+  const selectFinding = (findingId: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("finding", findingId);
+    router.replace(`?${next.toString()}`, { scroll: false });
+    setDrawer({ open: true, findingId });
+  };
 
   return (
     <div className="space-y-6">
@@ -138,6 +131,17 @@ export function ProjectAutoFixSection({
               </span>
             )}
           </Button>
+          {proposals.length > 0 && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => brief.mutate()}
+              disabled={brief.isPending}
+              title="Download remediation brief (Markdown)"
+            >
+              <Download />
+            </Button>
+          )}
           <AiStatusBadge
             kind="autofix"
             status={status}
@@ -177,27 +181,32 @@ export function ProjectAutoFixSection({
       )}
 
       {isLoading || (active && !proposals.length) ? (
-        <div className="space-y-3">
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-20 w-full" />
+        <div className="grid gap-4 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+          <Skeleton className="h-64 w-full" />
         </div>
       ) : proposals.length ? (
-        <div className="space-y-3">
-          {proposals.map((p) => (
-            <FixProposalCard
-              key={p.id}
-              proposal={p}
-              canApprove={canApprove}
-              invalidateKey={key}
-              commentCount={commentCounts.get(p.finding_id) ?? 0}
-              expanded={isExpanded(p.finding_id)}
-              onToggle={() => toggle(p.finding_id)}
-              onOpenComments={openComments}
-            />
-          ))}
-        </div>
+        <AutoFixWorkspace
+          scanId={scanId}
+          proposals={proposals}
+          canApprove={canApprove}
+          invalidateKey={key}
+          commentCounts={commentCounts}
+          onOpenComments={openComments}
+          focusFindingId={focusFindingId}
+          threshold={summary?.confidence_threshold}
+        />
       ) : status === "completed" ? (
-        <EmptyState icon={Wand2} title="No fixes to review" description="No auto-fixable findings were produced for this scan." />
+        <EmptyState
+          icon={Wand2}
+          title="No fixes to review"
+          description="No auto-fixable findings were produced for this scan."
+        />
       ) : (
         <EmptyState
           icon={Wand2}
@@ -213,7 +222,7 @@ export function ProjectAutoFixSection({
         proposals={proposals}
         commentCounts={commentCounts}
         selectedId={drawer.findingId}
-        onJump={expandAndScroll}
+        onJump={selectFinding}
       />
     </div>
   );

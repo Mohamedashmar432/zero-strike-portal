@@ -29,6 +29,30 @@ export type FixValidation = {
   ran_at?: string;
 };
 
+// Deterministic pre-LLM triage (backend remediation_triage). eligible=false means no agent ever
+// ran — `reason` is the actionable explanation and `strategy` says what a human should do instead.
+export type FixTriage = {
+  eligible?: boolean;
+  reason?: string | null;
+  strategy?: "code-patch" | "dependency-bump" | "rotate-secret" | "none";
+};
+
+// Post-draft AI review of the patch (backend remediation_critic). `skipped` is set instead of a
+// verdict when the critic was disabled or unavailable — render that as "not reviewed", never as a pass.
+export type FixCritique = {
+  skipped?: string;
+  verdict?: "pass" | "revise" | "reject";
+  resolves_finding?: boolean | null;
+  introduces_risk?: boolean | null;
+  breaks_callers?: boolean | null;
+  style_consistent?: boolean | null;
+  simpler_fix_available?: boolean | null;
+  adjusted_confidence?: number | null;
+  issues?: string[];
+  reasoning?: string | null;
+  redrafted?: boolean;
+};
+
 // SCA version-bump picker context (scanner data only). Present on SCA-finding proposals.
 export type DependencyUpdate = {
   package: string | null;
@@ -67,6 +91,10 @@ export type AiFixProposal = {
   branch_name: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  // Per-stage artifacts, so the UI can explain *why* a proposal is in its review_state instead of
+  // just showing the badge. Each is null until its stage ran.
+  triage: FixTriage | null;
+  critique: FixCritique | null;
   validation: FixValidation | null;
   created_at: string;
   updated_at: string;
@@ -89,6 +117,9 @@ export type AutoFixSummary = {
   needs_review_on_fix: number; // AI proposed a fix but a human should review it (low confidence)
   cannot_fix: number; // AI couldn't produce a safe fix — manual remediation
   risk_rating: AutoFixRiskRating;
+  // The effective bar the server used for the buckets above. Use this rather than fetching
+  // /remediation-settings (admin-only — see FALLBACK_THRESHOLD in components/auto-fix/fix-actions).
+  confidence_threshold: number;
 };
 
 export type AutoFixInsight = { summary: AutoFixSummary; proposals: AiFixProposal[] };
@@ -225,6 +256,24 @@ export function dismissFixProposal(proposalId: string, body: { reason?: string }
 
 export function downloadFixPatch(proposalId: string) {
   return apiFetchBlob(`/fix-proposals/${proposalId}/patch`);
+}
+
+/**
+ * The scan's remediation brief as Markdown, rendered deterministically from MongoDB. Distinct from
+ * getScanAutoFixOverview (an LLM summary of the repo) — this one is a pure function of stored data.
+ */
+export function downloadScanBrief(scanId: string) {
+  return apiFetchBlob(`/scans/${scanId}/auto-fix/brief`);
+}
+
+/** Save a fetched Blob under `filename`. Shared by the patch + brief download buttons. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // --- per-fix Ask-AI Q&A + "change it" revise ---

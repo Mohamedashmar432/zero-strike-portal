@@ -25,8 +25,10 @@ from app.models.user import User
 from app.services import (
     audit_service,
     connection_service,
+    fix_pattern_service,
     git_workspace,
     project_repo_service,
+    remediation_brief_service,
     remediation_settings_service,
 )
 from app.services.repo_write import RepoWriteError
@@ -266,11 +268,19 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
         )
 
         title = f"zero-strike/security fix: {rule}"
-        body = (
-            f"AI-generated fix (confidence {proposal.confidence_score:.0f}/100), reviewed and approved by a "
-            f"human before this PR was opened.\n\n**Finding:** {rule}\n**File:** `{proposal.file_path}`\n\n"
-            f"{proposal.explanation or ''}\n\n_Validated: the ZeroStrike scanner confirms the finding is "
-            f"resolved and no new medium+ findings were introduced. Review required before merge._"
+        # Same renderer as the downloadable remediation brief (one definition of "how we describe a
+        # fix"), minus the diff -- the PR already *is* the diff. proposal.validation is set above,
+        # so the re-scan evidence lands in the description a reviewer reads first.
+        body = "\n".join(
+            [
+                "AI-generated fix, reviewed and approved by a human before this PR was opened.",
+                "",
+                remediation_brief_service.render_proposal_section(
+                    proposal, finding, include_diff=False, heading_level=2
+                ),
+                "",
+                "_Review required before merge._",
+            ]
         )
         try:
             pr = await _open_pr(repo, token, rest_scheme, branch_name, base, title, body)
@@ -292,6 +302,10 @@ async def _apply(job: RemediationJob, proposal: AIFixProposal) -> None:
             target_type="ai_fix_proposal", target_id=str(proposal.id),
             metadata={"pr_url": pr["pr_url"], "pr_number": pr["pr_number"], "branch": branch_name, "base": base, "credential": source},
         )
+        # Remember it: this patch cleared the scanner re-scan gate AND a human approved it, so it's
+        # the strongest example available for the next occurrence of this rule in this project.
+        # Best-effort by contract -- fix_pattern_service swallows its own errors.
+        await fix_pattern_service.record(proposal, finding, "pr_open")
     except _ManualReview:
         raise
     except Exception as exc:

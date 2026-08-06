@@ -79,6 +79,10 @@ class FixProposalOut(BaseModel):
     branch_name: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
+    # Per-stage artifacts, so the UI can explain *why* a proposal is in its review_state:
+    # triage (deterministic, pre-LLM), critique (post-draft review), validation (re-scan gate).
+    triage: dict | None = None
+    critique: dict | None = None
     validation: dict | None = None
     created_at: datetime
     updated_at: datetime
@@ -103,6 +107,11 @@ class AutoFixSummary(BaseModel):
     needs_review_on_fix: int = 0  # can_fix but confidence below threshold — a human should review the fix
     cannot_fix: int = 0  # can_fix == False — AI couldn't produce a safe fix, needs manual remediation
     risk_rating: AutoFixRiskRating = "none"
+    # The effective threshold used for the buckets above, echoed so the UI can label them and warn on
+    # a below-bar approval WITHOUT calling /remediation-settings (admin-only — a plain project owner
+    # can approve a fix but cannot read that endpoint). Sending it here also means the client can
+    # never disagree with the server about where the bar is.
+    confidence_threshold: float = 0.0
 
 
 class AutoFixInsight(BaseModel):

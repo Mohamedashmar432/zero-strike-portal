@@ -28,11 +28,15 @@ from app.services import (
     ai_remediation_agent,
     audit_service,
     connection_service,
+    fix_pattern_service,
     git_workspace,
     llm_client,
     project_repo_service,
+    remediation_critic,
     remediation_project_doc_service,
     remediation_settings_service,
+    remediation_tools,
+    remediation_triage,
     secret_redaction,
 )
 from app.services.remediation_tools import SubmitFixProposalArgs, ToolContext
@@ -48,7 +52,15 @@ def _user_facing_failure_message(exc: Exception) -> str:
     if isinstance(exc, llm_client.LLMNotConfiguredError):
         return "No AI provider is configured. Configure one in Settings -> AI Provider."
     if isinstance(exc, llm_client.LLMTransientError):
-        return "The AI provider is temporarily rate-limited or unavailable. Try again in a minute."
+        # llm_client already retried and then failed over across every configured provider, so this
+        # is not a single provider hiccup. Say so, and don't promise "a minute" — free-tier quotas
+        # are commonly per-DAY (observed: Gemini free tier, 20 requests/day), where waiting a minute
+        # is useless advice and adding another provider is the actual fix.
+        return (
+            "Every configured AI provider is rate-limited or unavailable. Free-tier quotas can be "
+            "per-day, so this may not clear for a while — check Settings → AI Provider, or add "
+            "another provider."
+        )
     if isinstance(exc, llm_client.LLMMalformedResponseError):
         return "The AI provider returned a response we couldn't understand. Try again, or switch providers."
     if isinstance(exc, llm_client.LLMPermanentError):
@@ -61,7 +73,12 @@ def _r(text: str | None) -> str | None:
     return secret_redaction.redact(text) if text else text
 
 
-def _issue_bundle(finding: Finding, redacted_snippet: str | None, overview_md: str | None = None) -> dict:
+def _issue_bundle(
+    finding: Finding,
+    redacted_snippet: str | None,
+    overview_md: str | None = None,
+    prior_fixes: list[dict] | None = None,
+) -> dict:
     loc = finding.location
     taint = None
     if finding.taint_context:
@@ -88,9 +105,27 @@ def _issue_bundle(finding: Finding, redacted_snippet: str | None, overview_md: s
         "rationale": _r(finding.rationale),
         "scanner_remediation": _r(finding.remediation),
     }
+    # SCA findings: the agent needs the scanner-reported target version to bump to. This used to be
+    # computed only for the UI's version picker and never handed to the agent, so on every dependency
+    # finding the model reported "no fixed version was specified by the scanner" and declined —
+    # meaning SCA auto-fix could never succeed. Scanner data only; no registry calls.
+    dep = _dependency_update(finding)
+    if dep:
+        bundle["dependency_update"] = {
+            **dep,
+            "instruction": (
+                f"Bump {dep['package']} from {dep['current_version']} to "
+                f"{dep['recommended_version']} in {dep['manifest'] or loc.file}. "
+                "Edit only the manifest — do not change application code."
+            ),
+        }
     if overview_md:
         # Project map generated from this repo — context only (the agent reads it as data, not orders).
         bundle["project_overview"] = overview_md
+    if prior_fixes:
+        # Fixes for this same rule that already passed the re-scan gate AND a human review in this
+        # project. Untrusted repo code like everything else here — an example to follow, not orders.
+        bundle["previously_accepted_fixes_for_this_rule"] = prior_fixes
     return bundle
 
 
@@ -115,8 +150,28 @@ def _dependency_update(finding: Finding) -> dict | None:
         "current_version": dep.installed_version,
         "available_versions": available,
         "recommended_version": available[0],
-        "manifest": dep.manifest,
+        "manifest": _repo_relative_manifest(dep.manifest, finding),
     }
+
+
+def _repo_relative_manifest(manifest: str | None, finding: Finding) -> str | None:
+    """Keep the manifest repo-relative. Ingestion now normalizes it (report_ingestion_service), but
+    findings ingested before that fix still hold an absolute clone path like
+    `/tmp/zs-clones/<id>/requirements.txt` — which would leak the server's temp directory into the UI
+    and the PR body, and is a meaningless path to hand the agent. Heal it here rather than requiring
+    a rescan: the finding's own location.file is already relative and points at the same file for an
+    SCA finding."""
+    if not manifest:
+        return manifest
+    normalized = manifest.replace("\\", "/")
+    looks_absolute = normalized.startswith("/") or ":/" in normalized[:4]
+    if not looks_absolute:
+        return manifest
+    loc_file = (finding.location.file if finding.location else None) or ""
+    if loc_file and not loc_file.replace("\\", "/").startswith("/"):
+        return loc_file
+    # No relative fallback available: emit the basename rather than the full host path.
+    return normalized.rsplit("/", 1)[-1]
 
 
 def _redacted_snippet(finding: Finding) -> str | None:
@@ -129,66 +184,43 @@ def _redacted_snippet(finding: Finding) -> str | None:
     return secret_redaction.redact(snippet, known)
 
 
-async def _propose_for_finding(
+def _file_window(workdir: str | None, file_path: str | None, center_line: int | None) -> str | None:
+    """A bounded window of the real file around the finding, for the critic to judge the patch
+    against actual surrounding code. None when there's no clone or the path escapes it. Best-effort:
+    any read error just means the critic reviews without it."""
+    if not workdir or not file_path:
+        return None
+    target = remediation_tools._resolve_in_workdir(workdir, file_path)
+    if target is None or not target.is_file():
+        return None
+    try:
+        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    if center_line is None:
+        return "\n".join(lines[:_CRITIC_WINDOW * 2])
+    lo = max(0, center_line - 1 - _CRITIC_WINDOW)
+    return "\n".join(lines[lo : center_line - 1 + _CRITIC_WINDOW])
+
+
+_CRITIC_WINDOW = 60  # lines either side of the finding
+
+
+async def _persist_proposal(
     finding: Finding,
     job: RemediationJob,
     branch: str,
+    result: SubmitFixProposalArgs,
     provider: str | None,
     model: str | None,
-    revision_note: str | None = None,
-    workdir: str | None = None,
-    overview_md: str | None = None,
+    *,
+    triage: dict | None = None,
+    critique: dict | None = None,
 ) -> AIFixProposal:
-    redacted = _redacted_snippet(finding)
-    loc = finding.location
-    ctx = ToolContext(
-        provider=provider or "",
-        repo_full_name="",
-        branch=branch,
-        # Submit stays single-file (the flagged file); when a clone is available the READ tools may
-        # still explore the whole repo (dispatch reads the worktree, not just allowed_paths).
-        allowed_paths=[loc.file] if loc.file else [],
-        project_id=job.project_id,
-        scan_id=job.scan_id,
-        trace_id=job.trace_id,
-        finding_context={
-            "finding_id": str(finding.id),
-            "file_path": loc.file,
-            "language": finding.language,
-            "original_code": redacted or "",
-            "start_line": loc.start_line,
-            "end_line": loc.end_line,
-        },
-        workdir=workdir,
-    )
-    try:
-        result = await asyncio.wait_for(
-            ai_remediation_agent.run_agent(
-                _issue_bundle(finding, redacted, overview_md),
-                ctx,
-                ai_remediation_agent.budgets_from_settings(),
-                revision_note=revision_note,
-            ),
-            timeout=settings.remediation_agent_wall_clock_seconds,
-        )
-    except (asyncio.TimeoutError, llm_client.LLMError) as exc:
-        # Log the full raw error server-side (provider internals, request ids) but never surface
-        # that to the user -- a raw litellm/provider exception string can carry the provider's
-        # org id, nested JSON, and other internals that mean nothing to someone reviewing findings.
-        logger.warning("remediation agent failed for finding", finding_id=str(finding.id), error=str(exc))
-        result = SubmitFixProposalArgs(
-            finding_id=str(finding.id),
-            can_fix=False,
-            confidence_score=0.0,
-            file_path=loc.file or "",
-            explanation=_user_facing_failure_message(exc),
-            patch_scope="none",
-        )
-
+    """The single place a drafted (or triage-rejected) fix becomes an AIFixProposal. Idempotent
+    re-trigger: replaces any prior proposal for this finding in this scan."""
     review_state = "proposed" if result.can_fix else "manual_review"
     manual_reason = None if result.can_fix else (result.explanation or "Not safely auto-fixable.")
-
-    # Idempotent re-trigger: replace any prior proposal for this finding in this scan.
     await AIFixProposal.find(
         AIFixProposal.finding_id == str(finding.id), AIFixProposal.scan_id == job.scan_id
     ).delete()
@@ -213,9 +245,152 @@ async def _propose_for_finding(
         trace_id=job.trace_id,
         base_branch=branch,
         manual_review_reason=manual_reason,
+        triage=triage,
+        critique=critique,
     )
     await proposal.insert()
     return proposal
+
+
+async def _propose_for_finding(
+    finding: Finding,
+    job: RemediationJob,
+    branch: str,
+    provider: str | None,
+    model: str | None,
+    revision_note: str | None = None,
+    workdir: str | None = None,
+    overview_md: str | None = None,
+) -> AIFixProposal:
+    loc = finding.location
+
+    # Stage 1 -- deterministic triage. No LLM, no DB. When a finding provably can't yield an
+    # appliable patch, say so precisely instead of spending a full agent run to learn the same thing.
+    verdict = remediation_triage.triage(finding)
+    triage_artifact = {
+        "eligible": verdict.eligible,
+        "reason": verdict.reason,
+        "strategy": verdict.strategy,
+    }
+    if not verdict.eligible:
+        logger.info(
+            "finding skipped by triage",
+            finding_id=str(finding.id), strategy=verdict.strategy, file=loc.file if loc else None,
+        )
+        return await _persist_proposal(
+            finding, job, branch,
+            SubmitFixProposalArgs(
+                finding_id=str(finding.id),
+                can_fix=False,
+                confidence_score=0.0,
+                file_path=(loc.file if loc else "") or "",
+                explanation=verdict.reason or "Not safely auto-fixable.",
+                patch_scope="none",
+            ),
+            provider, model,
+            triage=triage_artifact,
+        )
+
+    redacted = _redacted_snippet(finding)
+    ctx = ToolContext(
+        provider=provider or "",
+        repo_full_name="",
+        branch=branch,
+        # Submit stays single-file (the flagged file); when a clone is available the READ tools may
+        # still explore the whole repo (dispatch reads the worktree, not just allowed_paths).
+        allowed_paths=[loc.file] if loc.file else [],
+        project_id=job.project_id,
+        scan_id=job.scan_id,
+        trace_id=job.trace_id,
+        finding_context={
+            "finding_id": str(finding.id),
+            "file_path": loc.file,
+            "language": finding.language,
+            "original_code": redacted or "",
+            "start_line": loc.start_line,
+            "end_line": loc.end_line,
+        },
+        workdir=workdir,
+    )
+    # Memory: how this rule was fixed and accepted before, in this project.
+    prior_fixes = await fix_pattern_service.recent_accepted(job.project_id, finding.rule_id)
+    bundle = _issue_bundle(finding, redacted, overview_md, prior_fixes)
+
+    async def _draft(note: str | None) -> SubmitFixProposalArgs:
+        """One bounded agent run. Never raises: a timeout/provider error becomes a can_fix=False
+        proposal so one difficult finding can't fail the job."""
+        try:
+            return await asyncio.wait_for(
+                ai_remediation_agent.run_agent(
+                    bundle, ctx, ai_remediation_agent.budgets_from_settings(), revision_note=note
+                ),
+                timeout=settings.remediation_agent_wall_clock_seconds,
+            )
+        except (asyncio.TimeoutError, llm_client.LLMError) as exc:
+            # Log the full raw error server-side (provider internals, request ids) but never surface
+            # that to the user -- a raw litellm/provider exception string can carry the provider's
+            # org id, nested JSON, and other internals that mean nothing to someone reviewing findings.
+            logger.warning("remediation agent failed for finding", finding_id=str(finding.id), error=str(exc))
+            return SubmitFixProposalArgs(
+                finding_id=str(finding.id),
+                can_fix=False,
+                confidence_score=0.0,
+                file_path=loc.file or "",
+                explanation=_user_facing_failure_message(exc),
+                patch_scope="none",
+            )
+
+    # Stage 2 -- draft.
+    result = await _draft(revision_note)
+
+    # Stage 3 -- critique. One LLM call that reviews the draft before a human spends attention on
+    # it. Entirely best-effort: critique() returns None on disabled/failed/not-applicable and the
+    # draft stands exactly as it would have pre-critic.
+    excerpt = _file_window(workdir, result.file_path or loc.file, loc.start_line)
+    critique_artifact: dict | None = None
+    verdict_obj = await remediation_critic.critique(
+        bundle, result, project_id=job.project_id, scan_id=job.scan_id, file_excerpt=excerpt
+    )
+    if verdict_obj is None:
+        # Distinguish the three reasons a critique didn't happen — an E2E run showed them collapsed
+        # into one string, which made the UI tell a reviewer "the patch is unreviewed, read it
+        # carefully" for findings where there was no patch to review in the first place.
+        if not settings.remediation_critic_enabled:
+            critique_artifact = remediation_critic.skipped("disabled")
+        elif not result.can_fix:
+            critique_artifact = remediation_critic.skipped("no_patch")
+        else:
+            critique_artifact = remediation_critic.skipped("unavailable")
+    else:
+        # "revise" -> one bounded redraft, fed back through the agent's existing TRUSTED
+        # revision_note channel (the same one a human reviewer uses). No new plumbing.
+        redrafts = 0
+        while (
+            verdict_obj.normalized_verdict == "revise"
+            and redrafts < settings.remediation_critic_max_redrafts
+        ):
+            redrafts += 1
+            logger.info("redrafting fix after critique", finding_id=str(finding.id), attempt=redrafts)
+            result = await _draft(remediation_critic.revision_note_from(verdict_obj))
+            excerpt = _file_window(workdir, result.file_path or loc.file, loc.start_line)
+            again = await remediation_critic.critique(
+                bundle, result, project_id=job.project_id, scan_id=job.scan_id, file_excerpt=excerpt
+            )
+            if again is None:
+                break  # critic went away mid-loop; keep the redrafted patch as-is
+            verdict_obj = again
+        # A "revise" we ran out of redrafts for is not a pass -- the defect the critic named is
+        # still there, so surface it for human review rather than presenting it as reviewed-clean.
+        if verdict_obj.normalized_verdict == "revise":
+            verdict_obj.verdict = "reject"
+        verdict_obj.redrafted = redrafts > 0
+        result = remediation_critic.apply_to_draft(result, verdict_obj)
+        critique_artifact = verdict_obj.model_dump()
+
+    return await _persist_proposal(
+        finding, job, branch, result, provider, model,
+        triage=triage_artifact, critique=critique_artifact,
+    )
 
 
 _ASK_SYSTEM_PROMPT = """You are a secure-code remediation assistant for the ZeroStrike platform.
@@ -306,9 +481,19 @@ async def _try_clone(scan: Scan | None, repo: ProjectRepo | None, branch: str, j
         return None
 
 
+async def _set_stage(job: RemediationJob, stage: str) -> None:
+    """Advance the observability-only stage. Advisory: never gate logic on it (the queue claims and
+    reaps on `status`), so a write failure here must not derail the job."""
+    try:
+        await job.set({RemediationJob.stage: stage, RemediationJob.updated_at: datetime.now(timezone.utc)})
+    except Exception:  # noqa: BLE001 — a progress breadcrumb is never worth failing a job for
+        logger.warning("could not record job stage", stage=stage)
+
+
 async def run_job(job: RemediationJob) -> None:
     start = datetime.now(timezone.utc)
     job.status = "running"
+    job.stage = "cloning"
     job.started_at = start
     job.updated_at = start
     await job.save()
@@ -347,6 +532,7 @@ async def run_job(job: RemediationJob) -> None:
                 scan_id=job.scan_id,
             )
 
+        await _set_stage(job, "triage")
         cfg = await remediation_settings_service.get_settings()
         findings: list[Finding] = []
         for fid in job.finding_ids[: cfg.max_findings_per_job]:
@@ -358,6 +544,7 @@ async def run_job(job: RemediationJob) -> None:
                 findings.append(f)
 
         await job.set({RemediationJob.progress_total: len(findings), RemediationJob.updated_at: datetime.now(timezone.utc)})
+        await _set_stage(job, "proposing")
         fixable = 0
         for done, finding in enumerate(findings, start=1):
             proposal = await _propose_for_finding(
@@ -393,6 +580,7 @@ async def run_job(job: RemediationJob) -> None:
 
     now = datetime.now(timezone.utc)
     job.status = "completed"
+    job.stage = "finalizing"
     job.provider = provider
     job.model_name = model
     job.completed_at = now

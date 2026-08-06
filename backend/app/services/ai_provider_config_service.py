@@ -33,6 +33,23 @@ async def get_active_config() -> AIProviderConfig | None:
     return await AIProviderConfig.find_one(AIProviderConfig.is_active == True)  # noqa: E712
 
 
+async def list_failover_configs() -> list[AIProviderConfig]:
+    """The active provider first, then every other *ready* provider as a fallback chain.
+
+    Why: on free tiers a single provider hits a per-minute or per-day quota routinely (observed:
+    Gemini's free tier is 20 requests/day), and with only the active config in play that takes the
+    whole AI feature down while other configured keys sit idle. Callers walk this list on a transient
+    failure -- see llm_client._with_failover.
+
+    Order is deterministic (active, then list_configs' newest-first) so behaviour is reproducible and
+    the active provider is always preferred rather than load-balanced away from.
+    """
+    configs = await list_configs()
+    ready = [c for c in configs if await is_ready(c)]
+    active = [c for c in ready if c.is_active]
+    return active + [c for c in ready if not c.is_active]
+
+
 def decrypt_api_key(config: AIProviderConfig) -> str | None:
     if not config.api_key_encrypted:
         return None

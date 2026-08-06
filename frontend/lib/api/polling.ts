@@ -54,6 +54,23 @@ export function refetchWhileAnyScanOrAiActive<TItem extends ScanLike>(intervalMs
     (query.state.data?.items ?? []).some(scanOrAiActive) ? backoff(intervalMs, query) : false;
 }
 
+// An auto-fix scan job needs a second condition the others don't: the propose job can be
+// "completed" while an individual proposal is still mid-apply (approved -> applying -> pr_open,
+// driven by a separate apply job). Without this the page would sit on "Applying…" until something
+// else triggered a refetch, and the PR link would never appear.
+const APPLYING_STATES = new Set(["approved", "applying"]);
+
+/** Auto-fix job for one scan: poll while the propose job is active OR any proposal is mid-apply. */
+export function refetchWhileAutoFixActive<
+  TData extends { status?: string | null; insight?: { proposals?: { review_state?: string }[] } | null },
+>(intervalMs = 5000) {
+  return (query: { state: { data?: TData; dataUpdateCount?: number } }) => {
+    const d = query.state.data;
+    const applying = (d?.insight?.proposals ?? []).some((p) => APPLYING_STATES.has(p.review_state ?? ""));
+    return isActive(d?.status) || applying ? backoff(intervalMs, query) : false;
+  };
+}
+
 /** Dashboard stats: poll while any recent scan OR its AI analysis is active (`recent_scans` shape). */
 export function refetchWhileAnyRecentScanActive<TItem extends ScanLike>(intervalMs = 5000) {
   return (query: { state: { data?: { recent_scans: TItem[] }; dataUpdateCount?: number } }) =>

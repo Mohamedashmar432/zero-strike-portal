@@ -88,6 +88,16 @@ class Settings(BaseSettings):
         "nvidia_nim",
         "gemini",
     }
+    # Post-draft critique pass (remediation_critic.py): one extra JSON completion per *fixable*
+    # finding that reviews the drafted patch before a human sees it. Deterministic triage already
+    # removed the hopeless findings, so this only costs on drafts worth reviewing. Kill switch:
+    # setting this False leaves the pipeline exactly as it was pre-critic.
+    remediation_critic_enabled: bool = True
+    # A "revise" verdict feeds the critic's issues back through the agent's existing revision_note
+    # channel. 1 keeps the worst-case per-finding cost bounded at two agent runs; the per-finding
+    # wall clock (remediation_agent_wall_clock_seconds) still applies to each run separately.
+    remediation_critic_max_redrafts: int = 1
+    remediation_critic_max_output_tokens: int = 2000  # a verdict + a few bullets, not code
 
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""

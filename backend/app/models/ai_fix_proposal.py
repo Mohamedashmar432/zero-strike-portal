@@ -68,8 +68,20 @@ class AIFixProposal(Document):
     pr_url: str | None = None
     pr_number: int | None = None
     pr_provider: str | None = None
-    # Scanner re-scan gate result: {scope_ok, target_cleared, new_finding_count,
-    # new_finding_fingerprints[], baseline_count, post_count, scanner_version, ran_at}.
+    # --- per-stage artifacts. Three dicts, one per pipeline stage that can independently judge
+    # this proposal, so a reviewer (and a debugger) can see WHY it ended up in its review_state
+    # without re-running anything. Each is None until its stage runs.
+    # remediation_triage (deterministic, pre-LLM): {eligible, reason, strategy}. When
+    # eligible=False no agent ran at all -- the proposal was written straight to manual_review.
+    triage: dict | None = None
+    # remediation_critic (one LLM call, post-draft, pre-human): {verdict, resolves_finding,
+    # introduces_risk, breaks_callers, style_consistent, simpler_fix_available,
+    # adjusted_confidence, issues[], reasoning, redrafted}. {"skipped": reason} when the critic
+    # was disabled or its call failed -- the proposal still stands, just uncritiqued.
+    critique: dict | None = None
+    # Scanner re-scan gate result (deterministic, post-approval): {scope_ok, target_cleared,
+    # new_finding_count, new_finding_fingerprints[], baseline_count, post_count, scanner_version,
+    # ran_at}.
     validation: dict | None = None
     approved_by: str | None = None
     approved_at: datetime | None = None

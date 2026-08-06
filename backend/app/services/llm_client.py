@@ -182,6 +182,16 @@ async def _record_usage_safe(
         logger.exception("failed to record llm usage", config_id=str(config_id), success=success)
 
 
+async def _failover_candidates(
+    tool_capable_only: bool = False,
+) -> list["AIProviderConfig"]:  # noqa: F821 — annotation only, model imported lazily by the service
+    """The provider chain to try, in order. Empty means nothing is configured/ready."""
+    candidates = await ai_provider_config_service.list_failover_configs()
+    if tool_capable_only:
+        candidates = [c for c in candidates if c.provider in settings.remediation_tool_capable_providers]
+    return candidates
+
+
 async def get_completion(
     messages: list[dict],
     *,
@@ -190,19 +200,57 @@ async def get_completion(
     project_id: str | None = None,
     scan_id: str | None = None,
 ) -> dict:
-    """Resolves the active provider and returns the parsed-JSON response body.
+    """Returns the parsed-JSON response body, failing over across configured providers.
 
     Fails fast with LLMNotConfiguredError (no network call) if no provider is active/ready.
-    Transient upstream failures are retried (3 attempts, exponential backoff starting at 5s --
-    see app.core.retry.retry_transient); auth/bad-request/not-found/permission failures are
-    classified permanent and raised immediately without retrying. A response that isn't valid
-    JSON raises LLMMalformedResponseError (not retried -- the call itself already succeeded,
-    and is recorded as such before the parse is attempted).
+    Transient upstream failures are retried on the same provider (3 attempts, exponential backoff
+    starting at 5s -- see app.core.retry.retry_transient) and then, if other ready providers are
+    configured, the call is retried on the next one. Only *transient* failures fail over: a
+    permanent error (bad key, malformed request) would fail identically everywhere and must stay
+    visible to the admin rather than being masked by a fallback. A response that isn't valid JSON
+    raises LLMMalformedResponseError (not retried -- the call itself already succeeded, and is
+    recorded as such before the parse is attempted).
     """
-    config = await ai_provider_config_service.get_active_config()
-    if config is None or not await ai_provider_config_service.is_ready(config):
+    candidates = await _failover_candidates()
+    if not candidates:
         raise LLMNotConfiguredError("No AI provider is configured and active")
 
+    last_transient: LLMTransientError | None = None
+    for index, config in enumerate(candidates):
+        try:
+            return await _completion_with_config(
+                config,
+                messages,
+                response_format_json=response_format_json,
+                max_tokens=max_tokens,
+                project_id=project_id,
+                scan_id=scan_id,
+            )
+        except LLMTransientError as exc:
+            last_transient = exc
+            remaining = candidates[index + 1 :]
+            if remaining:
+                logger.warning(
+                    "provider unavailable; failing over to the next configured provider",
+                    exhausted=config.provider,
+                    next=remaining[0].provider,
+                )
+                continue
+            raise
+    raise last_transient  # unreachable: the loop either returns or raises
+
+
+async def _completion_with_config(
+    config,
+    messages: list[dict],
+    *,
+    response_format_json: bool,
+    max_tokens: int | None,
+    project_id: str | None,
+    scan_id: str | None,
+) -> dict:
+    """One completion attempt against one provider config. Usage is recorded against `config`, so a
+    failed-over call bills the provider that actually served it."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
     api_key = _resolve_api_key(config.provider, ai_provider_config_service.decrypt_api_key(config))
     kwargs: dict = {
@@ -347,15 +395,51 @@ async def get_tool_completion(
     project_id: str | None = None,
     scan_id: str | None = None,
 ) -> LLMToolResponse:
-    """One tool-calling turn against the active provider. Same config resolution, error taxonomy,
-    retry, and usage accounting as get_completion -- but returns the raw assistant message
-    (content + normalized tool_calls) instead of parsed JSON, and never sets response_format
+    """One tool-calling turn, failing over across configured providers. Same config resolution,
+    error taxonomy, retry, and usage accounting as get_completion -- but returns the raw assistant
+    message (content + normalized tool_calls) instead of parsed JSON, and never sets response_format
     (json_object + tools conflict on several providers). Callers should preflight
-    active_provider_supports_tools() so a non-tool provider fails as a clean 409, not mid-loop."""
-    config = await ai_provider_config_service.get_active_config()
-    if config is None or not await ai_provider_config_service.is_ready(config):
+    active_provider_supports_tools() so a non-tool provider fails as a clean 409, not mid-loop.
+
+    Failover here is restricted to tool-capable providers: dropping an agent turn onto a provider
+    that ignores `tools` would return prose and burn the loop's invalid-step budget instead of
+    helping. If the active provider is the only tool-capable one, behaviour is unchanged.
+    """
+    candidates = await _failover_candidates(tool_capable_only=True)
+    if not candidates:
         raise LLMNotConfiguredError("No AI provider is configured and active")
 
+    last_transient: LLMTransientError | None = None
+    for index, config in enumerate(candidates):
+        try:
+            return await _tool_completion_with_config(
+                config, messages, tools=tools, tool_choice=tool_choice,
+                max_tokens=max_tokens, project_id=project_id, scan_id=scan_id,
+            )
+        except LLMTransientError as exc:
+            last_transient = exc
+            remaining = candidates[index + 1 :]
+            if remaining:
+                logger.warning(
+                    "tool provider unavailable; failing over",
+                    exhausted=config.provider, next=remaining[0].provider,
+                )
+                continue
+            raise
+    raise last_transient  # unreachable
+
+
+async def _tool_completion_with_config(
+    config,
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    tool_choice: str | dict,
+    max_tokens: int | None,
+    project_id: str | None,
+    scan_id: str | None,
+) -> LLMToolResponse:
+    """One tool-calling attempt against one provider config."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
     api_key = _resolve_api_key(config.provider, ai_provider_config_service.decrypt_api_key(config))
     kwargs: dict = {

@@ -14,6 +14,7 @@ from app.models.audit_log import AuditLog
 from app.models.finding import Finding
 from app.models.finding_comment import FindingComment
 from app.models.fix_conversation import FixConversation
+from app.models.fix_pattern import FixPattern
 from app.models.oauth_connection import OAuthConnection
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -66,6 +67,7 @@ async def connect_to_mongo() -> None:
             RemediationProjectDoc,
             FindingComment,
             RemediationSettings,
+            FixPattern,
         ],
     )
 
