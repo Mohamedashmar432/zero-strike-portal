@@ -29,6 +29,24 @@ import { cn } from "@/lib/utils";
 // Ordered worst-first so the controls that need attention are at the top of each framework.
 const STATUS_ORDER = ["fail", "partial", "needs_manual_review", "not_applicable", "pass"];
 
+/**
+ * Split a flat control list into its per-framework sections, worst-status first. Exported
+ * (rather than kept file-private) solely so it has a stable import path for its test — it
+ * still has exactly one real call site, in AuditResult below.
+ */
+export function groupControlsByFramework(
+  summaries: FrameworkSummary[],
+  controls: ControlResult[]
+): { summary: FrameworkSummary; controls: ControlResult[] }[] {
+  return summaries.map((summary) => ({
+    summary,
+    controls: controls
+      .filter((c) => c.framework === summary.framework)
+      .slice()
+      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)),
+  }));
+}
+
 function ComplianceDisclaimer() {
   return (
     <Alert>
@@ -184,13 +202,7 @@ function ControlRow({
 }
 
 function AuditResult({ audit, projectId }: { audit: ComplianceAudit; projectId: string }) {
-  const byFramework = audit.summaries.map((summary) => ({
-    summary,
-    controls: audit.controls
-      .filter((c) => c.framework === summary.framework)
-      .slice()
-      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)),
-  }));
+  const byFramework = groupControlsByFramework(audit.summaries, audit.controls);
 
   return (
     <div className="space-y-6">
@@ -240,6 +252,11 @@ export default function ComplianceAuditPage() {
 
   const backHref = `/projects/${projectId}?tab=compliance`;
   const running = audit?.status === "queued" || audit?.status === "in_progress";
+  const failed = audit?.status === "failed";
+  // A failed audit already explains itself in the alert below; adding "No results" underneath
+  // just says the same thing twice.
+  const showEmpty =
+    !isLoading && !isError && !running && !failed && (audit?.summaries.length ?? 0) === 0;
 
   return (
     <div className="space-y-6">
@@ -271,7 +288,7 @@ export default function ComplianceAuditPage() {
 
       <ComplianceDisclaimer />
 
-      {audit?.status === "failed" && (
+      {failed && (
         <Alert>
           <Info />
           <AlertTitle>This audit failed</AlertTitle>
@@ -287,7 +304,7 @@ export default function ComplianceAuditPage() {
         isLoading={isLoading}
         isError={isError}
         errorMessage="Failed to load this compliance audit."
-        isEmpty={!isLoading && !isError && !running && (audit?.summaries.length ?? 0) === 0}
+        isEmpty={showEmpty}
         emptyState={
           <EmptyState
             icon={ShieldCheck}
@@ -308,7 +325,9 @@ export default function ComplianceAuditPage() {
             </p>
             <Skeleton className="h-40 w-full" />
           </div>
-        ) : audit ? (
+        ) : audit && !failed ? (
+          // A failed audit has no evidence set worth summarising — "Assessed 0 findings from
+          // 0 scans" under a failure alert reads like a result rather than an error.
           <AuditResult audit={audit} projectId={projectId} />
         ) : null}
       </DataTableCard>

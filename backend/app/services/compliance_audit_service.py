@@ -367,6 +367,15 @@ async def run_job(audit: ComplianceAudit) -> None:
 
     try:
         items, scan_ids, truncated = await gather_evidence(audit)
+        if not scan_ids:
+            # routers/compliance.py rejects this at trigger time, but the scans can still be
+            # deleted (or the repo disconnected) between queueing and running. Evaluating an
+            # empty evidence set would mark every code-assessable control "pass" — a clean
+            # bill of health backed by nothing. Fail loudly instead.
+            raise RuntimeError(
+                "No completed scans in the selected scope by the time this audit ran — "
+                "nothing to assess. Run a scan and start a new audit."
+            )
         audit.scan_ids = scan_ids
         audit.findings_total = len(items)
         audit.findings_truncated = truncated

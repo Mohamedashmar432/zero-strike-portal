@@ -292,6 +292,190 @@ def test_malformed_llm_response_still_completes_the_audit(client, monkeypatch):
     assert "unavailable" in body["ai_note"]
 
 
+# --- worker failure + defensive branches ---
+
+
+def test_a_crashing_worker_marks_the_audit_failed_and_records_it(client, monkeypatch):
+    """The outer failure path: anything unexpected inside run_job must land the audit in
+    `failed` with a message, not leave it stuck `running` forever."""
+    import app.services.compliance_audit_service as svc
+
+    async def boom(audit):
+        raise RuntimeError("mongo went away")
+
+    monkeypatch.setattr(svc, "gather_evidence", boom)
+
+    owner = register_and_login(client, email="comp-crash@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    r = _run_audit(client, headers, project["id"])
+    body = _poll_until_terminal(client, headers, r.json()["id"])
+    assert body["status"] == "failed"
+    assert "mongo went away" in body["error_message"]
+    assert body["controls"] == []
+
+    logs = client.get("/api/v1/audit-logs", headers=_admin_headers(client, email="comp-crash-admin@zerostrike.dev"))
+    assert logs.status_code == 200
+    assert any(item["action"] == "Compliance Audit Failed" for item in logs.json()["items"])
+
+
+def test_error_messages_are_clamped(client, monkeypatch):
+    import app.services.compliance_audit_service as svc
+
+    async def boom(audit):
+        raise RuntimeError("x" * 5000)
+
+    monkeypatch.setattr(svc, "gather_evidence", boom)
+
+    owner = register_and_login(client, email="comp-clamp@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    body = _poll_until_terminal(
+        client, headers, _run_audit(client, headers, project["id"]).json()["id"]
+    )
+    assert body["status"] == "failed"
+    assert len(body["error_message"]) <= 2000
+
+
+def test_an_audit_whose_scans_vanish_before_it_runs_fails_rather_than_claiming_pass(client):
+    """The router's 409 can't help if the scans are deleted between trigger and run. Evaluating
+    an empty evidence set would mark every code-assessable control "pass" — a clean bill of
+    health backed by nothing — so the audit must fail instead."""
+    import asyncio as _asyncio
+
+    from app.models.compliance_audit import ComplianceAudit
+
+    import app.services.compliance_audit_service as svc
+
+    owner = register_and_login(client, email="comp-vanish@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+
+    async def _do():
+        now = datetime.now(timezone.utc)
+        audit = ComplianceAudit(
+            project_id=project["id"],
+            frameworks=["soc2"],
+            scope="latest",
+            depth="deterministic",
+            status="queued",
+            created_at=now,
+            updated_at=now,
+        )
+        await audit.insert()
+        await svc.run_job(audit)
+        return await ComplianceAudit.get(audit.id)
+
+    result = _asyncio.run(_do())
+    assert result.status == "failed"
+    assert "nothing to assess" in result.error_message
+    # Above all: no control results were persisted, so nothing can read as passing.
+    assert result.controls == []
+    assert result.summaries == []
+
+
+def test_an_unknown_framework_on_a_persisted_audit_is_skipped_not_fatal(client):
+    import asyncio as _asyncio
+
+    from app.models.compliance_audit import ComplianceAudit
+
+    import app.services.compliance_audit_service as svc
+
+    owner = register_and_login(client, email="comp-ghostfw@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    async def _do():
+        now = datetime.now(timezone.utc)
+        # Simulates a framework removed from the catalog after the audit was queued.
+        audit = ComplianceAudit(
+            project_id=project["id"],
+            frameworks=["soc2", "retired-framework"],
+            scope="latest",
+            depth="deterministic",
+            status="queued",
+            created_at=now,
+            updated_at=now,
+        )
+        await audit.insert()
+        await svc.run_job(audit)
+        return await ComplianceAudit.get(audit.id)
+
+    result = _asyncio.run(_do())
+    assert result.status == "completed"
+    assert [s.framework for s in result.summaries] == ["soc2"]
+
+
+def test_ai_narrative_is_skipped_entirely_when_no_control_failed(client, monkeypatch):
+    """A clean project must not burn an LLM call — and must not get prose it didn't need."""
+    calls = {"n": 0}
+
+    async def counting_completion(messages, **kwargs):
+        calls["n"] += 1
+        return {"controls": []}
+
+    monkeypatch.setattr(llm_client, "get_completion", counting_completion)
+
+    admin_headers = _admin_headers(client, email="comp-clean-admin@zerostrike.dev")
+    _enable_ai(client, admin_headers)
+    owner = register_and_login(client, email="comp-clean@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    # An 'info' finding in a category no SOC 2 control selects on.
+    _seed_scan_with_findings(
+        project["id"],
+        findings=[{"fingerprint": "fp-clean", "severity": "info", "category": "unmapped-category"}],
+    )
+
+    body = _poll_until_terminal(
+        client,
+        headers,
+        _run_audit(client, headers, project["id"], depth="with_ai_narrative").json()["id"],
+    )
+    assert body["status"] == "completed"
+    assert calls["n"] == 0
+    assert body["ai_note"] is None
+
+
+def test_ai_control_cap_is_disclosed_rather_than_silently_dropping_controls(client, monkeypatch):
+    async def fake_completion(messages, **kwargs):
+        return {"controls": []}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_completion)
+    # Force the cap below the number of failing controls this evidence produces.
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "compliance_ai_max_controls_per_call", 1)
+
+    admin_headers = _admin_headers(client, email="comp-cap-admin@zerostrike.dev")
+    _enable_ai(client, admin_headers)
+    owner = register_and_login(client, email="comp-cap@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(
+        project["id"],
+        findings=[
+            {"fingerprint": "fp-1", "severity": "critical", "category": "injection"},
+            {"fingerprint": "fp-2", "severity": "high", "kind": "secret", "category": "secret"},
+            {"fingerprint": "fp-3", "severity": "high", "kind": "sca", "category": "dependency"},
+        ],
+    )
+
+    body = _poll_until_terminal(
+        client,
+        headers,
+        _run_audit(client, headers, project["id"], depth="with_ai_narrative").json()["id"],
+    )
+    assert body["status"] == "completed"
+    # Truncation must be visible, not silent.
+    assert "not sent for AI explanation" in body["ai_note"]
+
+
 # --- scope ---
 
 

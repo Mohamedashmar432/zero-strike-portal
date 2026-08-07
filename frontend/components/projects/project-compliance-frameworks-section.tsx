@@ -12,6 +12,7 @@ import {
   listFrameworks,
   listProjectAudits,
   type ComplianceAuditSummary,
+  type Framework,
   type FrameworkSummary,
 } from "@/lib/api/compliance";
 import { refetchWhileAnyItemActive } from "@/lib/api/polling";
@@ -21,8 +22,27 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString();
 }
 
-/** The most recent COMPLETED audit's summary for a framework, or null if never audited. */
-function latestSummaryFor(
+/**
+ * Human titles for an audit's frameworks. A completed audit carries them in its summaries;
+ * a queued or failed one has no summaries, so fall back to the catalog rather than showing
+ * the user a raw key like "soc2". Exported for its test.
+ */
+export function frameworkLabels(
+  audit: ComplianceAuditSummary,
+  catalog: Framework[] | undefined
+): string {
+  if (audit.summaries.length > 0) return audit.summaries.map((s) => s.framework_title).join(", ");
+  const titles = new Map((catalog ?? []).map((f) => [f.key, f.title]));
+  return audit.frameworks.map((key) => titles.get(key) ?? key).join(", ");
+}
+
+/**
+ * The most recent COMPLETED audit's summary for a framework, or null if never audited.
+ * Queued/running/failed audits are skipped: a card must never show numbers from an audit
+ * that didn't finish. Exported (rather than file-private) so it has a stable import path
+ * for its test — it has one real call site, below.
+ */
+export function latestSummaryFor(
   audits: ComplianceAuditSummary[],
   frameworkKey: string
 ): { audit: ComplianceAuditSummary; summary: FrameworkSummary } | null {
@@ -151,9 +171,7 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
-                    {audit.summaries.length > 0
-                      ? audit.summaries.map((s) => s.framework_title).join(", ")
-                      : audit.frameworks.join(", ")}
+                    {frameworkLabels(audit, catalog?.items)}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {formatDate(audit.created_at)} ·{" "}

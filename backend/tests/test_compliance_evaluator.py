@@ -95,6 +95,41 @@ def test_dependency_findings_match_despite_having_no_owasp_codes():
     assert _by_id(results)["CC7.3"].status == "fail"
 
 
+def test_a_finding_matches_on_its_owasp_code_alone():
+    """Selectors are a union, so an OWASP code must match even when the finding's category
+    is one the control never lists — that's the whole point of carrying both."""
+    item = _item(severity="high", kind="sast", category="some-new-scanner-category", owasp=("A03:2025",))
+    _, results = _evaluate("soc2", [item])
+    assert _by_id(results)["CC8.1"].status == "fail"
+
+
+def test_a_finding_matches_on_its_category_alone_with_no_owasp_code():
+    item = _item(severity="high", kind="sast", category="xss", owasp=())
+    _, results = _evaluate("soc2", [item])
+    assert _by_id(results)["CC8.1"].status == "fail"
+
+
+def test_cwe_selectors_match_when_a_control_uses_them():
+    """No shipped control selects on CWE yet, so exercise the branch directly — otherwise a
+    future CWE-based control would be added on top of never-executed code."""
+    from app.core.compliance_catalog import Control, ControlSelector
+    from app.services.compliance_audit_service import _matches
+
+    control = Control("X.1", "t", "ref", ControlSelector(cwe=frozenset({"CWE-89"})))
+    assert _matches(control.selector, _item(cwe=("CWE-89",), category="unrelated"))
+    assert not _matches(control.selector, _item(cwe=("CWE-79",), category="unrelated"))
+
+
+def test_an_empty_selector_field_is_not_a_wildcard():
+    """kinds=() must mean "no constraint", not "matches every kind" — the inverse reading
+    would make every control fail on any finding."""
+    from app.core.compliance_catalog import ControlSelector
+    from app.services.compliance_audit_service import _matches
+
+    only_secrets = ControlSelector(kinds=frozenset({"secret"}))
+    assert not _matches(only_secrets, _item(kind="sast", category="injection", owasp=("A03:2025",)))
+
+
 def test_one_finding_can_satisfy_multiple_controls_across_frameworks():
     item = _item(severity="critical", kind="secret", category="secret")
     for framework, control_id in (
