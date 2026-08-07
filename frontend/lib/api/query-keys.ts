@@ -74,6 +74,11 @@ export const queryKeys = {
       settings: () => ["ai", "autofix", "settings"] as const,
     },
   },
+  compliance: {
+    frameworks: () => ["compliance", "frameworks"] as const,
+    projectAudits: (projectId: string) => ["compliance", "project", projectId] as const,
+    audit: (auditId: string) => ["compliance", "audit", auditId] as const,
+  },
   repoCredentials: {
     all: () => ["repo-credentials"] as const,
     repos: (credentialId: string, query: string) =>

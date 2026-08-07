@@ -99,6 +99,28 @@ class Settings(BaseSettings):
     remediation_critic_max_redrafts: int = 1
     remediation_critic_max_output_tokens: int = 2000  # a verdict + a few bullets, not code
 
+    # Compliance audits (compliance_queue_service / compliance_audit_service). A fourth
+    # Mongo-backed queue peer. Cheap by default — the control evaluation is a pure in-memory
+    # pass over the project's findings; only the optional AI narrative costs anything, which
+    # is why the concurrency here is higher than remediation's.
+    max_concurrent_compliance_audits: int = 2
+    compliance_audit_timeout_seconds: int = 300
+    compliance_queue_stuck_multiplier: int = 3
+    # Caps the evidence set pulled into memory for one audit (findings sorted by
+    # priority_score desc). A project with more matching findings than this still gets an
+    # accurate pass/fail — the highest-priority evidence is what drives it — but the audit is
+    # flagged findings_truncated so the UI can say so rather than implying full coverage.
+    compliance_max_findings: int = 5000
+    # Per-control evidence rows persisted on the audit document. The exact match count is
+    # kept separately (evidence_total), so this only bounds document size, not correctness.
+    compliance_max_evidence_per_control: int = 25
+    # One narrative call per framework covers its failing/partial controls; this bounds that
+    # call's output. Explanations + remediation prose, no code.
+    compliance_ai_max_output_tokens: int = 3000
+    # Controls sent to the LLM in one framework's narrative call. Beyond this the remainder
+    # keep their deterministic rationale with no AI prose (never a job failure).
+    compliance_ai_max_controls_per_call: int = 25
+
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""
     github_client_secret: str = ""

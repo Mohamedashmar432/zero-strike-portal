@@ -67,6 +67,64 @@ async def _aggregate(model, pipeline: list[dict]) -> list[dict]:
     return await cursor.to_list(length=None)
 
 
+def repo_key_resolver(repos):
+    """Build scan -> repo-group-key resolution for a project's connected repos.
+
+    Exact project_repo_id first, else a clone_url match for scans predating that field
+    (Scan.project_repo_id is None on legacy rows). Without the fallback, older projects
+    silently under-report per-repo. Returns _UNLINKED for scans matching no connected repo
+    so nothing is dropped."""
+    by_id = {str(r.id): r for r in repos}
+    by_clone_url = {r.clone_url: r for r in repos}
+
+    def resolve(scan) -> str:
+        if scan.project_repo_id and scan.project_repo_id in by_id:
+            return scan.project_repo_id
+        if scan.project_repo_id is None and scan.repo_url and scan.repo_url in by_clone_url:
+            return str(by_clone_url[scan.repo_url].id)
+        return _UNLINKED
+
+    return resolve
+
+
+async def resolve_scope_scan_ids(
+    project_id: str, scope: str, project_repo_ids: list[str] | None = None
+) -> list[str]:
+    """The completed scans a compliance audit should draw evidence from.
+
+    scope="latest": the most recent completed scan per repo (plus the unlinked bucket) —
+    the same "current posture" semantics as get_project_scan_activity's current_findings, so
+    a fixed finding stops counting against a control.
+    scope="history": every completed scan in the project.
+
+    project_repo_ids narrows to specific repos; empty/None means all of them. Under "latest"
+    an explicit repo filter also excludes the unlinked bucket, since those scans belong to no
+    selected repo."""
+    scans = (
+        await Scan.find(Scan.project_id == project_id, Scan.status == "completed")
+        .sort(-Scan.created_at)
+        .to_list()
+    )
+    if not scans:
+        return []
+
+    selected = set(project_repo_ids or [])
+    if scope == "history":
+        if not selected:
+            return [str(s.id) for s in scans]
+        resolve = repo_key_resolver(await project_repo_service.list_repos(project_id))
+        return [str(s.id) for s in scans if resolve(s) in selected]
+
+    resolve = repo_key_resolver(await project_repo_service.list_repos(project_id))
+    latest_per_key: dict[str, str] = {}
+    for scan in scans:  # already newest-first, so the first hit per key wins
+        key = resolve(scan)
+        if selected and key not in selected:
+            continue
+        latest_per_key.setdefault(key, str(scan.id))
+    return list(latest_per_key.values())
+
+
 def _severity_counts_from_groups(groups: list[dict], key: str) -> dict[str, SeverityCounts]:
     by_key: dict[str, SeverityCounts] = {}
     for g in groups:
@@ -278,16 +336,7 @@ async def get_project_scan_activity(project_id: str, limit_per_repo: int = 50) -
         .to_list()
     )
 
-    # repo resolution: exact project_repo_id, else clone_url match for un-stamped legacy scans.
-    by_id = {str(r.id): r for r in repos}
-    by_clone_url = {r.clone_url: r for r in repos}
-
-    def _resolve_repo_key(scan) -> str:
-        if scan.project_repo_id and scan.project_repo_id in by_id:
-            return scan.project_repo_id
-        if scan.project_repo_id is None and scan.repo_url and scan.repo_url in by_clone_url:
-            return str(by_clone_url[scan.repo_url].id)
-        return _UNLINKED
+    _resolve_repo_key = repo_key_resolver(repos)
 
     counts_by_scan: dict[str, SeverityCounts] = {}
     if scans:
