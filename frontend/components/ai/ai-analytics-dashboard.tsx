@@ -90,6 +90,16 @@ function duration(ms: number) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
+/**
+ * Keeps both ends of a label. Truncating only the tail made "claude-sonnet-4-5" and
+ * "claude-haiku-4-5" render identically on the axis, which reads as a duplicated bar.
+ */
+function middleTruncate(value: string, max = 26) {
+  if (value.length <= max) return value;
+  const head = Math.ceil((max - 1) / 2);
+  return `${value.slice(0, head)}…${value.slice(-(max - 1 - head))}`;
+}
+
 function metricValue(row: Record<string, number>, metric: Metric) {
   return row[metric] ?? 0;
 }
@@ -195,9 +205,13 @@ export function AiAnalyticsDashboard({
             />
             <BreakdownCard
               title="Spend by model"
-              description="Cost per provider and model."
+              description="Cost per model. Hover for the provider."
+              // Label on the model, not "provider · model": the provider repeats across rows, so
+              // prefixing it pushed the distinguishing part past the truncation point and rendered
+              // claude-sonnet-4-5 and claude-haiku-4-5 as the same string. Provider is in the tooltip.
               rows={data!.by_model.map((r) => ({
-                label: r.model_name ? `${r.provider} · ${r.model_name}` : r.provider,
+                label: r.model_name || r.provider,
+                sublabel: r.provider,
                 ...r,
               }))}
             />
@@ -361,7 +375,7 @@ function BreakdownCard({
 }: {
   title: string;
   description: string;
-  rows: { label: string; cost_usd: number; requests: number }[];
+  rows: { label: string; sublabel?: string; cost_usd: number; requests: number }[];
 }) {
   const config: ChartConfig = { cost_usd: { label: "Cost", color: "var(--primary)" } };
   // Keep the chart legible; the log table below is the full drill-down.
@@ -386,12 +400,20 @@ function BreakdownCard({
                 dataKey="label"
                 tickLine={false}
                 axisLine={false}
-                width={140}
-                tickFormatter={(v: string) => (v.length > 20 ? `${v.slice(0, 19)}…` : v)}
+                width={170}
+                // Ellipsis in the middle, not the end: these labels (model ids, project names)
+                // differ in their tails far more often than their heads. Wrapped in an arrow on
+                // purpose -- recharts calls tickFormatter with (value, index), and passing
+                // middleTruncate directly would bind the tick index to its `max` parameter.
+                tickFormatter={(v: string) => middleTruncate(v)}
               />
               <ChartTooltip
                 content={
                   <ChartTooltipContent
+                    labelFormatter={(_label, payload) => {
+                      const row = payload?.[0]?.payload;
+                      return row?.sublabel ? `${row.label} · ${row.sublabel}` : (row?.label ?? "");
+                    }}
                     formatter={(value, _name, item) =>
                       `${usd(Number(value))} · ${compact(item?.payload?.requests ?? 0)} calls`
                     }

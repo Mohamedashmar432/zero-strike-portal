@@ -551,6 +551,26 @@ async def _tool_completion_with_config(
     )
 
 
+def connection_error_message(exc: Exception) -> str:
+    """A connection test is someone typing credentials and pressing a button, so the answer has to
+    read as a verdict on what they typed. Returning str(exc) puts litellm's exception repr, the
+    provider's raw JSON error body and a request id in a toast, which tells a project owner nothing
+    about which field is wrong. The raw text is still preserved in the audit record.
+    """
+    if isinstance(exc, LLMNotConfiguredError):
+        return "Pick a provider and model before testing the connection."
+    lowered = str(exc).lower()
+    if "authentication" in lowered or "invalid x-api-key" in lowered or "401" in lowered:
+        return "The provider rejected this API key. Check the key and try again."
+    if "not found" in lowered or "404" in lowered or "does not exist" in lowered:
+        return "The key works, but the provider doesn't recognise this model name. Check the model id."
+    if "rate limit" in lowered or "429" in lowered or "quota" in lowered:
+        return "The provider is rate-limiting or out of quota for this key. Try again later."
+    if isinstance(exc, LLMTransientError):
+        return "Couldn't reach the provider. Check the base URL and network, then try again."
+    return "The provider rejected the request. Check the provider, model and key."
+
+
 async def test_connection(
     *,
     provider: AIProvider,

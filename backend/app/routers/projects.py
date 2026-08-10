@@ -574,5 +574,15 @@ async def test_project_ai_provider(
             temperature=config.temperature,
         )
     except llm_client.LLMError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        # Raw text goes to the audit record only -- the caller gets a verdict they can act on.
+        await audit_service.record(
+            "Project AI Provider Test Connection Failed",
+            actor_user_id=str(user.id),
+            target_type="ai_provider_config",
+            target_id=str(config.id),
+            metadata={"project_id": project_id, "provider": config.provider, "error": str(exc)},
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, llm_client.connection_error_message(exc)
+        ) from exc
     return AIProviderTestResponse(message="Connection successful")

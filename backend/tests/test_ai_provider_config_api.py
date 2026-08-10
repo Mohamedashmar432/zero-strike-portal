@@ -162,7 +162,11 @@ def test_test_connection_draft_bad_key_returns_400_and_persists_nothing(client, 
         headers=admin_headers,
     )
     assert r.status_code == 400
-    assert "bad key" in r.json()["detail"]
+    # An actionable verdict on the key, not litellm's exception repr with the provider's raw JSON
+    # body pasted in. The raw text is preserved in the audit record instead.
+    detail = r.json()["detail"]
+    assert detail == "The provider rejected this API key. Check the key and try again."
+    assert "litellm" not in detail and "bad key" not in detail
 
     r = client.get(BASE, headers=admin_headers)
     assert r.json() == []  # nothing persisted as a side effect
@@ -179,7 +183,7 @@ def test_test_connection_stored_provider_bad_key_returns_400(client, monkeypatch
 
     r = client.post(f"{BASE}/{created['id']}/test", headers=admin_headers)
     assert r.status_code == 400
-    assert "invalid api key" in r.json()["detail"]
+    assert r.json()["detail"] == "The provider rejected this API key. Check the key and try again."
 
 
 def test_test_connection_success(client, monkeypatch):

@@ -118,14 +118,27 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
         result["by_project"] = [
             {
                 "project_id": r["_id"],
-                # Deleted projects keep their spend visible rather than vanishing from the totals --
-                # the money was still spent, and a gap in the chart is harder to explain than a label.
-                "project_name": names.get(r["_id"], "Portal (no project)" if not r["_id"] else "Deleted project"),
+                "project_name": names.get(r["_id"]) or _missing_project_label(r["_id"]),
                 **_totals_projection(r),
             }
             for r in rows
         ]
     return result
+
+
+def _missing_project_label(project_id: str | None) -> str:
+    """Deleted projects keep their spend visible rather than vanishing from the totals -- the money
+    was still spent, and a gap in the chart is harder to explain than a label.
+
+    The id fragment matters: a workspace that has deleted more than one project would otherwise get
+    two or more identically-labelled bars, which is indistinguishable from a rendering bug.
+    """
+    if not project_id:
+        return "Portal (no project)"
+    # "#<fragment>" rather than "(<fragment>)": recharts wraps axis labels into tspans and eats the
+    # space before a bracket, and a bare tail of a non-ObjectId legacy id reads as a stray word
+    # ("(roject)") instead of an identifier.
+    return f"Deleted project #{project_id[-6:]}"
 
 
 async def _project_names(project_ids: list[str]) -> dict[str, str]:

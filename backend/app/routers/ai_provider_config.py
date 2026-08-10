@@ -144,7 +144,10 @@ async def test_ai_provider(provider_id: str, user: User = Depends(require_admin)
             target_id=str(config.id),
             metadata={"provider": config.provider, "error": str(exc)},
         )
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        # The raw exception is kept in the audit record above; the admin gets an actionable verdict.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, llm_client.connection_error_message(exc)
+        ) from exc
 
     await audit_service.record(
         "AI Provider Test Connection Succeeded",
@@ -174,7 +177,10 @@ async def test_ai_provider_draft(payload: AIProviderTestRequest, user: User = De
             target_id=None,
             metadata={"provider": payload.provider, "error": str(exc)},
         )
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        # The raw exception is kept in the audit record above; the admin gets an actionable verdict.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, llm_client.connection_error_message(exc)
+        ) from exc
 
     await audit_service.record(
         "AI Provider Test Connection Succeeded",

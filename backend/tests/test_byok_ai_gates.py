@@ -42,6 +42,29 @@ def _add_project_key(client, headers, project_id):
     return r.json()
 
 
+def test_connection_error_messages_are_actionable_not_raw_exceptions():
+    """A project owner testing their own key gets a verdict on what they typed. str(exc) would put
+    litellm's repr, the provider's JSON body and a request id into a toast."""
+    import app.services.llm_client as llm_client
+
+    cases = {
+        'litellm.AuthenticationError: AnthropicException - {"type":"authentication_error"}': "API key",
+        "litellm.NotFoundError: model claude-nope does not exist": "model id",
+        "litellm.RateLimitError: quota exceeded for this key": "rate-limiting",
+    }
+    for raw, expected_fragment in cases.items():
+        msg = llm_client.connection_error_message(llm_client.LLMPermanentError(raw))
+        assert expected_fragment in msg
+        # Never leak the provider's raw payload or litellm internals to the UI.
+        assert "litellm" not in msg and "{" not in msg
+
+    unreachable = llm_client.connection_error_message(llm_client.LLMTransientError("connection reset"))
+    assert "base URL" in unreachable
+
+    not_configured = llm_client.connection_error_message(llm_client.LLMNotConfiguredError("x"))
+    assert "provider and model" in not_configured
+
+
 def test_ai_status_is_answered_per_project_under_byok(client):
     admin_headers = _admin_headers(client, email="gate-admin1@zerostrike.dev")
     owner = register_and_login(client, email="gate-owner1@zerostrike.dev")
