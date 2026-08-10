@@ -29,6 +29,15 @@ describe("AiStatusBadge", () => {
     expect(screen.getByText("AI FAILED")).toBeDefined();
   });
 
+  test("swaps the label set for the compliance-audit kind", () => {
+    const { rerender } = render(<AiStatusBadge kind="audit" status="queued" />);
+    expect(screen.getByText("AUDIT QUEUED")).toBeDefined();
+    rerender(<AiStatusBadge kind="audit" status="in_progress" progressTotal={0} />);
+    expect(screen.getByText("AUDITING")).toBeDefined();
+    rerender(<AiStatusBadge kind="audit" status="failed" />);
+    expect(screen.getByText("AUDIT FAILED")).toBeDefined();
+  });
+
   test.each(["completed", "not_requested", null, undefined] as const)(
     "renders nothing for %s",
     (status) => {

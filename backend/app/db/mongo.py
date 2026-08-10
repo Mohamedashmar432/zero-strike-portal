@@ -11,6 +11,7 @@ from app.models.ai_scan_insight import AIScanInsight
 from app.models.ai_usage_event import AIUsageEvent
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
+from app.models.compliance_audit import ComplianceAudit
 from app.models.finding import Finding
 from app.models.finding_comment import FindingComment
 from app.models.fix_conversation import FixConversation
@@ -68,6 +69,7 @@ async def connect_to_mongo() -> None:
             FindingComment,
             RemediationSettings,
             FixPattern,
+            ComplianceAudit,
         ],
     )
 

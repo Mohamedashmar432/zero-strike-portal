@@ -20,6 +20,7 @@ from app.routers import (
     api_keys,
     audit_logs,
     auth,
+    compliance,
     connections,
     dashboard,
     downloads,
@@ -36,6 +37,7 @@ from app.services import (
     ai_job_queue_service,
     ai_remediation_queue_service,
     cloud_scan_service,
+    compliance_queue_service,
     project_stats_service,
     scan_queue_service,
 )
@@ -66,16 +68,20 @@ async def lifespan(app: FastAPI):
     poll_task = asyncio.create_task(scan_queue_service.poll_loop())
     ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
     remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())
+    compliance_poll_task = asyncio.create_task(compliance_queue_service.poll_loop())
     yield
     poll_task.cancel()
     ai_poll_task.cancel()
     remediation_poll_task.cancel()
+    compliance_poll_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await poll_task
     with contextlib.suppress(asyncio.CancelledError):
         await ai_poll_task
     with contextlib.suppress(asyncio.CancelledError):
         await remediation_poll_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await compliance_poll_task
     await close_mongo_connection()
 
 
@@ -113,6 +119,8 @@ def create_app() -> FastAPI:
     app.include_router(ai_provider_config.router, prefix="/api/v1")
     app.include_router(ai_remediation.router, prefix="/api/v1")
     app.include_router(remediation_settings.router, prefix="/api/v1")
+    app.include_router(compliance.router, prefix="/api/v1")
+    app.include_router(compliance.project_router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

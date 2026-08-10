@@ -16,8 +16,11 @@ async def publish_binary(
     arch: ScannerArch = Form(...),
     user: User = Depends(require_admin),
 ):
-    data = await file.read()
-    doc = await download_service.publish(version=version, os_=os, arch=arch, data=data, uploaded_by=str(user.id))
+    # Hand the UploadFile through unread — publish() streams it into GridFS. Reading it
+    # whole here is what pushed the container over its memory limit during a release.
+    doc = await download_service.publish(
+        version=version, os_=os, arch=arch, source=file, uploaded_by=str(user.id)
+    )
     return {
         "version": doc.version,
         "os": doc.os,

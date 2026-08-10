@@ -10,9 +10,12 @@ const CLASS: Record<"queued" | "in_progress" | "failed", string> = {
   failed: "bg-severity-critical/15 text-severity-critical",
 };
 
-const LABEL: Record<"analysis" | "autofix", Record<"queued" | "in_progress" | "failed", string>> = {
+type BadgeKind = "analysis" | "autofix" | "audit";
+
+const LABEL: Record<BadgeKind, Record<"queued" | "in_progress" | "failed", string>> = {
   analysis: { queued: "AI QUEUED", in_progress: "AI ANALYZING", failed: "AI FAILED" },
   autofix: { queued: "FIX QUEUED", in_progress: "GENERATING FIXES", failed: "FIX FAILED" },
+  audit: { queued: "AUDIT QUEUED", in_progress: "AUDITING", failed: "AUDIT FAILED" },
 };
 
 function formatEta(ms: number): string {
@@ -51,8 +54,9 @@ export function AiStatusBadge({
   startedAt?: string | null;
   progressCompleted?: number;
   progressTotal?: number;
-  // Swaps the label set: "analysis" (default) or "autofix" (fix-generation job).
-  kind?: "analysis" | "autofix";
+  // Swaps the label set: "analysis" (default), "autofix" (fix-generation job) or
+  // "audit" (compliance audit job).
+  kind?: BadgeKind;
   className?: string;
 }) {
   if (status !== "queued" && status !== "in_progress" && status !== "failed") return null;
