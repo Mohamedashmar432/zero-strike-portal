@@ -158,6 +158,7 @@ async def _force_submit(messages: list[dict], ctx: ToolContext, reason: str) -> 
             max_tokens=settings.remediation_max_output_tokens,
             project_id=ctx.project_id,
             scan_id=ctx.scan_id,
+            feature="autofix",
         )
         for tc in resp.tool_calls:
             if tc.name == "submit_fix_proposal" or tc.name in _RECOVERED_TOOL_NAMES:
@@ -207,6 +208,7 @@ async def run_agent(
             max_tokens=settings.remediation_max_output_tokens,
             project_id=ctx.project_id,
             scan_id=ctx.scan_id,
+            feature="autofix",
         )
         tokens_used += resp.prompt_tokens + resp.completion_tokens
         messages.append(_assistant_message(resp))

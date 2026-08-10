@@ -178,8 +178,20 @@ Mirrors `SecurityRemediationAgent`:
 
 ### Provider config & secrets
 
-**Revised 2026-07-16**: `AIProviderConfig` is a **global, admin-only singleton** (one document for
-the whole portal, mirroring `WorkspaceSettings`'s "at most one document ever exists" pattern) —
+**Revised 2026-08-10 — the 2026-07-16 decision below is reversed.** `AIProviderConfig` is now
+**scoped**: `project_id = None` is the portal-wide, admin-managed provider (everything the
+2026-07-16 note describes, unchanged and still the default), and `project_id = <id>` is a
+project's own key. Which applies is decided by one workspace switch,
+`WorkspaceSettings.project_byok_enabled`, resolved in
+`ai_provider_config_service.resolve_failover_configs`. See `docs/AI_BYOK_AND_ANALYTICS.md`.
+
+Why the reversal: the 2026-07-16 rationale ("per-project credential storage nobody asked for")
+stopped holding once teams wanted to be billed for their own AI spend. Per-project keys also give
+per-project cost attribution, which a single shared key structurally cannot. The switch defaults
+off, so a workspace that never turns it on behaves exactly as the note below describes.
+
+**Superseded — 2026-07-16**: `AIProviderConfig` is a **global, admin-only singleton** (one document
+for the whole portal, mirroring `WorkspaceSettings`'s "at most one document ever exists" pattern) —
 **not** per-project as originally scoped below. This was confirmed during Analysis-MVP planning:
 the product requirement is "any LLM model, set by the portal admin," and the frontend settings page
 was already scaffolded under global Settings (not a per-project tab), so per-project scoping would

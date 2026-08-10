@@ -23,6 +23,8 @@ export type AiStatus = { enabled: boolean };
 export type AiProviderConfig = {
   id: string;
   name: string;
+  // null = the portal-wide provider an admin manages; set = this project's own key (BYOK).
+  project_id: string | null;
   provider: AiProvider;
   model_name: string | null;
   base_url: string | null;
@@ -133,8 +135,147 @@ export type ProjectAiUsage = {
   total_cost_usd: number;
 };
 
+/** Workspace-wide AI policy. Only the "Project BYOK" switch for now. */
+export type AiSettings = { project_byok_enabled: boolean };
+
+/**
+ * One row per LLM call. Metadata only, deliberately — prompts carry customer source and
+ * findings, so they are never stored or returned.
+ */
+export type AiUsageEvent = {
+  id: string;
+  created_at: string;
+  project_id: string | null;
+  project_name: string | null;
+  scan_id: string | null;
+  scope: "project" | "portal";
+  feature: string;
+  provider: string;
+  model_name: string | null;
+  status: "success" | "failed";
+  error_type: string | null;
+  duration_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+};
+
+export type AiUsageTotals = {
+  requests: number;
+  failed: number;
+  /** Percent, 0-100. An empty window reads 100 — "no calls" is not "every call failed". */
+  success_rate: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+  avg_duration_ms: number;
+};
+
+/**
+ * Same shape at both scopes — `by_project` is simply empty for a single project. That's what
+ * lets one dashboard component render the project tab and the admin page.
+ */
+export type AiAnalytics = {
+  days: number;
+  totals: AiUsageTotals;
+  timeseries: (Omit<AiUsageTotals, "avg_duration_ms"> & { date: string })[];
+  by_feature: (AiUsageTotals & { feature: string })[];
+  by_model: (AiUsageTotals & { provider: string; model_name: string | null })[];
+  by_project: (AiUsageTotals & { project_id: string | null; project_name: string })[];
+};
+
+export type AiUsageEventPage = {
+  items: AiUsageEvent[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type AiEventFilters = {
+  days?: number;
+  page?: number;
+  page_size?: number;
+  feature?: string;
+  status?: "success" | "failed";
+  project_id?: string;
+};
+
+function eventQuery(filters: AiEventFilters) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 export function getAiStatus() {
   return apiFetch<AiStatus>("/ai/status");
+}
+
+export function getAiSettings() {
+  return apiFetch<AiSettings>("/ai/settings");
+}
+
+export function updateAiSettings(input: AiSettings) {
+  return apiFetch<AiSettings>("/ai/settings", { method: "PUT", body: JSON.stringify(input) });
+}
+
+// --- per-project provider (BYOK) ---------------------------------------------------------
+
+export function listProjectAiProviders(projectId: string) {
+  return apiFetch<AiProviderConfig[]>(`/projects/${projectId}/ai-provider`);
+}
+
+export function createProjectAiProvider(projectId: string, input: CreateAiProviderInput) {
+  return apiFetch<AiProviderConfig>(`/projects/${projectId}/ai-provider`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateProjectAiProvider(
+  projectId: string,
+  configId: string,
+  input: UpdateAiProviderInput,
+) {
+  return apiFetch<AiProviderConfig>(`/projects/${projectId}/ai-provider/${configId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteProjectAiProvider(projectId: string, configId: string) {
+  return apiFetch<void>(`/projects/${projectId}/ai-provider/${configId}`, { method: "DELETE" });
+}
+
+export function activateProjectAiProvider(projectId: string, configId: string) {
+  return apiFetch<AiProviderConfig[]>(`/projects/${projectId}/ai-provider/${configId}/activate`, {
+    method: "POST",
+  });
+}
+
+export function testProjectAiProvider(projectId: string, configId: string) {
+  return apiFetch<void>(`/projects/${projectId}/ai-provider/${configId}/test`, { method: "POST" });
+}
+
+// --- usage analytics ----------------------------------------------------------------------
+
+export function getProjectAiAnalytics(projectId: string, days = 30) {
+  return apiFetch<AiAnalytics>(`/projects/${projectId}/ai-analytics?days=${days}`);
+}
+
+export function listProjectAiEvents(projectId: string, filters: AiEventFilters = {}) {
+  return apiFetch<AiUsageEventPage>(`/projects/${projectId}/ai-events${eventQuery(filters)}`);
+}
+
+export function getPortalAiAnalytics(days = 30, projectId?: string) {
+  const scope = projectId ? `&project_id=${projectId}` : "";
+  return apiFetch<AiAnalytics>(`/admin/ai-analytics?days=${days}${scope}`);
+}
+
+export function listPortalAiEvents(filters: AiEventFilters = {}) {
+  return apiFetch<AiUsageEventPage>(`/admin/ai-analytics/events${eventQuery(filters)}`);
 }
 
 export function getProjectAiUsage(projectId: string) {

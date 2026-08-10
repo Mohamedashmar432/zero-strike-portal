@@ -9,6 +9,13 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_repo import ProjectRepo
 from app.models.user import User
+from app.schemas.ai_analytics import AiAnalyticsResponse, AiUsageEventPage
+from app.schemas.ai_provider_config import (
+    AIProviderConfigCreateRequest,
+    AIProviderConfigResponse,
+    AIProviderConfigUpdateRequest,
+    AIProviderTestResponse,
+)
 from app.schemas.common import Page
 from app.schemas.project import (
     OwaspSummaryResponse,
@@ -29,8 +36,10 @@ from app.schemas.project_repo import (
     ProjectRepoUpdateRequest,
 )
 from app.services import (
+    ai_analytics_service,
     ai_provider_config_service,
     audit_service,
+    llm_client,
     project_repo_service,
     project_service,
     project_stats_service,
@@ -391,3 +400,179 @@ async def get_project_ai_usage(project_id: str, user: User = Depends(get_current
     await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)
     return ProjectAiUsageResponse(**await ai_provider_config_service.get_project_usage(project_id))
+
+
+# --- per-project AI usage analytics (readable by any member) ------------------------------
+
+
+@router.get("/{project_id}/ai-analytics", response_model=AiAnalyticsResponse)
+async def get_project_ai_analytics(
+    project_id: str, days: int = Query(30, ge=1, le=365), user: User = Depends(get_current_user)
+):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await ai_analytics_service.get_analytics(project_id=project_id, days=days)
+
+
+@router.get("/{project_id}/ai-events", response_model=AiUsageEventPage)
+async def list_project_ai_events(
+    project_id: str,
+    days: int = Query(30, ge=1, le=365),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    feature: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status", pattern="^(success|failed)$"),
+    user: User = Depends(get_current_user),
+):
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await ai_analytics_service.list_events(
+        project_id=project_id,
+        page=page,
+        page_size=page_size,
+        days=days,
+        feature=feature,
+        status=status_filter,
+    )
+
+
+# --- per-project AI provider (BYOK) -------------------------------------------------------
+#
+# Same service, same schemas and the same encryption as the admin's portal-wide providers -- the
+# only difference is that every call is scoped to this project_id, so a config created here can
+# never be seen, used or edited from another project. See ai_provider_config_service.
+
+
+async def _require_byok(project_id: str, user: User) -> None:
+    """Owner-or-admin, and only while the portal admin has BYOK switched on. Order matters: check
+    membership first so a non-member learns nothing about the workspace's BYOK setting."""
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_owner_or_admin(project_id, user)
+    if not await ai_provider_config_service.byok_enabled():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Project BYOK is disabled by the portal administrator.",
+        )
+
+
+@router.get("/{project_id}/ai-provider", response_model=list[AIProviderConfigResponse])
+async def list_project_ai_providers(project_id: str, user: User = Depends(get_current_user)):
+    """Readable by any member -- the response carries has_api_key, never the key itself, and a
+    collaborator seeing which model their findings are analysed by is useful, not sensitive."""
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    configs = await ai_provider_config_service.list_configs(project_id)
+    return [AIProviderConfigResponse.from_config(c) for c in configs]
+
+
+@router.post(
+    "/{project_id}/ai-provider",
+    response_model=AIProviderConfigResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_project_ai_provider(
+    project_id: str, payload: AIProviderConfigCreateRequest, user: User = Depends(get_current_user)
+):
+    await _require_byok(project_id, user)
+    config = await ai_provider_config_service.create_config(
+        name=payload.name,
+        provider=payload.provider,
+        model_name=payload.model_name,
+        base_url=payload.base_url,
+        temperature=payload.temperature,
+        api_key=payload.api_key,
+        created_by=str(user.id),
+        project_id=project_id,
+    )
+    await audit_service.record(
+        "Project AI Provider Added",
+        actor_user_id=str(user.id),
+        target_type="ai_provider_config",
+        target_id=str(config.id),
+        metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
+    )
+    return AIProviderConfigResponse.from_config(config)
+
+
+@router.put("/{project_id}/ai-provider/{config_id}", response_model=AIProviderConfigResponse)
+async def update_project_ai_provider(
+    project_id: str,
+    config_id: str,
+    payload: AIProviderConfigUpdateRequest,
+    user: User = Depends(get_current_user),
+):
+    await _require_byok(project_id, user)
+    config = await ai_provider_config_service.update_config(
+        config_id,
+        name=payload.name,
+        provider=payload.provider,
+        model_name=payload.model_name,
+        base_url=payload.base_url,
+        temperature=payload.temperature,
+        api_key=payload.api_key,
+        clear_api_key=payload.clear_api_key,
+        updated_by=str(user.id),
+        project_id=project_id,
+    )
+    await audit_service.record(
+        "Project AI Provider Updated",
+        actor_user_id=str(user.id),
+        target_type="ai_provider_config",
+        target_id=str(config.id),
+        metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
+    )
+    return AIProviderConfigResponse.from_config(config)
+
+
+@router.delete("/{project_id}/ai-provider/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_ai_provider(
+    project_id: str, config_id: str, user: User = Depends(get_current_user)
+):
+    await _require_byok(project_id, user)
+    config = await ai_provider_config_service.get_config_or_404(config_id, project_id)
+    await ai_provider_config_service.delete_config(config_id, project_id)
+    await audit_service.record(
+        "Project AI Provider Removed",
+        actor_user_id=str(user.id),
+        target_type="ai_provider_config",
+        target_id=str(config.id),
+        metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
+    )
+
+
+@router.post(
+    "/{project_id}/ai-provider/{config_id}/activate", response_model=list[AIProviderConfigResponse]
+)
+async def activate_project_ai_provider(
+    project_id: str, config_id: str, user: User = Depends(get_current_user)
+):
+    await _require_byok(project_id, user)
+    config = await ai_provider_config_service.set_active(config_id, project_id)
+    await audit_service.record(
+        "Project AI Provider Activated",
+        actor_user_id=str(user.id),
+        target_type="ai_provider_config",
+        target_id=str(config.id),
+        metadata={"project_id": project_id, "provider": config.provider},
+    )
+    configs = await ai_provider_config_service.list_configs(project_id)
+    return [AIProviderConfigResponse.from_config(c) for c in configs]
+
+
+@router.post("/{project_id}/ai-provider/{config_id}/test", response_model=AIProviderTestResponse)
+async def test_project_ai_provider(
+    project_id: str, config_id: str, user: User = Depends(get_current_user)
+):
+    await _require_byok(project_id, user)
+    config = await ai_provider_config_service.get_config_or_404(config_id, project_id)
+    try:
+        await llm_client.test_connection(
+            provider=config.provider,
+            model_name=config.model_name,
+            api_key=ai_provider_config_service.decrypt_api_key(config),
+            base_url=config.base_url,
+            temperature=config.temperature,
+        )
+    except llm_client.LLMError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return AIProviderTestResponse(message="Connection successful")

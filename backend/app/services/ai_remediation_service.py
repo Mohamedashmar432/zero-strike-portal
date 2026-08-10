@@ -433,7 +433,7 @@ async def ask_about_fix(proposal: AIFixProposal, finding: Finding | None, questi
         },
     ]
     data = await llm_client.get_completion(
-        messages, project_id=proposal.project_id, scan_id=proposal.scan_id
+        messages, project_id=proposal.project_id, scan_id=proposal.scan_id, feature="fix_chat"
     )
     answer = (data.get("answer") if isinstance(data, dict) else None) or ""
     return answer.strip() or "I couldn't produce an answer from this fix's context. Try rephrasing."

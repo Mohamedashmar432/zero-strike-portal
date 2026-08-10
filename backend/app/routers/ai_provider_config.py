@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import require_admin
-from app.core.timeutils import as_utc as _as_utc
+from app.core.deps import get_current_user, require_admin
 from app.models.ai_provider_config import AIProviderConfig
 from app.models.user import User
 from app.schemas.ai_provider_config import (
@@ -10,32 +9,19 @@ from app.schemas.ai_provider_config import (
     AIProviderConfigUpdateRequest,
     AIProviderTestRequest,
     AIProviderTestResponse,
+    AISettingsResponse,
+    AISettingsUpdateRequest,
 )
 from app.services import ai_provider_config_service, audit_service, llm_client
 
 router = APIRouter(prefix="/ai/providers", tags=["ai-provider-config"])
+# Workspace-level AI policy rather than one provider's config, so it gets its own path. Second
+# router in the same module follows ai_analysis.py / compliance.py.
+settings_router = APIRouter(prefix="/ai", tags=["ai-provider-config"])
 
 
 def _to_response(config: AIProviderConfig) -> AIProviderConfigResponse:
-    return AIProviderConfigResponse(
-        id=str(config.id),
-        name=config.name,
-        provider=config.provider,
-        model_name=config.model_name,
-        base_url=config.base_url,
-        temperature=config.temperature,
-        is_active=config.is_active,
-        has_api_key=config.api_key_encrypted is not None,
-        total_requests=config.total_requests,
-        total_failed_requests=config.total_failed_requests,
-        total_prompt_tokens=config.total_prompt_tokens,
-        total_completion_tokens=config.total_completion_tokens,
-        total_cost_usd=config.total_cost_usd,
-        last_used_at=_as_utc(config.last_used_at),
-        created_at=_as_utc(config.created_at),
-        updated_at=_as_utc(config.updated_at),
-        updated_by=config.updated_by,
-    )
+    return AIProviderConfigResponse.from_config(config)
 
 
 @router.get("", response_model=list[AIProviderConfigResponse])
@@ -198,3 +184,26 @@ async def test_ai_provider_draft(payload: AIProviderTestRequest, user: User = De
         metadata={"provider": payload.provider},
     )
     return AIProviderTestResponse(message="Connection successful")
+
+
+@settings_router.get("/settings", response_model=AISettingsResponse)
+async def get_ai_settings(user: User = Depends(get_current_user)):
+    """Readable by any signed-in user, unlike the rest of this router: it is a workspace policy
+    flag, not a credential, and a project owner has to know whether the BYOK card belongs on their
+    settings page. Writing it stays admin-only."""
+    return AISettingsResponse(project_byok_enabled=await ai_provider_config_service.byok_enabled())
+
+
+@settings_router.put("/settings", response_model=AISettingsResponse)
+async def update_ai_settings(payload: AISettingsUpdateRequest, user: User = Depends(require_admin)):
+    """Flipping this changes which key every AI call in the portal runs on, so it is audited like
+    any other provider change. Switching it *on* immediately disables AI for projects that haven't
+    added a key yet -- by design (see WorkspaceSettings.project_byok_enabled); the UI says so."""
+    enabled = await ai_provider_config_service.set_byok_enabled(payload.project_byok_enabled)
+    await audit_service.record(
+        "Project BYOK Enabled" if enabled else "Project BYOK Disabled",
+        actor_user_id=str(user.id),
+        target_type="workspace_settings",
+        target_id=None,
+    )
+    return AISettingsResponse(project_byok_enabled=enabled)

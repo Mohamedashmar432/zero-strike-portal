@@ -93,6 +93,16 @@ background `asyncio.Task`.
    artifacts anywhere in this stack), marks the scan `completed`, and re-triggers
    `scan_queue_service.drain_queue()` to backfill the concurrency slot it just freed.
 
+**AI provider resolution + usage log** (`docs/AI_BYOK_AND_ANALYTICS.md`): `AIProviderConfig` is
+scoped by `project_id` — `None` is the portal-wide admin-managed provider, a set value is that
+project's own key ("Project BYOK", toggled workspace-wide via
+`WorkspaceSettings.project_byok_enabled`). `ai_provider_config_service.resolve_failover_configs()`
+is the single place that policy is decided; with BYOK on a project runs *only* on its own key and
+never falls back to the portal's. Every LLM call — success or failure — writes one `AIUsageEvent`
+(feature, latency, tokens, cost, error type; **never** prompt/response content, 180-day TTL), read
+back by `ai_analytics_service` at two scopes: per-project (`/projects/{id}/ai-analytics`,
+member-gated) and portal-wide (`/admin/ai-analytics`, admin-gated).
+
 **Scanner binary distribution** (self-hosted, so bootstrapping a CI runner needs no
 portal credentials): `download_service.py` + `models/scanner_binary.py` store built
 `zerostrike` binaries in MongoDB GridFS (bucket `scanner_binaries`); `routers/downloads.py`

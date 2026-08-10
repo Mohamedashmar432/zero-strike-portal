@@ -58,6 +58,14 @@ from app.services import (
 
 router = APIRouter(tags=["ai-remediation"])
 
+# Covers both provider modes in one string rather than branching on byok_enabled() at three call
+# sites -- whichever settings page applies to the reader, the other clause is obviously not theirs.
+_TOOL_PROVIDER_409 = (
+    "AI Auto-Fix needs an active, tool-capable AI provider (e.g. Anthropic or OpenAI). "
+    "Configure one in Settings → AI Provider, or — when Project BYOK is on — "
+    "Project → Settings → AI Provider."
+)
+
 _JOB_STATUS_TO_API = {"queued": "queued", "running": "in_progress", "completed": "completed", "failed": "failed"}
 
 
@@ -242,12 +250,8 @@ async def trigger_scan_auto_fix(
             status.HTTP_409_CONFLICT,
             "AI Auto-Fix is disabled by an administrator (Settings → Auto-Fix).",
         )
-    if not await llm_client.active_provider_supports_tools():
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "AI Auto-Fix needs an active, tool-capable AI provider (e.g. Anthropic or OpenAI). "
-            "Configure one in Settings → AI Provider.",
-        )
+    if not await llm_client.active_provider_supports_tools(scan.project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _TOOL_PROVIDER_409)
     scope_key = f"{scan_id}:propose"
     active = await _active_job(scope_key)
     if active is not None:
@@ -411,12 +415,8 @@ async def trigger_finding_auto_fix(
             status.HTTP_409_CONFLICT,
             "AI Auto-Fix is disabled by an administrator (Settings → Auto-Fix).",
         )
-    if not await llm_client.active_provider_supports_tools():
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "AI Auto-Fix needs an active, tool-capable AI provider (e.g. Anthropic or OpenAI). "
-            "Configure one in Settings → AI Provider.",
-        )
+    if not await llm_client.active_provider_supports_tools(finding.project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _TOOL_PROVIDER_409)
     scope_key = f"{finding.scan_id}:propose:{finding_id}"
     active = await _active_job(scope_key)
     if active is not None:
@@ -572,11 +572,6 @@ async def download_fix_patch(proposal_id: str, user: User = Depends(get_current_
 
 # --- per-fix Ask-AI Q&A + "change it" revise ---------------------------------------------
 
-_TOOL_PROVIDER_409 = (
-    "AI Auto-Fix needs an active, tool-capable AI provider (e.g. Anthropic or OpenAI). "
-    "Configure one in Settings → AI Provider."
-)
-
 
 async def _get_or_create_conversation(proposal: AIFixProposal) -> FixConversation:
     conv = await FixConversation.find_one(
@@ -668,7 +663,7 @@ async def revise_fix_proposal(
     instruction = payload.instruction.strip()
     if not instruction:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An instruction is required")
-    if not await llm_client.active_provider_supports_tools():
+    if not await llm_client.active_provider_supports_tools(proposal.project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _TOOL_PROVIDER_409)
 
     finding = await Finding.get(proposal.finding_id)

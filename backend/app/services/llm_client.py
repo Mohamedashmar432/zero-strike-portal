@@ -1,11 +1,13 @@
-"""Thin wrapper over litellm.acompletion, backed by whichever AIProviderConfig is
-currently active (see ai_provider_config_service.get_active_config). litellm itself is
+"""Thin wrapper over litellm.acompletion, backed by whichever AIProviderConfig applies to the
+calling project (see ai_provider_config_service.resolve_failover_configs -- the portal-wide
+active provider normally, or the project's own key under Project BYOK). litellm itself is
 the provider abstraction (its model-string prefixes select anthropic/openai/lmstudio/
 kimi/nvidia_nim/openrouter/custom) -- this module deliberately does not build a second
 "provider adapter" interface on top of it.
 """
 
 import json
+import time
 
 import litellm
 import structlog
@@ -151,45 +153,68 @@ async def _call_acompletion(**kwargs):
     return await litellm.acompletion(**kwargs)
 
 
+def _ms(started: float) -> int:
+    """Wall-clock for the whole attempt including retry backoff -- that is what a user waiting on
+    an AI job actually experiences, so it's what the dashboard's latency should show."""
+    return int((time.perf_counter() - started) * 1000)
+
+
 async def _record_usage_safe(
-    config_id,
+    config,
     *,
     success: bool,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     cost_usd: float = 0.0,
-    provider: str | None = None,
-    model_name: str | None = None,
     project_id: str | None = None,
     scan_id: str | None = None,
+    feature: str = "unknown",
+    duration_ms: int = 0,
+    error_type: str | None = None,
 ) -> None:
     """Never lets a usage-write hiccup surface as an error -- by the time this is called the
     provider call itself has already succeeded or definitively failed, so a bookkeeping
     failure here must not change the outcome the caller sees."""
     try:
         await ai_provider_config_service.record_usage(
-            str(config_id),
+            str(config.id),
             success=success,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             cost_usd=cost_usd,
-            provider=provider,
-            model_name=model_name,
+            provider=config.provider,
+            model_name=config.model_name,
             project_id=project_id,
             scan_id=scan_id,
+            feature=feature,
+            duration_ms=duration_ms,
+            error_type=error_type,
         )
     except Exception:
-        logger.exception("failed to record llm usage", config_id=str(config_id), success=success)
+        logger.exception("failed to record llm usage", config_id=str(config.id), success=success)
 
 
 async def _failover_candidates(
     tool_capable_only: bool = False,
+    project_id: str | None = None,
 ) -> list["AIProviderConfig"]:  # noqa: F821 — annotation only, model imported lazily by the service
-    """The provider chain to try, in order. Empty means nothing is configured/ready."""
-    candidates = await ai_provider_config_service.list_failover_configs()
+    """The provider chain to try, in order. Empty means nothing is configured/ready *for this
+    caller* -- which under Project BYOK includes "this project brought no key of its own".
+    The scope policy itself lives in ai_provider_config_service.resolve_failover_configs."""
+    candidates = await ai_provider_config_service.resolve_failover_configs(project_id)
     if tool_capable_only:
         candidates = [c for c in candidates if c.provider in settings.remediation_tool_capable_providers]
     return candidates
+
+
+async def _not_configured_error(project_id: str | None) -> "LLMNotConfiguredError":
+    """Same condition, two very different fixes -- tell the user which one applies to them rather
+    than making them guess at 'no AI provider is configured'."""
+    if project_id and await ai_provider_config_service.byok_enabled():
+        return LLMNotConfiguredError(
+            "This project has no AI provider configured. Add one under Project → Settings → AI Provider."
+        )
+    return LLMNotConfiguredError("No AI provider is configured and active")
 
 
 async def get_completion(
@@ -199,6 +224,7 @@ async def get_completion(
     max_tokens: int | None = None,
     project_id: str | None = None,
     scan_id: str | None = None,
+    feature: str = "unknown",
 ) -> dict:
     """Returns the parsed-JSON response body, failing over across configured providers.
 
@@ -211,9 +237,9 @@ async def get_completion(
     raises LLMMalformedResponseError (not retried -- the call itself already succeeded, and is
     recorded as such before the parse is attempted).
     """
-    candidates = await _failover_candidates()
+    candidates = await _failover_candidates(project_id=project_id)
     if not candidates:
-        raise LLMNotConfiguredError("No AI provider is configured and active")
+        raise await _not_configured_error(project_id)
 
     last_transient: LLMTransientError | None = None
     for index, config in enumerate(candidates):
@@ -225,6 +251,7 @@ async def get_completion(
                 max_tokens=max_tokens,
                 project_id=project_id,
                 scan_id=scan_id,
+                feature=feature,
             )
         except LLMTransientError as exc:
             last_transient = exc
@@ -248,6 +275,7 @@ async def _completion_with_config(
     max_tokens: int | None,
     project_id: str | None,
     scan_id: str | None,
+    feature: str = "unknown",
 ) -> dict:
     """One completion attempt against one provider config. Usage is recorded against `config`, so a
     failed-over call bills the provider that actually served it."""
@@ -267,15 +295,21 @@ async def _completion_with_config(
     if response_format_json and config.provider in _JSON_OBJECT_PROVIDERS:
         kwargs["response_format"] = {"type": "json_object"}
 
+    attribution = {"project_id": project_id, "scan_id": scan_id, "feature": feature}
+    started = time.perf_counter()
     try:
         response = await _call_acompletion(**kwargs)
     except _PERMANENT_EXCEPTIONS as exc:
         logger.warning("llm call failed permanently", error=str(exc))
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+        )
         raise LLMPermanentError(str(exc)) from exc
     except _TRANSIENT_EXCEPTIONS as exc:
         logger.error("llm call exhausted retries", error=str(exc))
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started), **attribution
+        )
         raise LLMTransientError(str(exc)) from exc
     except litellm.APIError as exc:
         # litellm raises the bare base APIError for statuses it doesn't map to a specific
@@ -283,8 +317,11 @@ async def _completion_with_config(
         # upstream message surfaces instead of escaping as an opaque 500 -- none of the mapped
         # exceptions above subclass APIError, so this never shadows them.
         logger.warning("llm call failed with unmapped api error", error=str(exc))
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+        )
         raise LLMPermanentError(str(exc)) from exc
+    duration_ms = _ms(started)
 
     usage = getattr(response, "usage", None)
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -298,15 +335,13 @@ async def _completion_with_config(
     # The provider call succeeded and was billed regardless of what we do with the content
     # below -- record success now, before attempting to parse it.
     await _record_usage_safe(
-        config.id,
+        config,
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_usd=cost_usd,
-        provider=config.provider,
-        model_name=config.model_name,
-        project_id=project_id,
-        scan_id=scan_id,
+        duration_ms=duration_ms,
+        **attribution,
     )
 
     content = response.choices[0].message.content or ""
@@ -331,13 +366,16 @@ class LLMToolResponse(BaseModel):
     completion_tokens: int = 0
 
 
-async def active_provider_supports_tools() -> bool:
-    """Whether the active AI provider may drive the tool-calling remediation agent. Authoritative
-    gate is the admin-tunable settings.remediation_tool_capable_providers allowlist -- litellm's
-    supports_function_calling() is unreliable for the OpenAI-compatible-routed providers (kimi etc.),
-    and a provider that accepts `tools` but silently emits prose is caught anyway by the agent loop's
-    repeated-invalid fail-fast (see ai_remediation_agent)."""
-    config = await ai_provider_config_service.get_active_config()
+async def active_provider_supports_tools(project_id: str | None = None) -> bool:
+    """Whether the AI provider that would serve `project_id` may drive the tool-calling remediation
+    agent. Authoritative gate is the admin-tunable settings.remediation_tool_capable_providers
+    allowlist -- litellm's supports_function_calling() is unreliable for the OpenAI-compatible-routed
+    providers (kimi etc.), and a provider that accepts `tools` but silently emits prose is caught
+    anyway by the agent loop's repeated-invalid fail-fast (see ai_remediation_agent).
+
+    Takes project_id because under BYOK the answer differs per project -- one project's key may be
+    Anthropic and another's LM Studio."""
+    config = await ai_provider_config_service.resolve_active_config(project_id)
     if config is None or not await ai_provider_config_service.is_ready(config):
         return False
     return config.provider in settings.remediation_tool_capable_providers
@@ -394,6 +432,7 @@ async def get_tool_completion(
     max_tokens: int | None = None,
     project_id: str | None = None,
     scan_id: str | None = None,
+    feature: str = "unknown",
 ) -> LLMToolResponse:
     """One tool-calling turn, failing over across configured providers. Same config resolution,
     error taxonomy, retry, and usage accounting as get_completion -- but returns the raw assistant
@@ -405,16 +444,16 @@ async def get_tool_completion(
     that ignores `tools` would return prose and burn the loop's invalid-step budget instead of
     helping. If the active provider is the only tool-capable one, behaviour is unchanged.
     """
-    candidates = await _failover_candidates(tool_capable_only=True)
+    candidates = await _failover_candidates(tool_capable_only=True, project_id=project_id)
     if not candidates:
-        raise LLMNotConfiguredError("No AI provider is configured and active")
+        raise await _not_configured_error(project_id)
 
     last_transient: LLMTransientError | None = None
     for index, config in enumerate(candidates):
         try:
             return await _tool_completion_with_config(
                 config, messages, tools=tools, tool_choice=tool_choice,
-                max_tokens=max_tokens, project_id=project_id, scan_id=scan_id,
+                max_tokens=max_tokens, project_id=project_id, scan_id=scan_id, feature=feature,
             )
         except LLMTransientError as exc:
             last_transient = exc
@@ -438,6 +477,7 @@ async def _tool_completion_with_config(
     max_tokens: int | None,
     project_id: str | None,
     scan_id: str | None,
+    feature: str = "unknown",
 ) -> LLMToolResponse:
     """One tool-calling attempt against one provider config."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
@@ -456,11 +496,15 @@ async def _tool_completion_with_config(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
+    attribution = {"project_id": project_id, "scan_id": scan_id, "feature": feature}
+    started = time.perf_counter()
     try:
         response = await _call_acompletion(**kwargs)
     except _PERMANENT_EXCEPTIONS as exc:
         recovered = _recover_rejected_tool_name(exc)
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+        )
         if recovered is not None:
             logger.warning("recovered a tool call from a rejected-tool-name error", error=str(exc)[:300])
             return recovered
@@ -468,11 +512,15 @@ async def _tool_completion_with_config(
         raise LLMPermanentError(str(exc)) from exc
     except _TRANSIENT_EXCEPTIONS as exc:
         logger.error("llm tool call exhausted retries", error=str(exc))
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started), **attribution
+        )
         raise LLMTransientError(str(exc)) from exc
     except litellm.APIError as exc:
         logger.warning("llm tool call failed with unmapped api error", error=str(exc))
-        await _record_usage_safe(config.id, success=False)
+        await _record_usage_safe(
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+        )
         raise LLMPermanentError(str(exc)) from exc
 
     usage = getattr(response, "usage", None)
@@ -483,15 +531,13 @@ async def _tool_completion_with_config(
     except Exception:
         cost_usd = 0.0
     await _record_usage_safe(
-        config.id,
+        config,
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_usd=cost_usd,
-        provider=config.provider,
-        model_name=config.model_name,
-        project_id=project_id,
-        scan_id=scan_id,
+        duration_ms=_ms(started),
+        **attribution,
     )
 
     choice = response.choices[0]

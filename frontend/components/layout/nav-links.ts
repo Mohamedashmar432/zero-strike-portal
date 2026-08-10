@@ -1,6 +1,7 @@
 import {
   Activity,
   Bell,
+  ChartColumn,
   FileText,
   FolderKanban,
   LayoutDashboard,
@@ -22,6 +23,7 @@ export const adminLinks = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },
+  { href: "/admin/ai-analytics", label: "AI Analytics", icon: ChartColumn },
 ];
 
 export const settingsLinks = [

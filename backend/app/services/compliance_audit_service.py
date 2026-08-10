@@ -326,6 +326,7 @@ async def _narrate_framework(
             messages,
             max_tokens=settings.compliance_ai_max_output_tokens,
             project_id=project_id,
+            feature="compliance",
         )
         parsed = _NarrativeResponse.model_validate(raw)
     except (llm_client.LLMError, ValidationError) as exc:

@@ -14,27 +14,54 @@ from fastapi import HTTPException, status
 from app.core import security
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider, AIProviderConfig
 from app.models.ai_usage_event import AIUsageEvent
+from app.services import report_template_service
+
+# Everything below is scoped: project_id=None is the portal-wide, admin-managed scope, and any
+# other value is one project's own. The two never mix -- see resolve_failover_configs.
 
 
-async def list_configs() -> list[AIProviderConfig]:
+async def byok_enabled() -> bool:
+    """Whether the portal admin has switched on per-project bring-your-own-key."""
+    return (await report_template_service.get_workspace_settings()).project_byok_enabled
+
+
+async def set_byok_enabled(enabled: bool) -> bool:
+    ws = await report_template_service.get_workspace_settings()
+    ws.project_byok_enabled = enabled
+    await ws.save()
+    return ws.project_byok_enabled
+
+
+async def list_configs(project_id: str | None = None) -> list[AIProviderConfig]:
     # -_id is a stable tiebreaker: two configs created in the same millisecond (coarse clock on
     # Windows) would otherwise order nondeterministically. ObjectIds are monotonic with insertion.
-    return await AIProviderConfig.find().sort("-created_at", "-_id").to_list()
+    return (
+        await AIProviderConfig.find(AIProviderConfig.project_id == project_id)
+        .sort("-created_at", "-_id")
+        .to_list()
+    )
 
 
-async def get_config_or_404(config_id: str) -> AIProviderConfig:
+async def get_config_or_404(config_id: str, project_id: str | None = None) -> AIProviderConfig:
+    """Always pass the scope you expect. A config id alone is guessable/enumerable, so without the
+    project_id check a member of project A could read or edit project B's provider -- including
+    activating it, or wiping its key."""
     config = await AIProviderConfig.get(config_id)
-    if config is None:
+    if config is None or config.project_id != project_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "AI provider config not found")
     return config
 
 
-async def get_active_config() -> AIProviderConfig | None:
-    return await AIProviderConfig.find_one(AIProviderConfig.is_active == True)  # noqa: E712
+async def get_active_config(project_id: str | None = None) -> AIProviderConfig | None:
+    return await AIProviderConfig.find_one(
+        AIProviderConfig.is_active == True,  # noqa: E712
+        AIProviderConfig.project_id == project_id,
+    )
 
 
-async def list_failover_configs() -> list[AIProviderConfig]:
-    """The active provider first, then every other *ready* provider as a fallback chain.
+async def list_failover_configs(project_id: str | None = None) -> list[AIProviderConfig]:
+    """The active provider first, then every other *ready* provider in the same scope as a
+    fallback chain.
 
     Why: on free tiers a single provider hits a per-minute or per-day quota routinely (observed:
     Gemini's free tier is 20 requests/day), and with only the active config in play that takes the
@@ -44,10 +71,35 @@ async def list_failover_configs() -> list[AIProviderConfig]:
     Order is deterministic (active, then list_configs' newest-first) so behaviour is reproducible and
     the active provider is always preferred rather than load-balanced away from.
     """
-    configs = await list_configs()
+    configs = await list_configs(project_id)
     ready = [c for c in configs if await is_ready(c)]
     active = [c for c in ready if c.is_active]
     return active + [c for c in ready if not c.is_active]
+
+
+async def resolve_failover_configs(project_id: str | None) -> list[AIProviderConfig]:
+    """The provider chain that should actually serve a call for `project_id` -- the single place
+    the BYOK policy is decided, so llm_client doesn't have to know about it.
+
+    BYOK off: the portal-wide chain, for every project. Unchanged from before BYOK existed.
+
+    BYOK on: full isolation. A project runs *only* on its own configs -- never falling back to the
+    portal key even when its own provider is down, because the whole point of BYOK is that a
+    project's spend lands on the project's bill and nowhere else. A call with no project attribution
+    (an admin-triggered one) has no key it is entitled to use, so it gets nothing rather than
+    silently billing the portal.
+    """
+    if await byok_enabled():
+        return await list_failover_configs(project_id) if project_id else []
+    return await list_failover_configs(None)
+
+
+async def resolve_active_config(project_id: str | None) -> AIProviderConfig | None:
+    """The single config that would serve a call for `project_id`, under the same policy as
+    resolve_failover_configs. Used for display and for the tool-capability gate."""
+    if await byok_enabled():
+        return await get_active_config(project_id) if project_id else None
+    return await get_active_config(None)
 
 
 def decrypt_api_key(config: AIProviderConfig) -> str | None:
@@ -79,13 +131,15 @@ async def create_config(
     temperature: float,
     api_key: str | None,
     created_by: str | None,
+    project_id: str | None = None,
 ) -> AIProviderConfig:
-    """Auto-activates iff the collection was empty before this insert -- the first provider
-    ever added becomes active automatically; every subsequent one starts inactive."""
-    was_empty = await AIProviderConfig.find().count() == 0
+    """Auto-activates iff this scope was empty before the insert -- the first provider a project
+    (or the portal) ever adds becomes active automatically; every subsequent one starts inactive."""
+    was_empty = await AIProviderConfig.find(AIProviderConfig.project_id == project_id).count() == 0
     now = datetime.now(timezone.utc)
     config = AIProviderConfig(
         name=name,
+        project_id=project_id,
         provider=provider,
         model_name=model_name,
         base_url=base_url,
@@ -111,6 +165,7 @@ async def update_config(
     api_key: str | None,
     clear_api_key: bool,
     updated_by: str | None,
+    project_id: str | None = None,
 ) -> AIProviderConfig:
     """Applies the update payload's omitted-vs-clear api_key semantics:
     - api_key omitted (None) and clear_api_key falsy -> existing encrypted key untouched.
@@ -121,7 +176,7 @@ async def update_config(
     prospective (post-update) state would leave it not ready -- an admin editing the live
     active provider must not be able to silently break it.
     """
-    config = await get_config_or_404(config_id)
+    config = await get_config_or_404(config_id, project_id)
     config.name = name
     config.provider = provider
     config.model_name = model_name
@@ -146,24 +201,29 @@ async def update_config(
     return config
 
 
-async def delete_config(config_id: str) -> None:
-    config = await get_config_or_404(config_id)
+async def delete_config(config_id: str, project_id: str | None = None) -> None:
+    config = await get_config_or_404(config_id, project_id)
     await config.delete()
 
 
-async def set_active(config_id: str | None) -> AIProviderConfig | None:
-    """Deactivates whichever provider is currently active, then (if config_id is given)
-    activates that one. config_id=None deactivates everything -- turns AI analysis off.
+async def set_active(config_id: str | None, project_id: str | None = None) -> AIProviderConfig | None:
+    """Deactivates whichever provider is currently active *in this scope*, then (if config_id is
+    given) activates that one. config_id=None deactivates everything in the scope -- turns AI off
+    for the portal, or for that one project.
 
-    Two sequential writes, not a transaction -- this is a rare single-admin action with
+    Scoping the deactivation is what keeps the scopes independent: a project activating its own
+    provider must not switch off the portal's, nor any other project's.
+
+    Two sequential writes, not a transaction -- this is a rare single-actor action with
     no meaningful concurrency risk.
     """
-    await AIProviderConfig.find(AIProviderConfig.is_active == True).update(  # noqa: E712
-        Set({AIProviderConfig.is_active: False})
-    )
+    await AIProviderConfig.find(
+        AIProviderConfig.is_active == True,  # noqa: E712
+        AIProviderConfig.project_id == project_id,
+    ).update(Set({AIProviderConfig.is_active: False}))
     if config_id is None:
         return None
-    config = await get_config_or_404(config_id)
+    config = await get_config_or_404(config_id, project_id)
     config.is_active = True
     await config.save()
     return config
@@ -180,13 +240,17 @@ async def record_usage(
     model_name: str | None = None,
     project_id: str | None = None,
     scan_id: str | None = None,
+    feature: str = "unknown",
+    duration_ms: int = 0,
+    error_type: str | None = None,
 ) -> None:
     """Atomic $inc so concurrent llm_client calls (analyze_findings_batch runs one call per
     rule_id group, gathered concurrently under a semaphore) against the same active
     provider never lose increments to a read-modify-write race.
 
-    When project_id is given for a successful call with tokens, also drops one AIUsageEvent
-    so usage can later be sliced per project (the global totals can't be)."""
+    Also drops one AIUsageEvent per call -- *every* call, successful or not. Failures used to be
+    dropped on the floor, which is precisely what made "why is AI broken for this project?"
+    unanswerable: the only trace was an opaque bump of a global failed-requests counter."""
     now = datetime.now(timezone.utc)
     if success:
         inc = Inc(
@@ -208,17 +272,22 @@ async def record_usage(
         inc, Set({AIProviderConfig.last_used_at: now})
     )
 
-    if success and project_id and (prompt_tokens or completion_tokens):
-        await AIUsageEvent(
-            project_id=project_id,
-            scan_id=scan_id,
-            provider=provider or "",
-            model_name=model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost_usd=cost_usd,
-            created_at=now,
-        ).insert()
+    await AIUsageEvent(
+        project_id=project_id,
+        scan_id=scan_id,
+        config_id=str(config_id),
+        scope="project" if project_id else "portal",
+        provider=provider or "",
+        model_name=model_name,
+        feature=feature,
+        status="success" if success else "failed",
+        error_type=error_type,
+        duration_ms=duration_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost_usd,
+        created_at=now,
+    ).insert()
 
 
 async def get_project_usage(project_id: str) -> dict:
@@ -241,7 +310,7 @@ async def get_project_usage(project_id: str) -> dict:
     rows = await cursor.to_list(length=1)
     agg = rows[0] if rows else {}
 
-    active = await get_active_config()
+    active = await resolve_active_config(project_id)
     return {
         "enabled": active is not None and await is_ready(active),
         "active_provider": active.provider if active else None,

@@ -29,9 +29,11 @@ import {
   createAiProvider,
   deactivateAiProvider,
   deleteAiProvider,
+  getAiSettings,
   listAiProviders,
   testAiProviderConnection,
   updateAiProvider,
+  updateAiSettings,
   type AiProvider,
   type AiProviderConfig,
   type CreateAiProviderInput,
@@ -451,6 +453,58 @@ function AiProvidersPanel() {
   );
 }
 
+/**
+ * The workspace-wide "Project BYOK" switch. Deliberately spells out the consequence before the
+ * admin flips it: turning it on cuts every project that hasn't added a key off from AI, which is
+ * the intended isolation but is not something to discover from a support ticket.
+ */
+function ProjectByokPanel() {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: queryKeys.ai.settings(), queryFn: getAiSettings });
+  const enabled = data?.project_byok_enabled ?? false;
+
+  const toggle = useMutation({
+    mutationFn: (next: boolean) => updateAiSettings({ project_byok_enabled: next }),
+    onSuccess: (settings) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.ai.settings() });
+      toast.success(settings.project_byok_enabled ? "Project BYOK enabled" : "Project BYOK disabled");
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to update the BYOK setting"),
+  });
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl space-y-1">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            Project BYOK
+            <Badge variant={enabled ? "default" : "secondary"}>{enabled ? "On" : "Off"}</Badge>
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {enabled
+              ? "Each project runs AI on its own API key, fully isolated — a project's spend never touches the portal key, and a project with no key of its own has AI features disabled until it adds one."
+              : "Every project shares the portal-wide provider below. Turn this on to let each project bring its own API key and be billed separately."}
+          </p>
+        </div>
+        <Button
+          variant={enabled ? "outline" : "default"}
+          disabled={isLoading || toggle.isPending}
+          onClick={() => toggle.mutate(!enabled)}
+        >
+          {toggle.isPending ? "Saving…" : enabled ? "Turn off" : "Turn on"}
+        </Button>
+      </div>
+      {enabled && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Project owners configure their key under Project → Settings → AI Provider. Usage for every
+          project is visible under Admin → AI Analytics.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function AiProviderSettingsPage() {
   const isAdmin = useHasRole("admin");
   return (
@@ -462,7 +516,10 @@ export default function AiProviderSettingsPage() {
         </p>
       </div>
       <RequireRole role="admin">
-        <AiProvidersPanel />
+        <div className="space-y-6">
+          <ProjectByokPanel />
+          <AiProvidersPanel />
+        </div>
       </RequireRole>
       {!isAdmin && (
         <EmptyState
