@@ -102,6 +102,20 @@ async def resolve_active_config(project_id: str | None) -> AIProviderConfig | No
     return await get_active_config(None)
 
 
+async def ai_ready(project_id: str | None = None) -> bool:
+    """Whether a call for this project would actually find a usable provider.
+
+    Every "is AI available?" gate must use this rather than the bare is_ready(), which only ever
+    looks at the portal-wide config: under BYOK that would report AI as unavailable for a project
+    holding a perfectly good key of its own.
+
+    Note it does NOT fall through to is_ready()'s no-argument behaviour when the scope resolves to
+    nothing -- "this project has no provider" must stay false, not silently re-check the portal's.
+    """
+    config = await resolve_active_config(project_id)
+    return config is not None and await is_ready(config)
+
+
 def decrypt_api_key(config: AIProviderConfig) -> str | None:
     if not config.api_key_encrypted:
         return None

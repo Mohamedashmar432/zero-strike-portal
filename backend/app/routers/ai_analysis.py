@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from beanie.operators import In
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.core.deps import get_current_user
 from app.core.timeutils import as_utc
@@ -31,9 +31,32 @@ finding_scan_router = APIRouter(tags=["ai-analysis"])
 _JOB_STATUS_TO_API = {"queued": "queued", "running": "in_progress", "completed": "completed", "failed": "failed"}
 
 
+async def _require_ai_ready(project_id: str) -> None:
+    """AI availability is per-project under BYOK, so the gate needs the project and the error has
+    to name the page that actually fixes it -- sending a project owner to the admin's settings
+    when the missing key is their own wastes everyone's time."""
+    if await ai_provider_config_service.ai_ready(project_id):
+        return
+    if await ai_provider_config_service.byok_enabled():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project has no AI provider configured. Add one under Project → Settings → AI Provider.",
+        )
+    raise HTTPException(status.HTTP_409_CONFLICT, "AI analysis is not configured or not enabled")
+
+
 @router.get("/status", response_model=AIStatusResponse)
-async def get_ai_status(user: User = Depends(get_current_user)):
-    return AIStatusResponse(enabled=await ai_provider_config_service.is_ready())
+async def get_ai_status(project_id: str | None = Query(None), user: User = Depends(get_current_user)):
+    """Whether AI is usable. Pass project_id wherever the caller has one -- under Project BYOK the
+    answer is per-project, and asking without a project would report AI as off for everyone.
+
+    Without a project_id under BYOK there is no scope to answer for, so this reports whether AI is
+    usable *somewhere* (i.e. BYOK is on and it is a per-project matter). That is what the portal-level
+    admin screens are asking; project screens must pass their project_id to get the real answer.
+    """
+    if project_id is None and await ai_provider_config_service.byok_enabled():
+        return AIStatusResponse(enabled=True)
+    return AIStatusResponse(enabled=await ai_provider_config_service.ai_ready(project_id))
 
 
 # --- Analysis trigger/status ---
@@ -140,8 +163,7 @@ async def trigger_finding_analysis(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Finding has no fingerprint; cannot run AI analysis"
         )
-    if not await ai_provider_config_service.is_ready():
-        raise HTTPException(status.HTTP_409_CONFLICT, "AI analysis is not configured or not enabled")
+    await _require_ai_ready(finding.project_id)
 
     insight = await AIFindingInsight.find_one(
         AIFindingInsight.fingerprint == finding.fingerprint, AIFindingInsight.project_id == finding.project_id
@@ -211,8 +233,7 @@ async def trigger_scan_analysis(
     user: User = Depends(get_current_user),
 ):
     scan = await _get_scan_or_404_and_authorize(scan_id, user)
-    if not await ai_provider_config_service.is_ready():
-        raise HTTPException(status.HTTP_409_CONFLICT, "AI analysis is not configured or not enabled")
+    await _require_ai_ready(scan.project_id)
 
     insight = await AIScanInsight.find_one(AIScanInsight.scan_id == scan_id)
     if insight is not None and not payload.force:

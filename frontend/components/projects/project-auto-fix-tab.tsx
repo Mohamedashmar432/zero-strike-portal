@@ -14,7 +14,10 @@ export function ProjectAutoFixTab({ projectId, canApprove }: { projectId: string
   const scanId = params.get("scan");
   const focusFindingId = params.get("finding");
 
-  const { data: aiStatus } = useQuery({ queryKey: queryKeys.ai.status(), queryFn: getAiStatus });
+  const { data: aiStatus } = useQuery({
+    queryKey: queryKeys.ai.status(projectId),
+    queryFn: () => getAiStatus(projectId),
+  });
 
   if (!(aiStatus?.enabled ?? false)) {
     return (

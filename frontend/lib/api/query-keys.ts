@@ -64,7 +64,9 @@ export const queryKeys = {
     providers: {
       all: () => ["ai", "providers"] as const,
     },
-    status: () => ["ai", "status"] as const,
+    // Scoped: BYOK makes the answer per-project, so a project's status must not share a cache
+    // entry with the portal-level one.
+    status: (projectId?: string) => ["ai", "status", projectId ?? ""] as const,
     settings: () => ["ai", "settings"] as const,
     portalAnalytics: (days: number, projectId?: string) =>
       ["ai", "portal-analytics", days, projectId ?? ""] as const,

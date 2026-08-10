@@ -500,7 +500,9 @@ async def run_job(job: RemediationJob) -> None:
     structlog.contextvars.bind_contextvars(trace_id=job.trace_id, remediation_job_id=str(job.id))
     workdir: str | None = None
     try:
-        config = await ai_provider_config_service.get_active_config()
+        # Scope-aware: under BYOK this job must run on (and be stamped with) the project's own
+        # provider, not the portal's -- which may be absent entirely.
+        config = await ai_provider_config_service.resolve_active_config(job.project_id)
         if config is None or not await ai_provider_config_service.is_ready(config):
             raise ValueError("No AI provider is configured and active")
         provider, model = config.provider, config.model_name

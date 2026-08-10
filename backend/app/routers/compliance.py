@@ -133,10 +133,15 @@ async def create_compliance_audit(
             status.HTTP_400_BAD_REQUEST, f"Unknown compliance framework(s): {', '.join(unknown)}"
         )
 
-    if payload.depth == "with_ai_narrative" and not await ai_provider_config_service.is_ready():
+    if payload.depth == "with_ai_narrative" and not await ai_provider_config_service.ai_ready(project_id):
+        where = (
+            "Project → Settings → AI Provider"
+            if await ai_provider_config_service.byok_enabled()
+            else "Settings → AI Provider"
+        )
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "AI explanations need a configured, active AI provider (Settings → AI Provider). "
+            f"AI explanations need a configured, active AI provider ({where}). "
             "Run the audit without them, or configure a provider first.",
         )
 

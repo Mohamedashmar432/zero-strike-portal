@@ -209,8 +209,12 @@ function eventQuery(filters: AiEventFilters) {
   return query ? `?${query}` : "";
 }
 
-export function getAiStatus() {
-  return apiFetch<AiStatus>("/ai/status");
+/**
+ * Pass `projectId` from any project-scoped screen. Under Project BYOK the answer differs per
+ * project, and asking without one reports AI as unavailable for everybody.
+ */
+export function getAiStatus(projectId?: string) {
+  return apiFetch<AiStatus>(projectId ? `/ai/status?project_id=${projectId}` : "/ai/status");
 }
 
 export function getAiSettings() {
