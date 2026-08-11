@@ -28,6 +28,10 @@ vi.mock("@/lib/api/ai", () => ({
   activateAiProvider: vi.fn(),
   deactivateAiProvider: vi.fn(),
   testAiProviderConnection: vi.fn(),
+  // The page also renders the Project BYOK panel; default it to off so these tests keep
+  // exercising the portal-wide provider table only.
+  getAiSettings: vi.fn(() => Promise.resolve({ project_byok_enabled: false })),
+  updateAiSettings: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -43,6 +47,7 @@ function makeProvider(overrides: Partial<AiProviderConfig> = {}): AiProviderConf
   return {
     id: "p1",
     name: "Prod Anthropic",
+    project_id: null, // portal-wide, not a project's BYOK key
     provider: "anthropic",
     model_name: "claude-sonnet-5",
     base_url: null,

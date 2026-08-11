@@ -12,6 +12,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
+    admin_ai_analytics,
     admin_downloads,
     admin_scanner_status,
     ai_analysis,
@@ -117,6 +118,8 @@ def create_app() -> FastAPI:
     app.include_router(ai_analysis.router, prefix="/api/v1")
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")
     app.include_router(ai_provider_config.router, prefix="/api/v1")
+    app.include_router(ai_provider_config.settings_router, prefix="/api/v1")
+    app.include_router(admin_ai_analytics.router, prefix="/api/v1")
     app.include_router(ai_remediation.router, prefix="/api/v1")
     app.include_router(remediation_settings.router, prefix="/api/v1")
     app.include_router(compliance.router, prefix="/api/v1")

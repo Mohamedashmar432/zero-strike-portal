@@ -254,6 +254,7 @@ async def _enrich_completion(
         max_tokens=settings.ai_analysis_max_output_tokens,
         project_id=project_id,
         scan_id=scan_id,
+        feature="analysis",
     )
 
 
@@ -493,7 +494,7 @@ async def synthesize_scan(
     # small local model exceeding its context on the summary prompt).
     try:
         raw = await llm_client.get_completion(
-            messages, project_id=scan.project_id, scan_id=str(scan.id)
+            messages, project_id=scan.project_id, scan_id=str(scan.id), feature="scan_synthesis"
         )
         parsed = _ScanSynthesisResponse.model_validate(raw)
         summary = parsed.summary

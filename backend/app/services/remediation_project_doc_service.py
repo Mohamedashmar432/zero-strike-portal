@@ -57,7 +57,11 @@ async def _generate(workdir: str, scan_id: str | None, project_id: str) -> str |
         {"role": "user", "content": json.dumps({"untrusted_repo_snapshot": snapshot}, default=str)},
     ]
     data = await llm_client.get_completion(
-        messages, max_tokens=settings.remediation_max_output_tokens, project_id=project_id, scan_id=scan_id
+        messages,
+        max_tokens=settings.remediation_max_output_tokens,
+        project_id=project_id,
+        scan_id=scan_id,
+        feature="repo_doc",
     )
     md = (data.get("markdown") if isinstance(data, dict) else None) or ""
     return md.strip() or None

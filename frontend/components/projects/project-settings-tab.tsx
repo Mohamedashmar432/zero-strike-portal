@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
+import { ProjectAiProviderCard } from "@/components/projects/project-ai-provider-card";
 import { ReportTemplatePicker, type ReportTemplateValue } from "@/components/reports/report-template-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +101,8 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           </Button>
         </CardContent>
       </Card>
+
+      <ProjectAiProviderCard projectId={projectId} canManage={canManage(project.my_role)} />
 
       <Card>
         <CardHeader>

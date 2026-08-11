@@ -151,6 +151,7 @@ async def critique(
             max_tokens=settings.remediation_critic_max_output_tokens,
             project_id=project_id,
             scan_id=scan_id,
+            feature="critic",
         )
         return CritiqueResult.model_validate(data if isinstance(data, dict) else {})
     except (llm_client.LLMError, ValidationError) as exc:

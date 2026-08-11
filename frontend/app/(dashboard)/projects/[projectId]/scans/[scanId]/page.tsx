@@ -527,8 +527,8 @@ export default function ScanDetailPage() {
   }
 
   const { data: aiStatus } = useQuery({
-    queryKey: queryKeys.ai.status(),
-    queryFn: getAiStatus,
+    queryKey: queryKeys.ai.status(projectId),
+    queryFn: () => getAiStatus(projectId),
   });
   const aiEnabled = aiStatus?.enabled ?? false;
 

@@ -153,7 +153,12 @@ function AutoFixPolicyCard() {
 
 export default function AutoFixSettingsPage() {
   const isAdmin = useHasRole("admin");
-  const { data: aiStatus } = useQuery({ queryKey: queryKeys.ai.status(), queryFn: getAiStatus });
+  // Portal-level page, so no project scope. Must be wrapped, not passed bare: TanStack calls the
+  // queryFn with its context object, which would arrive as the projectId argument.
+  const { data: aiStatus } = useQuery({
+    queryKey: queryKeys.ai.status(),
+    queryFn: () => getAiStatus(),
+  });
   const providerReady = aiStatus?.enabled ?? false;
 
   return (

@@ -93,7 +93,10 @@ export default function NewComplianceAuditPage() {
     queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
   });
-  const { data: aiStatus } = useQuery({ queryKey: queryKeys.ai.status(), queryFn: getAiStatus });
+  const { data: aiStatus } = useQuery({
+    queryKey: queryKeys.ai.status(projectId),
+    queryFn: () => getAiStatus(projectId),
+  });
   const aiReady = aiStatus?.enabled ?? false;
 
   const backHref = `/projects/${projectId}?tab=compliance`;

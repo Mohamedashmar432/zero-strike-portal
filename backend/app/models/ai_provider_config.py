@@ -38,6 +38,12 @@ NO_KEY_REQUIRED_PROVIDERS: frozenset[str] = frozenset({"lmstudio", "custom"})
 
 class AIProviderConfig(Document):
     name: str = "Legacy Provider"  # lets a pre-migration singleton doc load without a migration script
+    # None = portal-wide, admin-managed (the only kind that existed before Project BYOK; legacy
+    # docs have no such field at all and Mongo's {project_id: null} matches them). Set = owned by
+    # that project, only ever visible and usable within it. `is_active` is scoped the same way:
+    # at most one active config *per scope*, so activating a project's provider never disturbs
+    # the portal's. See ai_provider_config_service.
+    project_id: str | None = None
     provider: AIProvider = "anthropic"
     model_name: str | None = None
     # Encrypted at rest via app.core.security.encrypt_secret/decrypt_secret — never store
@@ -65,4 +71,4 @@ class AIProviderConfig(Document):
 
     class Settings:
         name = "ai_provider_config"
-        indexes = [IndexModel([("is_active", 1)])]
+        indexes = [IndexModel([("project_id", 1), ("is_active", 1)])]

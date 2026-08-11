@@ -433,7 +433,7 @@ async def ask_about_fix(proposal: AIFixProposal, finding: Finding | None, questi
         },
     ]
     data = await llm_client.get_completion(
-        messages, project_id=proposal.project_id, scan_id=proposal.scan_id
+        messages, project_id=proposal.project_id, scan_id=proposal.scan_id, feature="fix_chat"
     )
     answer = (data.get("answer") if isinstance(data, dict) else None) or ""
     return answer.strip() or "I couldn't produce an answer from this fix's context. Try rephrasing."
@@ -500,7 +500,9 @@ async def run_job(job: RemediationJob) -> None:
     structlog.contextvars.bind_contextvars(trace_id=job.trace_id, remediation_job_id=str(job.id))
     workdir: str | None = None
     try:
-        config = await ai_provider_config_service.get_active_config()
+        # Scope-aware: under BYOK this job must run on (and be stamped with) the project's own
+        # provider, not the portal's -- which may be absent entirely.
+        config = await ai_provider_config_service.resolve_active_config(job.project_id)
         if config is None or not await ai_provider_config_service.is_ready(config):
             raise ValueError("No AI provider is configured and active")
         provider, model = config.provider, config.model_name

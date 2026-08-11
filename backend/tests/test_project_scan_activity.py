@@ -126,12 +126,13 @@ def test_project_ai_usage_aggregates_and_is_project_scoped(client):
             cfg_id, success=True, prompt_tokens=999, completion_tokens=999, cost_usd=1.0,
             provider="openai", model_name="gpt", project_id="someone-else",
         )
-        # a failed call records no event
+        # A failed call is recorded too (it counts as a request, contributes no tokens). Failures
+        # used to be dropped, which left a project with a broken key showing no trace at all.
         await svc.record_usage(cfg_id, success=False, provider="openai", project_id=project["id"])
 
     asyncio.run(seed())
 
     body = client.get(f"/api/v1/projects/{project['id']}/ai-usage", headers=_headers(owner)).json()
-    assert body["total_requests"] == 2
+    assert body["total_requests"] == 3
     assert body["total_prompt_tokens"] == 150
     assert body["total_completion_tokens"] == 50

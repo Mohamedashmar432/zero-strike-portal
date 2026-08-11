@@ -13,5 +13,13 @@ class WorkspaceSettings(Document):
 
     default_report_template: ReportTemplate = "standard"
 
+    # "Project BYOK": when True, each project brings its own AI provider + key and is fully
+    # isolated -- a project's key serves only that project and never falls back to the
+    # portal-wide provider, and a project without one has AI disabled entirely. When False
+    # (the default) every project shares the admin's portal-wide provider, as it always has.
+    # Read through ai_provider_config_service.byok_enabled(); enforced in
+    # ai_provider_config_service.resolve_failover_configs().
+    project_byok_enabled: bool = False
+
     class Settings:
         name = "workspace_settings"
