@@ -60,6 +60,9 @@ async def list_frameworks(user: User = Depends(get_current_user)):
                         title=c.title,
                         reference=c.reference,
                         code_assessable=c.selector is not None,
+                        domain=c.domain,
+                        description=c.description,
+                        recommendation=c.recommendation,
                         manual_reason=c.manual_reason,
                     )
                     for c in f.controls

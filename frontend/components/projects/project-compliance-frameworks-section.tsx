@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ShieldCheck } from "lucide-react";
+import { CheckCircle2, Shield, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/compliance";
 import { refetchWhileAnyItemActive } from "@/lib/api/polling";
 import { queryKeys } from "@/lib/api/query-keys";
+import { cn } from "@/lib/utils";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString();
@@ -95,10 +96,37 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {frameworks.map((framework) => {
           const latest = latestSummaryFor(audits, framework.key);
+          const score =
+            latest?.summary.compliance_score ??
+            (latest && latest.summary.assessed_total > 0
+              ? Math.round((latest.summary.passed / latest.summary.assessed_total) * 100)
+              : null);
+
           return (
-            <Card key={framework.key}>
-              <CardHeader>
-                <CardTitle>{framework.title}</CardTitle>
+            <Card
+              key={framework.key}
+              className="flex flex-col justify-between border-border/80 transition-all hover:border-border"
+            >
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-base font-semibold leading-tight">
+                    {framework.title}
+                  </CardTitle>
+                  {score !== null && (
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-2 py-0.5 font-mono text-xs font-bold",
+                        score >= 80
+                          ? "bg-status-success/15 text-status-success"
+                          : score >= 50
+                            ? "bg-severity-medium/15 text-severity-medium"
+                            : "bg-severity-critical/15 text-severity-critical"
+                      )}
+                    >
+                      {score}%
+                    </span>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {latest ? (
@@ -109,6 +137,29 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
                       </span>{" "}
                       code-assessable controls passed
                     </p>
+
+                    {/* Progress Bar */}
+                    <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div
+                        className="bg-status-success transition-all"
+                        style={{
+                          width: `${latest.summary.assessed_total > 0 ? (latest.summary.passed / latest.summary.assessed_total) * 100 : 0}%`,
+                        }}
+                      />
+                      <div
+                        className="bg-severity-critical transition-all"
+                        style={{
+                          width: `${latest.summary.assessed_total > 0 ? (latest.summary.failed / latest.summary.assessed_total) * 100 : 0}%`,
+                        }}
+                      />
+                      <div
+                        className="bg-severity-medium transition-all"
+                        style={{
+                          width: `${latest.summary.assessed_total > 0 ? (latest.summary.partial / latest.summary.assessed_total) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+
                     <p className="text-xs text-muted-foreground">
                       {latest.summary.failed} failed · {latest.summary.partial} partial ·{" "}
                       {latest.summary.needs_manual_review} need manual review
@@ -119,7 +170,7 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
                     <Button
                       variant="link"
                       size="sm"
-                      className="h-auto p-0"
+                      className="h-auto p-0 text-primary"
                       nativeButton={false}
                       render={
                         <Link href={`/projects/${projectId}/compliance/${latest.audit.id}`} />
@@ -167,7 +218,7 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
               <Link
                 key={audit.id}
                 href={`/projects/${projectId}/compliance/${audit.id}`}
-                className="flex items-center justify-between gap-3 rounded-xl border border-border p-3 hover:bg-accent/50"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border p-3 transition-colors hover:bg-accent/50"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">

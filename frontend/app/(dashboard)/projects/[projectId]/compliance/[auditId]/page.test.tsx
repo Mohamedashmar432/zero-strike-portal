@@ -14,6 +14,7 @@ function summary(framework: string): FrameworkSummary {
     partial: 0,
     not_applicable: 0,
     needs_manual_review: 0,
+    compliance_score: 0,
   };
 }
 
@@ -24,6 +25,9 @@ function control(framework: string, control_id: string, status: ControlStatus): 
     control_title: control_id,
     control_reference: control_id,
     status,
+    domain: "General Controls",
+    description: "",
+    recommendation: "",
     rationale: "",
     ai_explanation: null,
     ai_remediation: null,

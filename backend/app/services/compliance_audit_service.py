@@ -127,6 +127,9 @@ def _evaluate_control(
         "control_id": control.id,
         "control_title": control.title,
         "control_reference": control.reference,
+        "domain": control.domain,
+        "description": control.description,
+        "recommendation": control.recommendation,
     }
 
     if control.selector is None:
@@ -194,17 +197,22 @@ def evaluate(
         for control in framework.controls
     ]
 
+    assessed_total = sum(1 for c in framework.controls if c.selector is not None)
+    passed_count = sum(1 for r in results if r.status == "pass")
+    score = round((passed_count / assessed_total) * 100) if assessed_total > 0 else 0
+
     summary = FrameworkSummary(
         framework=framework.key,
         framework_title=framework.title,
         scope_note=framework.scope_note,
         controls_total=len(results),
-        assessed_total=sum(1 for c in framework.controls if c.selector is not None),
-        passed=sum(1 for r in results if r.status == "pass"),
+        assessed_total=assessed_total,
+        passed=passed_count,
         failed=sum(1 for r in results if r.status == "fail"),
         partial=sum(1 for r in results if r.status == "partial"),
         not_applicable=sum(1 for r in results if r.status == "not_applicable"),
         needs_manual_review=sum(1 for r in results if r.status == "needs_manual_review"),
+        compliance_score=score,
     )
     return summary, results
 
@@ -291,11 +299,18 @@ def _narrative_payload(framework: Framework, results: list[ControlResult]) -> di
             {
                 "control_id": r.control_id,
                 "control_title": r.control_title,
+                "domain": r.domain,
                 "status": r.status,
                 "matched_findings": r.evidence_total,
                 "severity_counts": r.severity_counts,
                 "sample_findings": [
-                    {"rule_id": e.rule_id, "severity": e.severity, "message": _clip(e.message)}
+                    {
+                        "file": e.file,
+                        "line": e.line,
+                        "rule_id": e.rule_id,
+                        "severity": e.severity,
+                        "message": _clip(e.message),
+                    }
                     for e in r.evidence[:3]
                 ],
             }

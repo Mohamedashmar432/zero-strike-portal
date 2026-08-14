@@ -23,6 +23,9 @@ export type ControlSummary = {
   id: string;
   title: string;
   reference: string;
+  domain: string;
+  description: string;
+  recommendation: string;
   // False for governance/process controls no code scanner can evidence.
   code_assessable: boolean;
   manual_reason: string | null;
@@ -52,6 +55,9 @@ export type ControlResult = {
   control_id: string;
   control_title: string;
   control_reference: string;
+  domain: string;
+  description: string;
+  recommendation: string;
   status: ControlStatus;
   rationale: string;
   ai_explanation: string | null;
@@ -73,6 +79,7 @@ export type FrameworkSummary = {
   partial: number;
   not_applicable: number;
   needs_manual_review: number;
+  compliance_score: number;
 };
 
 /** The audit without its control bodies -- what the project's history list renders. */

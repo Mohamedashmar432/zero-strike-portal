@@ -25,6 +25,7 @@ function fwSummary(framework: string, passed: number): FrameworkSummary {
     partial: 0,
     not_applicable: 0,
     needs_manual_review: 5,
+    compliance_score: Math.round((passed / 5) * 100),
   };
 }
 

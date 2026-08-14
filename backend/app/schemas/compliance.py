@@ -18,6 +18,9 @@ class ControlSummaryOut(BaseModel):
     title: str
     reference: str
     code_assessable: bool
+    domain: str = "General Controls"
+    description: str = ""
+    recommendation: str = ""
     manual_reason: str | None = None
 
 
@@ -60,6 +63,9 @@ class ControlResultOut(BaseModel):
     control_title: str
     control_reference: str
     status: ControlStatus
+    domain: str = "General Controls"
+    description: str = ""
+    recommendation: str = ""
     rationale: str
     ai_explanation: str | None = None
     ai_remediation: str | None = None
@@ -79,6 +85,7 @@ class FrameworkSummaryOut(BaseModel):
     partial: int
     not_applicable: int
     needs_manual_review: int
+    compliance_score: int = 0
 
 
 class ComplianceAuditListItem(BaseModel):

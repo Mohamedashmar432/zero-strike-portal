@@ -104,11 +104,15 @@ def test_frameworks_endpoint_lists_the_catalog(client):
     r = client.get("/api/v1/compliance/frameworks", headers=_headers(owner))
     assert r.status_code == 200
     items = r.json()["items"]
-    assert {f["key"] for f in items} == {"soc2", "iso27001", "gdpr", "hipaa"}
+    assert {f["key"] for f in items} == {"soc2", "iso27001", "gdpr", "hipaa", "pcidss", "nist80053"}
     soc2 = next(f for f in items if f["key"] == "soc2")
     assert soc2["controls_total"] == len(soc2["controls"])
     assert 0 < soc2["assessed_total"] < soc2["controls_total"]
     assert soc2["scope_note"]
+    # Controls must carry domain, description, recommendation
+    assert all(c["domain"] for c in soc2["controls"])
+    assert all(c["description"] for c in soc2["controls"])
+    assert all(c["recommendation"] for c in soc2["controls"])
     # Manual controls must arrive flagged, with their reason, so the wizard can be honest.
     manual = [c for c in soc2["controls"] if not c["code_assessable"]]
     assert manual and all(c["manual_reason"] for c in manual)

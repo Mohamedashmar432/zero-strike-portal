@@ -46,6 +46,9 @@ class ControlResult(BaseModel):
     control_title: str
     control_reference: str
     status: ControlStatus
+    domain: str = "General Controls"
+    description: str = ""
+    recommendation: str = ""
     rationale: str  # deterministic, template-generated -- never LLM-written
     ai_explanation: str | None = None
     ai_remediation: str | None = None
@@ -65,6 +68,7 @@ class FrameworkSummary(BaseModel):
     partial: int = 0
     not_applicable: int = 0
     needs_manual_review: int = 0
+    compliance_score: int = 0  # percentage of assessed controls passed (0-100)
 
 
 class ComplianceAudit(Document):
