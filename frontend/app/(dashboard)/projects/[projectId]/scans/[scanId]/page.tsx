@@ -220,39 +220,39 @@ export function FindingItem({
       : undefined;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
+    <div className="overflow-hidden rounded-xl border border-border/70 bg-card/40 transition-colors hover:border-border">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-4 p-4 text-left hover:bg-accent/40"
+        className="flex w-full items-center gap-3.5 p-3.5 text-left transition-colors hover:bg-accent/40"
       >
         <ChevronRight
-          className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+          className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-150", expanded && "rotate-90 text-primary")}
         />
         {finding.severity && <SeverityBadge severity={finding.severity} />}
         {adjustedSeverity && (
           <span
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono"
             title={analysis?.insight?.severity_reasoning || "AI-adjusted severity"}
           >
-            <span className="font-mono font-semibold">AI→</span>
+            <span className="font-semibold text-purple-400">AI→</span>
             <SeverityBadge severity={adjustedSeverity} />
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{finding.rule_name || finding.rule_id || "Finding"}</p>
-          <p className="truncate font-mono text-xs text-muted-foreground">
+          <p className="truncate text-xs font-semibold text-foreground">{finding.rule_name || finding.rule_id || "Finding"}</p>
+          <p className="truncate font-mono text-[11px] text-muted-foreground">
             {fileLine(finding.location.file, finding.location.start_line)}
           </p>
         </div>
         <div className="hidden shrink-0 gap-6 text-right text-xs md:flex">
           <div>
-            <p className="text-muted-foreground">Category</p>
-            <p className="font-medium">{finding.category ?? "—"}</p>
+            <p className="text-[10px] uppercase font-mono text-muted-foreground">Category</p>
+            <p className="font-medium text-xs text-foreground">{finding.category ?? "—"}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Priority</p>
-            <p className={cn("font-mono font-bold", finding.priority_tier && PRIORITY_CLASS[finding.priority_tier])}>
+            <p className="text-[10px] uppercase font-mono text-muted-foreground">Priority</p>
+            <p className={cn("font-mono font-bold text-xs", finding.priority_tier && PRIORITY_CLASS[finding.priority_tier])}>
               {finding.priority_score != null ? finding.priority_score.toFixed(1) : "—"}
               {finding.priority_tier ? ` (${PRIORITY_LABELS[finding.priority_tier]})` : ""}
             </p>
@@ -260,7 +260,7 @@ export function FindingItem({
         </div>
       </button>
       {expanded && (
-        <div className={cn("grid grid-cols-1 border-t border-border", snippet && "lg:grid-cols-12")}>
+        <div className={cn("grid grid-cols-1 border-t border-border/70", snippet && "lg:grid-cols-12")}>
           {snippet && (
             <div className="lg:col-span-8">
               <CodeSnippet

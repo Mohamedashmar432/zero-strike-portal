@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, LayoutGrid, List as ListIcon, Plus } from "lucide-react";
+import { ChevronDown, FolderGit2, FolderKanban, LayoutGrid, List as ListIcon, Plus, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useMemo, useState } from "react";
@@ -14,6 +14,7 @@ import { ScanStatusSummaryPills } from "@/components/scans/scan-status-summary-p
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getProjectsStats, listProjects, type ProjectStatsItem } from "@/lib/api/projects";
 
@@ -79,29 +80,31 @@ function ProjectsPageContent() {
     <div className="space-y-6">
       <PageHeader
         title="Projects"
-        description="Run ZeroStrike SAST scans against your codebases and review the findings."
+        description="Continuous code repositories, scan histories, and vulnerabilities."
         actions={
           <>
-            <div className="flex rounded-lg border border-border p-0.5">
+            <div className="flex rounded-lg border border-border/80 bg-muted/30 p-0.5">
               <Button
                 variant={view === "list" ? "secondary" : "ghost"}
-                size="icon-sm"
+                size="icon-xs"
                 aria-label="List view"
                 onClick={() => setView("list")}
+                className="h-7 w-7"
               >
-                <ListIcon />
+                <ListIcon className="size-3.5" />
               </Button>
               <Button
                 variant={view === "grid" ? "secondary" : "ghost"}
-                size="icon-sm"
+                size="icon-xs"
                 aria-label="Grid view"
                 onClick={() => setView("grid")}
+                className="h-7 w-7"
               >
-                <LayoutGrid />
+                <LayoutGrid className="size-3.5" />
               </Button>
             </div>
-            <Button nativeButton={false} render={<Link href="/projects/new" />}>
-              <Plus />
+            <Button nativeButton={false} render={<Link href="/projects/new" />} size="sm" className="gap-1.5 font-medium">
+              <Plus className="size-4" />
               New Project
             </Button>
           </>
@@ -111,14 +114,14 @@ function ProjectsPageContent() {
       <FilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Search projects…"
+        searchPlaceholder="Search projects by name or description…"
         facets={[
           {
             type: "select",
             value: statusFilter,
             onChange: (v) => setStatusFilter(v as StatusFilter),
             options: [
-              { value: "all", label: "All statuses" },
+              { value: "all", label: "All Statuses" },
               { value: "active", label: "Active" },
               { value: "archived", label: "Archived" },
             ],
@@ -132,40 +135,55 @@ function ProjectsPageContent() {
             {filtered.map((p) => {
               const s = statsFor(p.id);
               return (
-              <Card key={p.id}>
-                <CardContent className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <Link href={`/projects/${p.id}`} className="font-medium underline-offset-4 hover:underline">
-                      {p.name}
-                    </Link>
-                    {s.risk_repo_count > 0 && (
-                      <span className="rounded-sm bg-severity-critical/15 px-2 py-0.5 text-xs font-medium text-severity-critical">
-                        {s.risk_repo_count} at risk
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {p.scan_count} scan{p.scan_count === 1 ? "" : "s"} · {p.is_archived ? "Archived" : "Active"}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{s.total_findings} findings</span>
-                    <ScanStatusSummaryPills counts={s.scan_status_counts} />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleExpanded(p.id)}
-                    className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    <ChevronDown className={cn("size-3.5 transition-transform", expanded.has(p.id) && "rotate-180")} />
-                    Repositories
-                  </button>
-                  {expanded.has(p.id) && (
-                    <div className="border-t border-border pt-3">
-                      <ProjectRepoBreakdown projectId={p.id} />
+                <Card key={p.id} className="border-border/80 bg-card/60 transition-all hover:border-border hover:bg-card/90">
+                  <CardContent className="space-y-3.5 p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FolderKanban className="size-4.5 shrink-0 text-primary" />
+                        <Link href={`/projects/${p.id}`} className="font-semibold text-foreground text-sm truncate hover:text-primary transition-colors">
+                          {p.name}
+                        </Link>
+                      </div>
+                      {s.risk_repo_count > 0 && (
+                        <span className="flex items-center gap-1 rounded-md bg-severity-critical/15 px-2 py-0.5 text-[11px] font-semibold text-severity-critical shrink-0">
+                          <ShieldAlert className="size-3" />
+                          {s.risk_repo_count} at risk
+                        </span>
+                      )}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {p.description || "ZeroStrike SAST project repository."}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground border-t border-border/50 pt-2.5">
+                      <span className="font-mono">{p.scan_count} scan{p.scan_count === 1 ? "" : "s"}</span>
+                      <Badge variant={p.is_archived ? "outline" : "secondary"} className="text-[10px] uppercase font-mono">
+                        {p.is_archived ? "Archived" : "Active"}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-bold text-foreground">
+                        {s.total_findings} finding{s.total_findings === 1 ? "" : "s"}
+                      </span>
+                      <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(p.id)}
+                      className="flex w-full items-center justify-between rounded-md bg-muted/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                        <FolderGit2 className="size-3.5 text-primary" />
+                        Repositories ({s.total_repo_count})
+                      </span>
+                      <ChevronDown className={cn("size-3.5 transition-transform duration-150", expanded.has(p.id) && "rotate-180")} />
+                    </button>
+                    {expanded.has(p.id) && (
+                      <div className="border-t border-border/60 pt-3">
+                        <ProjectRepoBreakdown projectId={p.id} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               );
             })}
           </div>
@@ -174,61 +192,74 @@ function ProjectsPageContent() {
         <DataTableCard isLoading={isLoading} isError={isError} errorMessage="Failed to load projects." isEmpty={isEmpty} emptyState={emptyState}>
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Findings</TableHead>
-                <TableHead>Scan Status</TableHead>
-                <TableHead>At-Risk Repos</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-10" />
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">Project Name</TableHead>
+                <TableHead className="py-2.5">Findings</TableHead>
+                <TableHead className="py-2.5">Scan Status</TableHead>
+                <TableHead className="py-2.5">At-Risk Repos</TableHead>
+                <TableHead className="py-2.5">Status</TableHead>
+                <TableHead className="w-10 py-2.5" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((p) => {
                 const s = statsFor(p.id);
                 return (
-                <Fragment key={p.id}>
-                  <TableRow className="cursor-pointer" onClick={() => toggleExpanded(p.id)}>
-                    <TableCell>
-                      <Link
-                        href={`/projects/${p.id}`}
-                        className="font-medium underline-offset-4 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {p.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{s.total_findings}</TableCell>
-                    <TableCell>
-                      <ScanStatusSummaryPills counts={s.scan_status_counts} />
-                    </TableCell>
-                    <TableCell>
-                      {s.risk_repo_count > 0 ? (
-                        <span className="font-mono font-semibold text-severity-critical">
-                          {s.risk_repo_count} / {s.total_repo_count}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">{s.total_repo_count}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{p.is_archived ? "Archived" : "Active"}</TableCell>
-                    <TableCell>
-                      <ChevronDown
-                        className={cn("size-4 text-muted-foreground transition-transform", expanded.has(p.id) && "rotate-180")}
-                      />
-                    </TableCell>
-                  </TableRow>
-                  {expanded.has(p.id) && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="bg-muted/20 p-4">
-                        <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                          Repositories
-                        </p>
-                        <ProjectRepoBreakdown projectId={p.id} />
+                  <Fragment key={p.id}>
+                    <TableRow className="cursor-pointer transition-colors hover:bg-muted/30 text-xs" onClick={() => toggleExpanded(p.id)}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban className="size-4 shrink-0 text-primary" />
+                          <Link
+                            href={`/projects/${p.id}`}
+                            className="font-semibold text-foreground underline-offset-4 hover:underline hover:text-primary"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {p.name}
+                          </Link>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono font-bold text-foreground">{s.total_findings}</TableCell>
+                      <TableCell>
+                        <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                      </TableCell>
+                      <TableCell>
+                        {s.risk_repo_count > 0 ? (
+                          <span className="font-mono font-bold text-severity-critical flex items-center gap-1">
+                            <ShieldAlert className="size-3.5" />
+                            {s.risk_repo_count} / {s.total_repo_count}
+                          </span>
+                        ) : (
+                          <span className="font-mono text-muted-foreground">{s.total_repo_count}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={p.is_archived ? "outline" : "secondary"} className="text-[10px] uppercase font-mono">
+                          {p.is_archived ? "Archived" : "Active"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <ChevronDown
+                          className={cn("size-3.5 text-muted-foreground transition-transform duration-150", expanded.has(p.id) && "rotate-180")}
+                        />
                       </TableCell>
                     </TableRow>
-                  )}
-                </Fragment>
+                    {expanded.has(p.id) && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={6} className="bg-muted/30 p-0 border-b border-border/80">
+                          <div className="p-4 pl-8 border-l-2 border-primary/50 space-y-2.5 bg-muted/20">
+                            <div className="flex items-center gap-2">
+                              <FolderGit2 className="size-3.5 text-primary" />
+                              <span className="text-[11px] font-bold tracking-wider text-muted-foreground uppercase font-mono">
+                                Connected Repositories & Security Status
+                              </span>
+                            </div>
+                            <ProjectRepoBreakdown projectId={p.id} />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
                 );
               })}
             </TableBody>

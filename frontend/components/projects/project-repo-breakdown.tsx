@@ -1,7 +1,19 @@
 "use client";
 
 import { useQueries, useQuery } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Calendar,
+  CheckCircle2,
+  FolderGit2,
+  GitBranch,
+  Shield,
+  ShieldAlert,
+} from "lucide-react";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { projectRiskStatus, SeverityCountPills } from "@/components/severity/severity-count-pills";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,14 +26,6 @@ import { listScans, type Scan } from "@/lib/api/scans";
 
 const EMPTY_COUNTS: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 
-/**
- * Shows a project's connected repos with per-repo severity/status/last-scan.
- *
- * Only cloud scans record a `repo_url`, matched here against each repo's
- * `clone_url` — local/CI scans can't be attributed to a specific connected repo
- * with the data this app tracks today, so a repo with only local/CI scan history
- * shows as "No scans yet" rather than a guessed status.
- */
 export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
   const { data: repos, isLoading: reposLoading } = useQuery({
     queryKey: queryKeys.projects.repos(projectId),
@@ -55,19 +59,28 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
     })),
   });
 
-  if (reposLoading || scansLoading) return <Skeleton className="h-16 w-full" />;
+  if (reposLoading || scansLoading) {
+    return (
+      <div className="space-y-2 py-1">
+        <Skeleton className="h-16 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   if (!repos || repos.length === 0) {
     return (
-      <EmptyState
-        title="No repositories connected"
-        description="Connect a repo on this project's Repositories tab to see it here."
-      />
+      <div className="rounded-xl border border-dashed border-border/80 bg-background/50 p-6 text-center text-xs">
+        <FolderGit2 className="mx-auto size-6 text-muted-foreground/50 mb-1.5" />
+        <p className="font-medium text-foreground">No repositories linked to this project</p>
+        <p className="text-muted-foreground text-[11px] mt-0.5">
+          Connect a GitHub or Azure DevOps repository on the project settings tab.
+        </p>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {repos.map((repo, i) => {
         const scan = matchedScans[i];
         const report = reportQueries[i]?.data;
@@ -81,36 +94,76 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
             }
           : EMPTY_COUNTS;
         const risk = projectRiskStatus(counts);
+
         return (
           <div
             key={repo.id}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background px-3 py-2"
+            className="flex flex-col gap-3 rounded-xl border border-border/80 bg-background p-3.5 shadow-xs transition-all hover:border-border hover:shadow-sm sm:flex-row sm:items-center sm:justify-between border-l-4 border-l-primary/60"
           >
-            <div className="min-w-0">
-              <p className="truncate font-mono text-sm">
-                {repo.label ? `${repo.label} — ${repo.repo_full_name}` : repo.repo_full_name}
-              </p>
-              <p className="text-xs text-muted-foreground">{repo.selected_branch}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-4">
-              <SeverityCountPills counts={counts} />
-              {scan ? (
-                <span className={cn("rounded-sm px-2 py-0.5 text-xs font-medium", risk.className)}>
-                  {risk.label}
+            {/* Left Repository Metadata */}
+            <div className="space-y-1.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+                  <FolderGit2 className="size-3.5" />
+                </div>
+                <span className="font-mono text-xs font-bold text-foreground truncate">
+                  {repo.repo_full_name}
                 </span>
-              ) : (
-                <span className="text-xs text-muted-foreground">No scans yet</span>
+                <Badge variant="outline" className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                  {repo.provider}
+                </Badge>
+                <div className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  <GitBranch className="size-3 text-primary/80" />
+                  <span>{repo.selected_branch || "main"}</span>
+                </div>
+              </div>
+
+              {repo.label && (
+                <p className="text-[11px] text-muted-foreground font-mono pl-8 line-clamp-1">
+                  Label: <span className="text-foreground/80">{repo.label}</span>
+                </p>
               )}
-              <span className="text-xs text-muted-foreground">
-                {scan ? new Date(scan.created_at).toLocaleDateString() : "—"}
-              </span>
-              {scan && (
-                <Link
-                  href={`/projects/${projectId}/scans/${scan.id}`}
-                  className="text-xs font-medium text-primary hover:underline"
+            </div>
+
+            {/* Right Status & Scan Details */}
+            <div className="flex flex-wrap items-center gap-3 shrink-0 pt-2 sm:pt-0 border-t border-border/40 sm:border-t-0">
+              {/* Finding Severity Counts */}
+              <div className="shrink-0">
+                <SeverityCountPills counts={counts} />
+              </div>
+
+              {/* Health Risk Badge */}
+              {scan ? (
+                <Badge
+                  variant="outline"
+                  className={cn("font-mono text-[10px] font-semibold uppercase", risk.className)}
                 >
-                  View
-                </Link>
+                  {risk.label}
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="font-mono text-[10px] text-muted-foreground">
+                  No Scans
+                </Badge>
+              )}
+
+              {/* Timestamp */}
+              <div className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                <Calendar className="size-3 opacity-60" />
+                <span>{scan ? new Date(scan.created_at).toLocaleDateString() : "—"}</span>
+              </div>
+
+              {/* Direct View Action */}
+              {scan && (
+                <Button
+                  nativeButton={false}
+                  render={<Link href={`/projects/${projectId}/scans/${scan.id}`} />}
+                  size="xs"
+                  variant="outline"
+                  className="gap-1 font-medium text-xs h-7 border-border/80 hover:bg-muted hover:text-foreground"
+                >
+                  <span>View Scan</span>
+                  <ArrowRight className="size-3" />
+                </Button>
               )}
             </div>
           </div>

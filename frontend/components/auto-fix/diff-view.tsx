@@ -18,7 +18,7 @@ type UnifiedRow = {
 
 function splitLines(value: string): string[] {
   const lines = value.split("\n");
-  if (lines.length && lines[lines.length - 1] === "") lines.pop(); // drop empty tail from a final newline
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 
@@ -51,13 +51,13 @@ function buildUnifiedRows(original: string, patched: string): UnifiedRow[] {
 }
 
 function Cell({ no, text, tone }: { no: number | null; text: string | null; tone: "same" | "add" | "del" | "empty" }) {
-  const bg = tone === "add" ? "bg-emerald-500/10" : tone === "del" ? "bg-severity-critical/15" : "";
+  const bg = tone === "add" ? "bg-emerald-500/15 text-emerald-300" : tone === "del" ? "bg-severity-critical/15 text-rose-300" : "";
   const sign = tone === "add" ? "+" : tone === "del" ? "-" : " ";
   return (
     <>
-      <td className={cn("w-px px-2 py-0.5 text-right text-[#8a827d] select-none tabular-nums", bg)}>{no ?? ""}</td>
-      <td className={cn("w-1/2 px-3 py-0.5 whitespace-pre", bg)}>
-        {text !== null ? <span className="text-[#8a827d] select-none">{sign} </span> : null}
+      <td className={cn("w-px px-2.5 py-0.5 text-right text-[#7d8590] select-none tabular-nums font-mono text-[11px]", bg)}>{no ?? ""}</td>
+      <td className={cn("w-1/2 px-3 py-0.5 whitespace-pre font-mono text-[12px]", bg)}>
+        {text !== null ? <span className="text-[#7d8590] select-none font-bold">{sign} </span> : null}
         {text}
       </td>
     </>
@@ -66,15 +66,13 @@ function Cell({ no, text, tone }: { no: number | null; text: string | null; tone
 
 function DiffHeader({ filePath }: { filePath: string }) {
   return (
-    <div className="border-b border-white/10 px-3 py-1.5 font-mono text-xs text-[#8a827d]">{filePath}</div>
+    <div className="border-b border-border/80 bg-muted/40 px-3.5 py-2 font-mono text-xs font-medium text-foreground flex items-center gap-2">
+      <span className="text-primary font-bold">diff --git</span>
+      <span>{filePath}</span>
+    </div>
   );
 }
 
-/**
- * GitHub-style code diff: red rows are the vulnerable lines, green rows the AI-recommended fix.
- * `mode="unified"` (default) is the single-column GitHub PR look; `mode="split"` keeps the
- * side-by-side view. Computed client-side with jsdiff; palette mirrors findings/code-snippet.tsx.
- */
 export function DiffView({
   original,
   patched,
@@ -87,7 +85,7 @@ export function DiffView({
   filePath?: string | null;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg bg-[#1e1c1b] text-[#d4ccc8]">
+    <div className="overflow-x-auto rounded-lg border border-border/70 bg-[#0d1117] text-[#e6edf3]">
       {filePath ? <DiffHeader filePath={filePath} /> : null}
       {mode === "split" ? (
         <table className="w-full border-collapse font-mono text-xs leading-relaxed">
@@ -108,18 +106,18 @@ export function DiffView({
         <table className="w-full border-collapse font-mono text-xs leading-relaxed">
           <tbody>
             {buildUnifiedRows(original, patched).map((r, i) => {
-              const bg = r.kind === "add" ? "bg-emerald-500/10" : r.kind === "del" ? "bg-severity-critical/15" : "";
+              const bg = r.kind === "add" ? "bg-emerald-500/15 text-emerald-300" : r.kind === "del" ? "bg-severity-critical/15 text-rose-300" : "";
               const sign = r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ";
               return (
                 <tr key={i}>
-                  <td className={cn("w-px px-2 py-0.5 text-right text-[#8a827d] select-none tabular-nums", bg)}>
+                  <td className={cn("w-px px-2.5 py-0.5 text-right text-[#7d8590] select-none tabular-nums font-mono text-[11px]", bg)}>
                     {r.oldNo ?? ""}
                   </td>
-                  <td className={cn("w-px px-2 py-0.5 text-right text-[#8a827d] select-none tabular-nums", bg)}>
+                  <td className={cn("w-px px-2.5 py-0.5 text-right text-[#7d8590] select-none tabular-nums font-mono text-[11px]", bg)}>
                     {r.newNo ?? ""}
                   </td>
-                  <td className={cn("px-3 py-0.5 whitespace-pre", bg)}>
-                    <span className="text-[#8a827d] select-none">{sign} </span>
+                  <td className={cn("px-3 py-0.5 whitespace-pre font-mono text-[12px]", bg)}>
+                    <span className="text-[#7d8590] select-none font-bold">{sign} </span>
                     {r.text}
                   </td>
                 </tr>

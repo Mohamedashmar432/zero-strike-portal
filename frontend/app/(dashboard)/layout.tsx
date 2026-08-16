@@ -30,7 +30,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main
         className={cn(
           "min-h-screen p-6 pt-16 transition-[margin] duration-200 md:pt-6",
-          pinned ? "md:ml-64" : "md:ml-16"
+          pinned ? "md:ml-60" : "md:ml-16"
         )}
       >
         {children}

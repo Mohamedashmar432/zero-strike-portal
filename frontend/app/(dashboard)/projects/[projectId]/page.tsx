@@ -44,13 +44,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Activity, ChevronDown, Play, ShieldAlert, Swords } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/providers/auth-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/common/stat-card";
+import { ProjectSidebar } from "@/components/projects/project-sidebar";
+import { ProjectOverviewHub } from "@/components/projects/project-overview-hub";
+import { ProjectDastTab } from "@/components/projects/project-dast-tab";
+import { ProjectAttackSimTab } from "@/components/projects/project-attack-sim-tab";
+import { ProjectOwaspSection } from "@/components/projects/project-owasp-section";
 import { ProjectHistoryTab } from "@/components/projects/project-history-tab";
 import { AiAnalyticsDashboard } from "@/components/ai/ai-analytics-dashboard";
 import { ProjectComplianceTab } from "@/components/projects/project-compliance-tab";
+import { ProjectComplianceConfigTab } from "@/components/projects/project-compliance-config-tab";
 import { ProjectAutoFixTab } from "@/components/projects/project-auto-fix-tab";
 import { ProjectSettingsTab } from "@/components/projects/project-settings-tab";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
@@ -124,69 +138,95 @@ function OverviewTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="divide-y">
-            <DetailRow label="Name">{project.name}</DetailRow>
-            <DetailRow label="Owner">
-              {owners.length === 0 ? (
-                "—"
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  {owners.map((o) => (
-                    <span key={o.id} className="flex items-center gap-1.5">
-                      <Avatar size="sm">
-                        <AvatarFallback>{getInitials(o.name ?? o.invited_email)}</AvatarFallback>
-                      </Avatar>
-                      {o.name ?? o.invited_email}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </DetailRow>
-            <DetailRow label="Description">
-              <span className="text-muted-foreground">{project.description || "No description."}</span>
-            </DetailRow>
-            <DetailRow label="Status">{project.is_archived ? "Archived" : "Active"}</DetailRow>
-            <DetailRow label="Source">{sources.length ? sources.join(", ") : "No repositories connected"}</DetailRow>
-            <DetailRow label="Last scan">
-              {project.last_scan_at ? parseApiDate(project.last_scan_at).toLocaleString() : "Never"}
-            </DetailRow>
-            <DetailRow label="AI usage">{aiUsageText}</DetailRow>
-            <DetailRow label="Input tokens">
-              {aiUsage ? aiUsage.total_prompt_tokens.toLocaleString() : "—"}
-            </DetailRow>
-            <DetailRow label="Output tokens">
-              {aiUsage ? aiUsage.total_completion_tokens.toLocaleString() : "—"}
-            </DetailRow>
-          </dl>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
-          label="Risk Level"
-          value={<span className={cn("rounded-sm px-2 py-0.5 text-lg", risk.className)}>{risk.label}</span>}
+          label="Security Risk Level"
+          value={<span className={cn("rounded-md px-2.5 py-0.5 text-base font-semibold", risk.className)}>{risk.label}</span>}
+          caption={risk.label === "At Risk" ? "Critical vulnerabilities present" : "No critical blockers"}
         />
-        <StatCard label="Total Scans" value={project.scan_count} />
+        <StatCard label="Total Scan Executions" value={project.scan_count} caption="Across all branches & commits" />
         <StatCard
-          label="Overall Findings"
+          label="Active Security Findings"
           value={activity?.current_findings_total ?? project.total_findings ?? 0}
-          caption={connectedCount ? `latest scan across ${connectedCount} repo(s)` : undefined}
+          caption={connectedCount ? `Latest scan across ${connectedCount} repo(s)` : undefined}
+          valueClassName="font-mono font-bold"
         />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-normal text-muted-foreground">Current findings by severity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <SeverityCountPills counts={currentCounts} />
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="lg:col-span-8">
+          <Card className="border-border/80 bg-card/60">
+            <CardHeader className="border-b border-border/60 pb-3">
+              <CardTitle className="text-sm font-semibold tracking-tight">Project Metadata & Integrations</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4">
+              <dl className="divide-y divide-border/50 text-xs">
+                <DetailRow label="Project Name">
+                  <span className="font-semibold text-foreground">{project.name}</span>
+                </DetailRow>
+                <DetailRow label="Description">
+                  <span className="text-muted-foreground">{project.description || "No description provided."}</span>
+                </DetailRow>
+                <DetailRow label="Ownership">
+                  {owners.length === 0 ? (
+                    "—"
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {owners.map((o) => (
+                        <span key={o.id} className="flex items-center gap-1.5 font-medium">
+                          <Avatar size="sm" className="size-5 border border-border">
+                            <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
+                              {getInitials(o.name ?? o.invited_email)}
+                            </AvatarFallback>
+                          </Avatar>
+                          {o.name ?? o.invited_email}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </DetailRow>
+                <DetailRow label="Lifecycle Status">
+                  <Badge variant={project.is_archived ? "outline" : "secondary"} className="text-[10px] font-mono uppercase">
+                    {project.is_archived ? "Archived" : "Active"}
+                  </Badge>
+                </DetailRow>
+                <DetailRow label="Source Repositories">
+                  <span className="font-mono">{sources.length ? sources.join(", ") : "No repositories connected"}</span>
+                </DetailRow>
+                <DetailRow label="Last Security Scan">
+                  <span className="font-mono">
+                    {project.last_scan_at ? parseApiDate(project.last_scan_at).toLocaleString() : "Never"}
+                  </span>
+                </DetailRow>
+                <DetailRow label="AI Auditor Integration">
+                  <span className="font-mono text-muted-foreground">{aiUsageText}</span>
+                </DetailRow>
+                <DetailRow label="Total AI Token Usage">
+                  <span className="font-mono">
+                    {aiUsage ? `${(aiUsage.total_prompt_tokens + aiUsage.total_completion_tokens).toLocaleString()} tokens` : "—"}
+                  </span>
+                </DetailRow>
+              </dl>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="lg:col-span-4 space-y-4">
+          <Card className="border-border/80 bg-card/60">
+            <CardHeader className="border-b border-border/60 pb-3">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono">
+                Current Findings Distribution
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 space-y-3">
+              <SeverityCountPills counts={currentCounts} />
+              <p className="text-[11px] text-muted-foreground">
+                Aggregated latest scan results for this project.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
@@ -787,82 +827,183 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const TAB_VALUES = [
+    "overview",
     "scans",
-    "repos",
+    "dast",
+    "attack-sim",
     "history",
     "compliance",
+    "compliance-config",
+    "owasp",
     "auto-fix",
     "ai-usage",
+    "repos",
     "members",
     "keys",
     "settings",
   ];
+
   const initialTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
-  const { data: project } = useQuery({
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+
+  const { data: project, isLoading: isProjectLoading } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
   });
 
+  const { data: repos } = useQuery({
+    queryKey: queryKeys.projects.repos(projectId),
+    queryFn: () => listProjectRepos(projectId),
+  });
+
+  const { data: members } = useQuery({
+    queryKey: queryKeys.projects.members(projectId),
+    queryFn: () => listMembers(projectId),
+  });
+
+  const { data: activity } = useQuery({
+    queryKey: queryKeys.projects.scanActivity(projectId),
+    queryFn: () => getProjectScanActivity(projectId),
+  });
+
+  const { data: aiUsage } = useQuery({
+    queryKey: queryKeys.projects.aiUsage(projectId),
+    queryFn: () => getProjectAiUsage(projectId),
+  });
+
+  function handleTabChange(tabId: string) {
+    setActiveTab(tabId);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tabId === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", tabId);
+    }
+    const query = params.toString();
+    router.replace(`/projects/${projectId}${query ? `?${query}` : ""}`, { scroll: false });
+  }
+
+  if (isProjectLoading || !project) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-44 w-full rounded-2xl" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  const currentCounts: SeverityCounts =
+    activity?.current_findings ??
+    project.findings_by_severity ?? {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      info: 0,
+    };
+  const risk = projectRiskStatus(currentCounts);
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={project?.name ?? "Project"}
-        breadcrumb={
-          <Breadcrumbs
-            items={[{ label: "Projects", href: "/projects" }, { label: project?.name ?? "Project" }]}
-          />
-        }
-        actions={
-          project && <Badge variant="secondary">{roleLabel(project.my_role)}</Badge>
-        }
+    <div className="space-y-4">
+      {/* Breadcrumb Navigation */}
+      <Breadcrumbs
+        items={[{ label: "Projects", href: "/projects" }, { label: project.name }]}
       />
-      <Tabs defaultValue={initialTab}>
-        <TabsList variant="line">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="scans">Scans</TabsTrigger>
-          <TabsTrigger value="repos">Repositories</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance</TabsTrigger>
-          <TabsTrigger value="auto-fix">Auto-Fix</TabsTrigger>
-          <TabsTrigger value="ai-usage">AI Usage</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="keys">Project Tokens</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
-        <TabsContent value="overview">
-          <OverviewTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="scans">
-          <ScansTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="repos">
-          <RepositoriesTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="history">
-          <ProjectHistoryTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="compliance">
-          <ProjectComplianceTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="auto-fix">
-          <ProjectAutoFixTab projectId={projectId} canApprove={canManage(project?.my_role)} />
-        </TabsContent>
-        <TabsContent value="ai-usage">
-          <AiAnalyticsDashboard scope="project" projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="members">
-          <MembersTab projectId={projectId} myRole={project?.my_role} />
-        </TabsContent>
-        <TabsContent value="keys">
-          <ApiKeysTab projectId={projectId} />
-        </TabsContent>
-        <TabsContent value="settings">
-          <ProjectSettingsTab projectId={projectId} />
-        </TabsContent>
-      </Tabs>
+
+      {/* Azure-Style Two-Tier Workspace: Secondary Project Sidebar Blade (Left) + Content (Right) */}
+      <div className="flex flex-col gap-5 lg:flex-row items-start">
+        {/* Left Column: Project Sidebar Blade */}
+        <div className="w-full lg:w-56 lg:sticky lg:top-4 shrink-0">
+          <ProjectSidebar
+            project={project}
+            activity={activity}
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+            counts={{
+              scans: project.scan_count,
+              repos: repos?.length,
+              members: members?.length,
+            }}
+          />
+        </div>
+
+        {/* Right Column: Main Module Work Area */}
+        <div className="min-w-0 flex-1 space-y-5 w-full">
+          {/* Slim Contextual Header */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-3">
+            <div className="space-y-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-bold tracking-tight text-foreground truncate">
+                  {project.name}
+                </h1>
+                <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+                  {roleLabel(project.my_role)}
+                </Badge>
+                <Badge variant="outline" className={cn("font-mono text-[10px] uppercase", risk.className)}>
+                  {risk.label}
+                </Badge>
+                {project.is_archived && (
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground uppercase font-mono">
+                    Archived
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground line-clamp-1">
+                {project.description || "ZeroStrike DevSecOps & Security Operations Hub."}
+              </p>
+            </div>
+          </div>
+
+          {/* Module View Content */}
+          <div>
+            {activeTab === "overview" && (
+              <ProjectOverviewHub
+                project={project}
+                activity={activity}
+                repos={repos}
+                aiUsage={aiUsage}
+                onNavigateTab={handleTabChange}
+              />
+            )}
+            {activeTab === "scans" && <ScansTab projectId={projectId} />}
+            {activeTab === "dast" && <ProjectDastTab projectId={projectId} />}
+            {activeTab === "attack-sim" && <ProjectAttackSimTab projectId={projectId} />}
+            {activeTab === "history" && <ProjectHistoryTab projectId={projectId} />}
+            {activeTab === "compliance" && <ProjectComplianceTab projectId={projectId} />}
+            {activeTab === "compliance-config" && (
+              <ProjectComplianceConfigTab projectId={projectId} />
+            )}
+            {activeTab === "owasp" && (
+              <Card className="border-border/80 bg-card/60 p-4">
+                <CardHeader className="px-0 pt-0 pb-3">
+                  <CardTitle className="text-sm font-semibold tracking-tight text-foreground">
+                    OWASP Top 10 Risk Radar
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-0 pb-0">
+                  <ProjectOwaspSection projectId={projectId} />
+                </CardContent>
+              </Card>
+            )}
+            {activeTab === "auto-fix" && (
+              <ProjectAutoFixTab projectId={projectId} canApprove={canManage(project?.my_role)} />
+            )}
+            {activeTab === "ai-usage" && (
+              <AiAnalyticsDashboard scope="project" projectId={projectId} />
+            )}
+            {activeTab === "repos" && <RepositoriesTab projectId={projectId} />}
+            {activeTab === "members" && (
+              <MembersTab projectId={projectId} myRole={project?.my_role} />
+            )}
+            {activeTab === "keys" && <ApiKeysTab projectId={projectId} />}
+            {activeTab === "settings" && <ProjectSettingsTab projectId={projectId} />}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

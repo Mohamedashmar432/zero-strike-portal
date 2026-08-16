@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { Activity, Binary, CheckCircle2, Cpu, RefreshCw, XCircle } from "lucide-react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatCard } from "@/components/common/stat-card";
@@ -25,13 +25,13 @@ export default function ScannerStatusPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Scanner Status"
-        description="Published scanner binaries, the live cloud-scan queue, and recent failures."
+        title="Scanner Infrastructure"
+        description="Published ZeroStrike scanner binaries, cloud scan queue telemetry, and failure logs."
       />
 
       {data && !data.engine_available && (
         <Alert variant="destructive">
-          <XCircle />
+          <XCircle className="size-4" />
           <AlertTitle>Cloud scan engine unavailable on this server</AlertTitle>
           <AlertDescription>
             The scanner binary isn&apos;t resolvable at SCANNER_BINARY_PATH — every cloud scan will
@@ -41,61 +41,20 @@ export default function ScannerStatusPage() {
         </Alert>
       )}
 
-      <div>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Binary checklist</h2>
-        <DataTableCard
-          isLoading={isLoading}
-          isError={isError}
-          errorMessage="Failed to load scanner status."
-          isEmpty={false}
-          emptyState={<EmptyState title="No data" />}
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>OS / Arch</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead>Uploaded</TableHead>
-                <TableHead>Uploaded by</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.binaries.map((b) => (
-                <TableRow key={`${b.os}-${b.arch}`}>
-                  <TableCell className="font-mono text-xs">
-                    {b.os}-{b.arch}
-                  </TableCell>
-                  <TableCell>
-                    {b.published ? (
-                      <Badge variant="secondary">
-                        <CheckCircle2 /> Published
-                      </Badge>
-                    ) : (
-                      <Badge variant="destructive">
-                        <XCircle /> Missing
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{b.version ?? "—"}</TableCell>
-                  <TableCell className="text-xs">{formatDate(b.uploaded_at)}</TableCell>
-                  <TableCell className="font-mono text-xs">{b.uploaded_by ?? "—"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </DataTableCard>
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Cloud scan queue</h2>
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
-          <StatCard label="Running" value={data?.queue.running ?? "—"} isLoading={isLoading} />
-          <StatCard label="Queued" value={data?.queue.queued ?? "—"} isLoading={isLoading} />
+      {/* Cloud Scan Queue KPIs */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+          <Cpu className="size-4 text-primary" />
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Cloud Execution Queue</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard label="Active Running Scans" value={data?.queue.running ?? "—"} isLoading={isLoading} />
+          <StatCard label="Queued Scans" value={data?.queue.queued ?? "—"} isLoading={isLoading} />
           <StatCard
-            label="Concurrency slots"
+            label="Worker Concurrency Slots"
             value={data ? `${data.queue.running} / ${data.queue.max_concurrent}` : "—"}
             isLoading={isLoading}
+            caption="Server subprocess execution pool"
           />
         </div>
         <DataTableCard
@@ -107,19 +66,19 @@ export default function ScannerStatusPage() {
         >
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Scan</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead />
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">Scan ID</TableHead>
+                <TableHead className="py-2.5">Project ID</TableHead>
+                <TableHead className="py-2.5">Started At</TableHead>
+                <TableHead className="py-2.5" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {data?.queue.running_scans.map((s) => (
-                <TableRow key={s.scan_id}>
-                  <TableCell className="font-mono text-xs">{s.scan_id}</TableCell>
-                  <TableCell className="font-mono text-xs">{s.project_id}</TableCell>
-                  <TableCell className="text-xs">{formatDate(s.started_at)}</TableCell>
+                <TableRow key={s.scan_id} className="text-xs">
+                  <TableCell className="font-mono text-xs font-semibold text-foreground">{s.scan_id}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{s.project_id}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(s.started_at)}</TableCell>
                   <TableCell>
                     {s.stuck && <Badge variant="destructive">Stuck — pending reap</Badge>}
                   </TableCell>
@@ -130,8 +89,62 @@ export default function ScannerStatusPage() {
         </DataTableCard>
       </div>
 
-      <div>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Recent failures</h2>
+      {/* Binary Checklist Section */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+          <Binary className="size-4 text-primary" />
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Published Binaries Distribution</h2>
+        </div>
+        <DataTableCard
+          isLoading={isLoading}
+          isError={isError}
+          errorMessage="Failed to load scanner status."
+          isEmpty={false}
+          emptyState={<EmptyState title="No data" />}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">OS / Architecture</TableHead>
+                <TableHead className="py-2.5">Distribution Status</TableHead>
+                <TableHead className="py-2.5">Version</TableHead>
+                <TableHead className="py-2.5">Uploaded</TableHead>
+                <TableHead className="py-2.5">Uploaded By</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.binaries.map((b) => (
+                <TableRow key={`${b.os}-${b.arch}`} className="text-xs">
+                  <TableCell className="font-mono font-semibold text-foreground">
+                    {b.os}-{b.arch}
+                  </TableCell>
+                  <TableCell>
+                    {b.published ? (
+                      <Badge variant="secondary" className="gap-1 font-mono text-[10px] text-status-success">
+                        <CheckCircle2 className="size-3" /> Published
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="gap-1 font-mono text-[10px]">
+                        <XCircle className="size-3" /> Missing
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{b.version ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(b.uploaded_at)}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{b.uploaded_by ?? "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTableCard>
+      </div>
+
+      {/* Recent Failures Section */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+          <Activity className="size-4 text-primary" />
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Recent Scan Failures</h2>
+        </div>
         <DataTableCard
           isLoading={isLoading}
           isError={isError}
@@ -141,22 +154,22 @@ export default function ScannerStatusPage() {
         >
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Project</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Error</TableHead>
-                <TableHead>When</TableHead>
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">Project ID</TableHead>
+                <TableHead className="py-2.5">Scan Type</TableHead>
+                <TableHead className="py-2.5">Error Message</TableHead>
+                <TableHead className="py-2.5">Completed</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data?.recent_failures.map((f) => (
-                <TableRow key={f.scan_id}>
-                  <TableCell className="font-mono text-xs">{f.project_id}</TableCell>
-                  <TableCell className="text-xs uppercase">{f.scan_type}</TableCell>
-                  <TableCell className="max-w-md truncate text-xs" title={f.error_message ?? undefined}>
+                <TableRow key={f.scan_id} className="text-xs">
+                  <TableCell className="font-mono text-xs font-semibold text-foreground">{f.project_id}</TableCell>
+                  <TableCell className="font-mono text-xs uppercase text-muted-foreground">{f.scan_type}</TableCell>
+                  <TableCell className="max-w-md truncate font-mono text-xs text-severity-critical" title={f.error_message ?? undefined}>
                     {f.error_message ?? "—"}
                   </TableCell>
-                  <TableCell className="text-xs">{formatDate(f.completed_at)}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(f.completed_at)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
