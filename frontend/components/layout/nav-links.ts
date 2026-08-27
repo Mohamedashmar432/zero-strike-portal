@@ -2,6 +2,7 @@ import {
   Activity,
   Bell,
   ChartColumn,
+  Database,
   FileText,
   FolderKanban,
   LayoutDashboard,
@@ -34,4 +35,5 @@ export const settingsLinks = [
   { href: "/settings/auto-fix", label: "Auto-fix", icon: Wand2 },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
   { href: "/settings/report-templates", label: "Report Templates", icon: FileText },
+  { href: "/settings/data", label: "Data Management", icon: Database },
 ];

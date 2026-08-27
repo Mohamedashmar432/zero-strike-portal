@@ -1,14 +1,9 @@
 from fastapi import HTTPException, status
 
-from app.models.ai_usage_event import AIUsageEvent
-from app.models.api_key import ApiKey
-from app.models.compliance_audit import ComplianceAudit
-from app.models.finding import Finding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
-from app.models.report import Report
-from app.models.scan import Scan
 from app.models.user import User
+from app.services import data_management_service
 
 
 async def get_membership(project_id: str, user_id: str) -> ProjectMember | None:
@@ -47,12 +42,7 @@ async def get_project_or_404(project_id: str) -> Project:
 
 
 async def delete_project_cascade(project: Project) -> None:
-    project_id = str(project.id)
-    await ProjectMember.find(ProjectMember.project_id == project_id).delete()
-    await ApiKey.find(ApiKey.project_id == project_id).delete()
-    await Scan.find(Scan.project_id == project_id).delete()
-    await Finding.find(Finding.project_id == project_id).delete()
-    await Report.find(Report.project_id == project_id).delete()
-    await AIUsageEvent.find(AIUsageEvent.project_id == project_id).delete()
-    await ComplianceAudit.find(ComplianceAudit.project_id == project_id).delete()
-    await project.delete()
+    """Delegates to data_management_service so the collection list lives in exactly one
+    place. Hand-maintaining it here had already drifted -- project repos, AI insights, fix
+    proposals, remediation jobs and finding comments were left orphaned in Mongo."""
+    await data_management_service.purge_project(str(project.id))
