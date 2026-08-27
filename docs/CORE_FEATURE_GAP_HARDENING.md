@@ -184,11 +184,42 @@ scan ids change.
 
 ## Verification
 
-`ruff check .` clean; **613 backend tests pass** (`pytest`), including new coverage for: unsupported
-framework rejection, coverage + score-ceiling fields, audit reuse and its invalidation, the
-dependency-bump critic skip (both directions), re-run dedupe with `force`, quota-trim surfacing, and
-per-feature spend deltas. Frontend: `tsc --noEmit` clean, `eslint` 0 errors, **123 vitest tests
-pass** including `scanCoverageGaps`.
+Static + unit: `ruff check .` clean; **613 backend tests pass** (`pytest`), including new coverage
+for unsupported framework rejection, coverage + score-ceiling fields, audit reuse and its
+invalidation, the dependency-bump critic skip (both directions), re-run dedupe with `force`,
+quota-trim surfacing, and per-feature spend deltas. Frontend: `tsc --noEmit` clean, `eslint` 0
+errors, **125 vitest tests pass**.
+
+**Browser QA** (Chrome via CDP against a real backend on :8001 and `next dev` on :3000, using a
+disposable seeded project — 3 connected repos, 1 with a 45-day-old scan carrying 6 synthetic
+findings, 5 existing fix proposals, and 73 AI usage events spread over two 30-day windows; deleted
+afterwards). Confirmed rendering, not just types:
+
+| Flow | Evidence |
+|---|---|
+| Framework gate | wizard, config tab and catalog endpoint all offer exactly SOC 2 + ISO 27001; `POST` with `gdpr` → 400 *"Not available yet: gdpr. Supported frameworks: soc2, iso27001."* |
+| Score honesty | *"50% Scan-evidence score / 5 of 10 code-assessable controls"* + *"Not a compliance percentage. Only 56% of this framework's 18 controls can be assessed from code at all"*. "Compliance Score" and "High Alignment" absent from the DOM. |
+| Scan coverage | *"2 of 3 repositories in scope have no completed scan"* and *"already 45 days old when the audit ran"* both fire. |
+| Deterministic invariants | 0 controls pass-with-evidence, 0 manual-with-evidence, 0 missing rationale, 0 AI prose on a deterministic run; status counts sum to `controls_total` for both frameworks. |
+| Quota surfacing | *"2 finding(s) were blocked by the allowance"* + *"3 finding(s) already had a proposal"*; chip reads 5/10; button reads "Fix remaining findings". |
+| Critic skip | dependency-bump proposal's Checks tab reads *"Not needed for a dependency bump…"* and does **not** fall through to "the patch below is unreviewed". |
+| Audit reuse | wizard re-run returned the same audit id with the explaining toast; audit count stayed at 3 across two reuse calls. |
+| Spend attribution | *"Spend is up $1.06 against the previous 30 days — mostly Auto-fix agent"*; `repo_doc` appears as `$0.48 → $0.00 / −$0.48` and is excluded from the bar chart. |
+| Hygiene | zero console errors/warnings across every page visited; new copy passes AA contrast in light theme (#5C5C55 on #F2F1EC ≈ 6:1). |
+
+Two defects the test suite did not catch, both fixed in `130f0d7`:
+
+1. **`coverage_percent` on historical audits.** Summaries written before the field existed have no
+   value stored, and Pydantic serialises the gap as `0`, not `null` — so the `??` fallback never
+   fired and an older audit would have claimed *"only 0% of this framework can be assessed from
+   code"*. Now derived from `assessed_total / controls_total`, which every summary ever written
+   carries, with a regression test on the legacy shape.
+2. **"Azure-aligned continuous regulatory posture assessment"** as the audit page subtitle. Nothing
+   is continuous; audits are started by hand and read the scans that existed at that moment.
+
+One earlier reading error worth recording: a `fullPage` screenshot showed both spend bar charts as
+empty. The bars were present with correct geometry and fill — recharts' `ResponsiveContainer`
+measures 0 during a full-page capture. Viewport screenshots and a DOM check confirmed they render.
 
 ## Known gaps left open
 
