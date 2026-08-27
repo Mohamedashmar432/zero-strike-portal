@@ -26,7 +26,8 @@ RemediationJobStatus = Literal["queued", "running", "completed", "failed"]
 CredentialSource = Literal["pat", "oauth"]
 
 # Observability-only sub-phase of status="running" (see RemediationJob.stage).
-# propose: cloning -> triage -> proposing -> critiquing -> finalizing
+# propose: triage -> cloning -> proposing -> critiquing -> finalizing
+#   (triage first: a job whose findings all already have proposals never clones at all)
 # apply:   cloning -> baseline_scan -> patching -> rescan -> pushing -> opening_pr
 RemediationJobStage = Literal[
     "cloning", "triage", "proposing", "critiquing", "finalizing",
@@ -46,6 +47,10 @@ class RemediationJob(Document):
     # kind="propose" only: a developer's "change the fix to X" instruction from the review UI. Threaded
     # (as trusted input) into the agent so the re-proposed patch honors it. None for a first proposal.
     revision_note: str | None = None
+    # kind="propose" only: redraft findings that already have a proposal instead of skipping them.
+    # Off by default -- a re-run over the same selection is free under the per-scan quota (already
+    # charged), so without this every re-click would silently re-spend a full agent run per finding.
+    force: bool = False
     scope_key: str  # dedup key, e.g. f"{scan_id}:{kind}:{proposal_id or hash(finding_ids)}"
 
     status: RemediationJobStatus = "queued"
@@ -64,6 +69,12 @@ class RemediationJob(Document):
     trace_id: str  # uuid4, bound into structlog for the whole run and stamped on every AIFixProposal
     progress_completed: int = 0  # findings proposed
     progress_total: int = 0
+    # Why the run covered fewer findings than were submitted. Stored on the job (not just the
+    # audit log) so the poll response can tell the user, instead of a trim happening in silence:
+    #   quota_skipped     -- trimmed at trigger time by the per-scan allowance
+    #   skipped_existing  -- already had a proposal, so no LLM call was spent (force=False)
+    quota_skipped: int = 0
+    skipped_existing: int = 0
     provider: str | None = None
     model_name: str | None = None
 

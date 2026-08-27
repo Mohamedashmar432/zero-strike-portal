@@ -13,9 +13,11 @@ from app.models.auto_fix_quota import ScanAutoFixQuota
 from tests.test_auth_flow import register_and_login
 from tests.test_remediation_api import (
     _create_project,
+    _enable_ai,
     _headers,
     _insert_finding,
     _insert_scan,
+    _poll_scan,
 )
 from tests.test_users import _admin_headers
 
@@ -382,3 +384,36 @@ def test_grant_above_the_hard_ceiling_is_rejected(client):
     assert r.status_code == 422  # schema bound
     # request survives as pending so it can still be decided properly
     assert client.get(f"/api/v1/scans/{scan_id}/auto-fix/quota", headers=headers).json()["pending_request_count"] == 1
+
+
+def test_bulk_trigger_reports_the_findings_the_quota_trimmed(client, monkeypatch):
+    """A trim must never be silent: the poll response carries the count, so the UI can say
+    "3 findings were not queued" instead of letting them look unfixable."""
+    from app.services import ai_remediation_agent, ai_remediation_service
+
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+        return ai_remediation_service.SubmitFixProposalArgs(
+            finding_id=issue_bundle["finding_id"], can_fix=False, confidence_score=0.0,
+            file_path="app.py", explanation="no fix", patch_scope="none",
+        )
+
+    monkeypatch.setattr(ai_remediation_agent, "run_agent", fake_run_agent)
+    admin = _admin_headers(client, email="quota-trim-admin@zs.dev")
+    _enable_ai(client, admin)
+    tokens = register_and_login(client, "quota-trim@example.com")
+    headers = _headers(tokens)
+    project = _create_project(client, headers, name="Quota Trim")
+    scan_id = _insert_scan(project["id"])
+    # 8 of the 10-finding allowance already spent, then ask for 5 more.
+    for i in range(8):
+        _insert_proposal(project["id"], scan_id, _insert_finding(project["id"], scan_id, f"fp-t-{i}"))
+    fresh = [_insert_finding(project["id"], scan_id, f"fp-tn-{i}") for i in range(5)]
+
+    r = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix", json={"finding_ids": fresh}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    body = _poll_scan(client, headers, scan_id)
+    assert body["quota_skipped"] == 3
+    # Only what the allowance permitted was attempted: 8 already charged + 2 new = 10.
+    assert len(body["insight"]["proposals"]) == 10

@@ -104,7 +104,8 @@ def test_frameworks_endpoint_lists_the_catalog(client):
     r = client.get("/api/v1/compliance/frameworks", headers=_headers(owner))
     assert r.status_code == 200
     items = r.json()["items"]
-    assert {f["key"] for f in items} == {"soc2", "iso27001", "gdpr", "hipaa", "pcidss", "nist80053"}
+    # Only the reviewed frameworks are offered — see SUPPORTED_FRAMEWORK_KEYS.
+    assert {f["key"] for f in items} == {"soc2", "iso27001"}
     soc2 = next(f for f in items if f["key"] == "soc2")
     assert soc2["controls_total"] == len(soc2["controls"])
     assert 0 < soc2["assessed_total"] < soc2["controls_total"]
@@ -142,7 +143,7 @@ def test_audit_runs_to_completed_and_maps_findings_to_controls(client):
         ],
     )
 
-    r = _run_audit(client, headers, project["id"], frameworks=["soc2", "gdpr"])
+    r = _run_audit(client, headers, project["id"], frameworks=["soc2", "iso27001"])
     assert r.status_code == 202
     audit_id = r.json()["id"]
 
@@ -151,7 +152,7 @@ def test_audit_runs_to_completed_and_maps_findings_to_controls(client):
     assert body["scan_ids"] == [scan_id]
     assert body["findings_total"] == 2
     assert body["findings_truncated"] is False
-    assert {s["framework"] for s in body["summaries"]} == {"soc2", "gdpr"}
+    assert {s["framework"] for s in body["summaries"]} == {"soc2", "iso27001"}
 
     # Deterministic mapping: the injection finding fails secure-development, the secret
     # (which carries NO owasp code) still fails the credentials control.
@@ -535,7 +536,7 @@ def test_project_audit_list_is_newest_first(client):
 
     first = _run_audit(client, headers, project["id"]).json()["id"]
     _poll_until_terminal(client, headers, first)
-    second = _run_audit(client, headers, project["id"], frameworks=["hipaa"]).json()["id"]
+    second = _run_audit(client, headers, project["id"], frameworks=["iso27001"]).json()["id"]
     _poll_until_terminal(client, headers, second)
 
     r = client.get(f"/api/v1/projects/{project['id']}/compliance-audits", headers=headers)
@@ -592,3 +593,82 @@ def test_deleting_a_project_removes_its_audits(client):
         204,
     )
     assert _count_audits(project["id"]) == 0
+
+
+# --- scope honesty + repeat-run reuse ---
+
+
+def test_unsupported_framework_is_rejected_with_the_supported_list(client):
+    """gdpr/hipaa/pcidss/nist80053 still exist in the catalog (old audits render) but must not
+    be runnable until their evidence mapping has been reviewed control-by-control."""
+    owner = register_and_login(client, email="comp-unsupported@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    r = _run_audit(client, headers, project["id"], frameworks=["soc2", "gdpr"])
+    assert r.status_code == 400
+    assert "gdpr" in r.json()["detail"]
+    assert "soc2" in r.json()["detail"]  # names what IS supported
+
+
+def test_completed_audit_records_scan_coverage_and_score_ceiling(client):
+    owner = register_and_login(client, email="comp-coverage@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    body = _poll_until_terminal(
+        client, headers, _run_audit(client, headers, project["id"]).json()["id"]
+    )
+    # No repos connected in this project, so nothing to be incomplete against -- but the
+    # fields must be present so the UI can always render the coverage line.
+    assert body["repos_in_scope"] == 0
+    assert body["repos_with_scans"] == 0
+    assert body["newest_scan_at"]
+
+    summary = body["summaries"][0]
+    # The score is over code-assessable controls only; coverage_percent is that ceiling, and
+    # must be below 100 while the framework carries manual-only controls.
+    assert 0 < summary["coverage_percent"] < 100
+    assert summary["coverage_percent"] == round(
+        summary["assessed_total"] / summary["controls_total"] * 100
+    )
+    assert summary["needs_manual_review"] == summary["controls_total"] - summary["assessed_total"]
+
+
+def test_identical_rerun_returns_the_existing_audit_unless_refreshed(client):
+    """Same frameworks + same resolved scans => byte-identical verdicts, so re-running is pure
+    waste (and pays for the narrative twice). refresh=True forces a fresh run."""
+    owner = register_and_login(client, email="comp-reuse@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+
+    first = _run_audit(client, headers, project["id"]).json()["id"]
+    _poll_until_terminal(client, headers, first)
+
+    again = _run_audit(client, headers, project["id"]).json()
+    assert again["id"] == first
+    assert again["reused"] is True
+    assert _count_audits(project["id"]) == 1
+
+    forced = _run_audit(client, headers, project["id"], refresh=True).json()
+    assert forced["id"] != first
+    assert forced["reused"] is False
+    _poll_until_terminal(client, headers, forced["id"])
+    assert _count_audits(project["id"]) == 2
+
+
+def test_a_new_scan_invalidates_reuse(client):
+    owner = register_and_login(client, email="comp-reuse-new@zerostrike.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-a"}])
+    first = _run_audit(client, headers, project["id"]).json()["id"]
+    _poll_until_terminal(client, headers, first)
+
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "fp-b"}])
+    second = _run_audit(client, headers, project["id"]).json()
+    assert second["id"] != first
+    assert second["reused"] is False

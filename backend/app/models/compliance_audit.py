@@ -68,7 +68,13 @@ class FrameworkSummary(BaseModel):
     partial: int = 0
     not_applicable: int = 0
     needs_manual_review: int = 0
-    compliance_score: int = 0  # percentage of assessed controls passed (0-100)
+    # Percentage of *code-assessable* controls that passed (0-100). Deliberately not a
+    # compliance percentage: manual-only controls are not in the denominator, so this number
+    # cannot be read as "we are N% compliant". `coverage_percent` is what makes that visible.
+    compliance_score: int = 0
+    # assessed_total / controls_total, as a percentage. How much of the framework this tool
+    # can speak to at all — the honest ceiling on the score above.
+    coverage_percent: int = 0
 
 
 class ComplianceAudit(Document):
@@ -91,6 +97,11 @@ class ComplianceAudit(Document):
     # The exact scans the evidence set was drawn from -- so a result stays interpretable
     # after later scans land.
     scan_ids: list[str] = Field(default_factory=list)
+    # Scan coverage of the selected scope, recorded so a reader can tell an audit that saw
+    # every repo from one that saw two of nine. An audit is only as complete as its scans.
+    repos_in_scope: int = 0
+    repos_with_scans: int = 0
+    newest_scan_at: datetime | None = None
     findings_total: int = 0
     findings_truncated: bool = False
     ai_note: str | None = None  # why the AI narrative is missing, when it is

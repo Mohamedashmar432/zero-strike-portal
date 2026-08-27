@@ -175,11 +175,23 @@ export type AiUsageTotals = {
  * Same shape at both scopes — `by_project` is simply empty for a single project. That's what
  * lets one dashboard component render the project tab and the admin page.
  */
+export type AiUsageFeatureRow = AiUsageTotals & {
+  feature: string;
+  /** The same feature over the equally-long window immediately before this one, and the change.
+   *  Descriptive totals don't explain a bill; a per-feature delta does. */
+  prev_cost_usd: number;
+  prev_requests: number;
+  cost_delta_usd: number;
+  requests_delta: number;
+};
+
 export type AiAnalytics = {
   days: number;
   totals: AiUsageTotals;
+  /** Totals over the preceding window of equal length, for the movement line. */
+  previous_totals: AiUsageTotals;
   timeseries: (Omit<AiUsageTotals, "avg_duration_ms"> & { date: string })[];
-  by_feature: (AiUsageTotals & { feature: string })[];
+  by_feature: AiUsageFeatureRow[];
   by_model: (AiUsageTotals & { provider: string; model_name: string | null })[];
   by_project: (AiUsageTotals & { project_id: string | null; project_name: string })[];
 };

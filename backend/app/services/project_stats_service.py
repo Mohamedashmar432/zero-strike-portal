@@ -4,6 +4,9 @@ here is a raw pymongo aggregation via get_pymongo_collection() (not Document.agg
 which isn't awaitable on this Motor client — see dashboard_service._severity_groups for
 the same pattern) rather than a new service/infra layer."""
 
+from dataclasses import dataclass
+from datetime import datetime
+
 from beanie import PydanticObjectId
 from beanie.operators import And, Eq, In, Or
 
@@ -87,10 +90,25 @@ def repo_key_resolver(repos):
     return resolve
 
 
-async def resolve_scope_scan_ids(
+@dataclass(frozen=True)
+class ScopeCoverage:
+    """What a compliance scope actually resolved to — and what it missed.
+
+    An audit is only as complete as the scans behind it, so the two repo counts travel with
+    the scan ids rather than being re-derived (and re-guessed) by every caller.
+    `repos_in_scope` is 0 for a project with no connected repos, where the scans are all in
+    the unlinked bucket and there is no repo list to be incomplete against."""
+
+    scan_ids: list[str]
+    repos_in_scope: int
+    repos_with_scans: int
+    newest_scan_at: datetime | None = None
+
+
+async def resolve_scope_coverage(
     project_id: str, scope: str, project_repo_ids: list[str] | None = None
-) -> list[str]:
-    """The completed scans a compliance audit should draw evidence from.
+) -> ScopeCoverage:
+    """The completed scans a compliance audit should draw evidence from, plus repo coverage.
 
     scope="latest": the most recent completed scan per repo (plus the unlinked bucket) —
     the same "current posture" semantics as get_project_scan_activity's current_findings, so
@@ -105,24 +123,34 @@ async def resolve_scope_scan_ids(
         .sort(-Scan.created_at)
         .to_list()
     )
-    if not scans:
-        return []
-
+    repos = await project_repo_service.list_repos(project_id)
     selected = set(project_repo_ids or [])
-    if scope == "history":
-        if not selected:
-            return [str(s.id) for s in scans]
-        resolve = repo_key_resolver(await project_repo_service.list_repos(project_id))
-        return [str(s.id) for s in scans if resolve(s) in selected]
+    repos_in_scope = len(selected) if selected else len(repos)
+    if not scans:
+        return ScopeCoverage([], repos_in_scope, 0)
 
-    resolve = repo_key_resolver(await project_repo_service.list_repos(project_id))
+    resolve = repo_key_resolver(repos)
+    newest = scans[0].created_at  # sorted newest-first
+
+    if scope == "history":
+        kept = scans if not selected else [s for s in scans if resolve(s) in selected]
+        covered = {resolve(s) for s in kept} - {_UNLINKED}
+        return ScopeCoverage([str(s.id) for s in kept], repos_in_scope, len(covered), newest)
+
     latest_per_key: dict[str, str] = {}
     for scan in scans:  # already newest-first, so the first hit per key wins
         key = resolve(scan)
         if selected and key not in selected:
             continue
         latest_per_key.setdefault(key, str(scan.id))
-    return list(latest_per_key.values())
+    covered = set(latest_per_key) - {_UNLINKED}
+    return ScopeCoverage(list(latest_per_key.values()), repos_in_scope, len(covered), newest)
+
+
+async def resolve_scope_scan_ids(
+    project_id: str, scope: str, project_repo_ids: list[str] | None = None
+) -> list[str]:
+    return (await resolve_scope_coverage(project_id, scope, project_repo_ids)).scan_ids
 
 
 def _severity_counts_from_groups(groups: list[dict], key: str) -> dict[str, SeverityCounts]:

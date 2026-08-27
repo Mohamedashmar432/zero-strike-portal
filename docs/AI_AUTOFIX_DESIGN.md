@@ -110,6 +110,25 @@ not just tool-capable ones.
 - Any failure ⇒ `critique = {"skipped": reason}` and the draft stands unchanged. A critic outage must
   never become a fix outage. The UI renders "not reviewed", never an implied pass.
 
+**Conditional, not unconditional.** The pass is skipped for a `dependency-bump` strategy patch
+(`remediation_critic_skip_dependency_bumps`, default on): the whole change is one version string in a
+manifest and the target version comes from the scanner's advisory data, not the model — so there is no
+drafted *logic* for a reviewer to be skeptical about. SCA findings are usually the most numerous class,
+which is exactly where the pass costs most and buys least. The apply-phase gate (baseline scan → patch →
+re-scan) and human approval still both run, and the proposal records
+`critique = {"skipped": "dependency_bump"}` so the UI says why rather than implying a pass.
+
+### Re-run dedupe (`run_job`, `force`)
+
+A finding that already has an `AIFixProposal` costs **nothing** under the per-scan quota — it was
+charged when first drafted. So a second "fix all" click would re-spend a full tool-calling run per
+finding to reproduce what is already on screen. `run_job` therefore drops already-proposed findings
+from the work list unless the job carries `force=True`, records the count in
+`RemediationJob.skipped_existing`, and surfaces it in the poll response so a shorter run is never
+silent. The work list is resolved **before** the clone, so a job with nothing new to draft neither
+clones nor pays for an overview-doc call. Redrafting one specific proposal goes through
+`POST /findings/{id}/auto-fix`, which always redrafts.
+
 ### SCA context in the issue bundle
 
 `_issue_bundle` includes a `dependency_update` block (package, current + recommended version,
@@ -239,7 +258,8 @@ that output is non-deterministic and repo-derived, the opposite of this.
 `remediation_max_output_tokens`, `remediation_tool_capable_providers`,
 `remediation_critic_enabled` (kill switch — off leaves the pipeline exactly as it was pre-critic),
 `remediation_critic_max_redrafts` (1 — bounds worst-case per-finding cost at two agent runs),
-`remediation_critic_max_output_tokens`.
+`remediation_critic_max_output_tokens`, `remediation_critic_skip_dependency_bumps` (skip the pass for
+one-line manifest version bumps; set False to critique every fixable draft).
 
 ## Deliberately not built
 

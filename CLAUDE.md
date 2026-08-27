@@ -103,6 +103,19 @@ never falls back to the portal's. Every LLM call — success or failure — writ
 back by `ai_analytics_service` at two scopes: per-project (`/projects/{id}/ai-analytics`,
 member-gated) and portal-wide (`/admin/ai-analytics`, admin-gated).
 
+**Compliance audits** (`core/compliance_catalog.py`, `services/compliance_audit_service.py`;
+see `docs/CORE_FEATURE_GAP_HARDENING.md`): a deterministic evaluator maps scanner findings to
+framework controls. `evaluate()` is pure — no Mongo, no LLM — and is the *only* thing that sets a
+control's status; the optional LLM narrator writes advisory prose for already-failing controls and
+can never move a verdict. Three rules that must not be softened: a control with no selector is
+`needs_manual_review` (never `pass`), `compliance_score` is scored over code-assessable controls
+only so it is **not** a compliance percentage (`coverage_percent` and the audit's repo counts exist
+to keep that visible), and an audit with no scans in scope is refused rather than rendered as
+all-pass. **Only `soc2` and `iso27001` are runnable** — `SUPPORTED_FRAMEWORK_KEYS`; the other four
+frameworks stay in the catalog so historical audits render, but are not offered and are rejected at
+trigger time. Widening that set means reviewing a framework's evidence mapping control-by-control
+first, and a test asserts the current set.
+
 **Scanner binary distribution** (self-hosted, so bootstrapping a CI runner needs no
 portal credentials): `download_service.py` + `models/scanner_binary.py` store built
 `zerostrike` binaries in MongoDB GridFS (bucket `scanner_binaries`); `routers/downloads.py`

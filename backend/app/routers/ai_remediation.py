@@ -227,6 +227,10 @@ async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFi
         started_at=started_at,
         progress_completed=done,
         progress_total=total,
+        # Surfaced, not just logged: a run that silently covered fewer findings than the user
+        # asked for reads as "the AI couldn't fix them" rather than "it never looked".
+        quota_skipped=job.quota_skipped if job else 0,
+        skipped_existing=job.skipped_existing if job else 0,
         insight=AutoFixInsight(
             summary=_summary(outs, total_findings=len(findings), threshold=cfg.confidence_threshold),
             proposals=outs,
@@ -284,6 +288,8 @@ async def trigger_scan_auto_fix(
         project_id=scan.project_id,
         scan_id=scan_id,
         finding_ids=finding_ids,
+        force=payload.force,
+        quota_skipped=quota_skipped,
         scope_key=scope_key,
         trace_id=uuid.uuid4().hex,
         created_by=str(user.id),

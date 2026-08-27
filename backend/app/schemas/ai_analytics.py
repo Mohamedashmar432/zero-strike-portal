@@ -29,6 +29,12 @@ class AiUsageDayPoint(BaseModel):
 
 class AiUsageFeatureRow(AiUsageTotals):
     feature: str
+    #: The same feature over the window immediately before this one, and the change. This is
+    #: what turns "compliance cost $12" into "compliance cost $12, up $11 from last month".
+    prev_cost_usd: float = 0.0
+    prev_requests: int = 0
+    cost_delta_usd: float = 0.0
+    requests_delta: int = 0
 
 
 class AiUsageModelRow(AiUsageTotals):
@@ -44,6 +50,9 @@ class AiUsageProjectRow(AiUsageTotals):
 class AiAnalyticsResponse(BaseModel):
     days: int
     totals: AiUsageTotals
+    #: The same totals over the preceding window of equal length, so the dashboard can say
+    #: whether spend moved rather than only what it was.
+    previous_totals: AiUsageTotals
     timeseries: list[AiUsageDayPoint]
     by_feature: list[AiUsageFeatureRow]
     by_model: list[AiUsageModelRow]

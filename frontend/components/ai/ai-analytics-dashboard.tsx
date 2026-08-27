@@ -15,6 +15,7 @@ import {
   type AiUsageTotals,
 } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -198,11 +199,16 @@ export function AiAnalyticsDashboard({
         <>
           <TimeSeriesCard data={data!} metric={metric} onMetricChange={setMetric} />
           <div className="grid gap-4 lg:grid-cols-2">
+            {/* by_feature also carries zero-cost rows for features that spent only in the
+                previous window -- those belong in "What changed", not in a bar chart of zeroes. */}
             <BreakdownCard
               title="Spend by feature"
               description="Which AI feature the money went to."
-              rows={data!.by_feature.map((r) => ({ label: featureLabel(r.feature), ...r }))}
+              rows={data!.by_feature
+                .filter((r) => r.requests > 0)
+                .map((r) => ({ label: featureLabel(r.feature), ...r }))}
             />
+            <SpendMovementCard data={data!} />
             <BreakdownCard
               title="Spend by model"
               description="Cost per model. Hover for the provider."
@@ -241,7 +247,7 @@ export function AiAnalyticsDashboard({
           setPage(1);
         }}
         query={events}
-        features={data?.by_feature.map((f) => f.feature) ?? []}
+        features={data?.by_feature.filter((f) => f.requests > 0).map((f) => f.feature) ?? []}
       />
     </div>
   );
@@ -368,6 +374,75 @@ function TimeSeriesCard({
  * carry identity, not the colour. (A categorical palette here would imply the bars are different
  * series, which they aren't.)
  */
+/**
+ * What moved, and which workflow moved it.
+ *
+ * "Spend by feature" says where the money went; it does not say why the bill changed. This
+ * compares each feature against the equally-long window immediately before, largest movement
+ * first, so a jump resolves to a workflow instead of staying a mystery.
+ */
+function SpendMovementCard({ data }: { data: AiAnalytics }) {
+  const moved = data.by_feature
+    .filter((r) => Math.abs(r.cost_delta_usd ?? 0) > 0 || (r.requests_delta ?? 0) !== 0)
+    .sort((a, b) => Math.abs(b.cost_delta_usd ?? 0) - Math.abs(a.cost_delta_usd ?? 0))
+    .slice(0, 6);
+
+  const totalDelta = (data.totals.cost_usd ?? 0) - (data.previous_totals?.cost_usd ?? 0);
+  const driver = moved[0];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">What changed</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {totalDelta === 0
+            ? `Spend is flat against the previous ${data.days} days.`
+            : `Spend is ${totalDelta > 0 ? "up" : "down"} ${usd(Math.abs(totalDelta))} against the previous ${data.days} days` +
+              (driver ? ` — mostly ${featureLabel(driver.feature)}.` : ".")}
+        </p>
+      </CardHeader>
+      <CardContent>
+        {moved.length === 0 ? (
+          <EmptyState title="No movement to explain" />
+        ) : (
+          <ul className="divide-y divide-hairline">
+            {moved.map((row) => {
+              const delta = row.cost_delta_usd ?? 0;
+              const up = delta > 0;
+              return (
+                <li
+                  key={row.feature}
+                  className="flex items-baseline justify-between gap-3 py-2 text-sm"
+                >
+                  <span className="min-w-0 truncate">{featureLabel(row.feature)}</span>
+                  <span className="flex shrink-0 items-baseline gap-3 font-mono text-xs tabular-nums">
+                    <span className="text-muted-foreground">
+                      {usd(row.prev_cost_usd ?? 0)} → {usd(row.cost_usd)}
+                    </span>
+                    <span
+                      className={cn(
+                        "w-20 text-right",
+                        delta === 0
+                          ? "text-muted-foreground"
+                          : up
+                            ? "text-severity-medium"
+                            : "text-status-success",
+                      )}
+                    >
+                      {up ? "+" : "−"}
+                      {usd(Math.abs(delta))}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function BreakdownCard({
   title,
   description,

@@ -43,10 +43,13 @@ const EMPTY_TOTALS = {
   avg_duration_ms: 0,
 };
 
+const NO_DELTA = { prev_cost_usd: 0, prev_requests: 0, cost_delta_usd: 0, requests_delta: 0 };
+
 function analytics(overrides: Partial<AiAnalytics> = {}): AiAnalytics {
   return {
     days: 30,
     totals: EMPTY_TOTALS,
+    previous_totals: EMPTY_TOTALS,
     timeseries: [],
     by_feature: [],
     by_model: [],
@@ -90,7 +93,7 @@ describe("AiAnalyticsDashboard", () => {
         timeseries: [
           { date: "2026-08-01", requests: 60, failed: 3, success_rate: 95, prompt_tokens: 20_000, completion_tokens: 5_000, cost_usd: 6.25 },
         ],
-        by_feature: [{ feature: "autofix", ...EMPTY_TOTALS, requests: 120, cost_usd: 12.5 }],
+        by_feature: [{ feature: "autofix", ...EMPTY_TOTALS, ...NO_DELTA, requests: 120, cost_usd: 12.5 }],
       }),
     );
     renderWithClient(<AiAnalyticsDashboard scope="project" projectId="p1" />);

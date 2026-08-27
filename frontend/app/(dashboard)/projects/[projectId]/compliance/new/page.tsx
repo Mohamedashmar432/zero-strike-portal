@@ -111,7 +111,18 @@ export default function NewComplianceAuditPage() {
         project_repo_ids: repoIds,
         depth: withAi && aiReady ? "with_ai_narrative" : "deterministic",
       }),
-    onSuccess: (audit) => router.replace(`/projects/${projectId}/compliance/${audit.id}`),
+    onSuccess: (audit) => {
+      // The evaluator is deterministic, so an identical scope over the same scans returns the
+      // audit that already exists rather than paying to reproduce it. Say so — landing on a
+      // result dated last week without explanation looks like a bug.
+      if (audit.reused) {
+        toast.info(
+          "No scans have changed since the last identical audit, so this is that result — " +
+            "re-running it would produce the same verdicts."
+        );
+      }
+      router.replace(`/projects/${projectId}/compliance/${audit.id}`);
+    },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.message : "Failed to start the audit"),
   });

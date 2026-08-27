@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
-import type { ControlResult, ControlStatus, FrameworkSummary } from "@/lib/api/compliance";
-import { groupControlsByFramework } from "./page";
+import type {
+  ComplianceAudit,
+  ControlResult,
+  ControlStatus,
+  FrameworkSummary,
+} from "@/lib/api/compliance";
+import { groupControlsByFramework, scanCoverageGaps } from "./page";
 
 function summary(framework: string): FrameworkSummary {
   return {
@@ -15,6 +20,7 @@ function summary(framework: string): FrameworkSummary {
     not_applicable: 0,
     needs_manual_review: 0,
     compliance_score: 0,
+    coverage_percent: 0,
   };
 }
 
@@ -85,5 +91,67 @@ describe("groupControlsByFramework", () => {
     ]);
     expect(groups).toHaveLength(2);
     expect(groups[1].controls).toEqual([]);
+  });
+});
+
+function auditFixture(overrides: Partial<ComplianceAudit> = {}): ComplianceAudit {
+  return {
+    id: "a1",
+    project_id: "p1",
+    frameworks: ["soc2"],
+    scope: "latest",
+    depth: "deterministic",
+    status: "completed",
+    error_message: null,
+    started_at: "2026-08-01T00:00:00Z",
+    completed_at: "2026-08-01T00:00:00Z",
+    created_at: "2026-08-01T00:00:00Z",
+    progress_completed: 1,
+    progress_total: 1,
+    findings_total: 3,
+    summaries: [summary("soc2")],
+    scan_ids: ["s1"],
+    repos_in_scope: 3,
+    repos_with_scans: 3,
+    newest_scan_at: "2026-08-01T00:00:00Z",
+    findings_truncated: false,
+    ai_note: null,
+    reused: false,
+    controls: [],
+    ...overrides,
+  };
+}
+
+describe("scanCoverageGaps", () => {
+  test("full coverage with fresh scans raises nothing", () => {
+    expect(scanCoverageGaps(auditFixture())).toEqual({
+      missingRepos: 0,
+      staleDays: 0,
+      hasGap: false,
+    });
+  });
+
+  test("repos in scope with no completed scan are a gap — controls would read Pass off nothing", () => {
+    const gaps = scanCoverageGaps(auditFixture({ repos_in_scope: 9, repos_with_scans: 2 }));
+    expect(gaps.missingRepos).toBe(7);
+    expect(gaps.hasGap).toBe(true);
+  });
+
+  test("evidence age is measured against when the audit ran, not against now", () => {
+    const gaps = scanCoverageGaps(
+      auditFixture({
+        newest_scan_at: "2026-05-01T00:00:00Z",
+        completed_at: "2026-08-01T00:00:00Z",
+      })
+    );
+    expect(gaps.staleDays).toBe(92);
+    expect(gaps.hasGap).toBe(true);
+  });
+
+  test("a scan count that exceeds the repo count never reports negative missing repos", () => {
+    // scope="history" resolves many scans per repo, so repos_with_scans can equal repos_in_scope
+    // while scan_ids is longer -- the counts must not go out of range either way.
+    expect(scanCoverageGaps(auditFixture({ repos_in_scope: 1, repos_with_scans: 3 })).missingRepos)
+      .toBe(0);
   });
 });

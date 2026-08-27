@@ -45,6 +45,10 @@ class ComplianceAuditCreateRequest(BaseModel):
     scope: AuditScope = "latest"
     project_repo_ids: list[str] = Field(default_factory=list)  # empty = every repo
     depth: AuditDepth = "deterministic"
+    #: Re-run even when an identical completed audit over the same scans exists. Default False
+    #: returns that audit instead, because the evaluator is deterministic — the verdicts would
+    #: be byte-identical and the AI narrative would be paid for twice.
+    refresh: bool = False
 
 
 class ControlEvidenceOut(BaseModel):
@@ -85,7 +89,10 @@ class FrameworkSummaryOut(BaseModel):
     partial: int
     not_applicable: int
     needs_manual_review: int
+    #: Percentage of code-assessable controls passed — NOT a compliance percentage.
     compliance_score: int = 0
+    #: assessed_total / controls_total, as a percentage: the ceiling on the score above.
+    coverage_percent: int = 0
 
 
 class ComplianceAuditListItem(BaseModel):
@@ -109,6 +116,14 @@ class ComplianceAuditListItem(BaseModel):
 
 class ComplianceAuditResponse(ComplianceAuditListItem):
     scan_ids: list[str] = Field(default_factory=list)
+    #: Repo coverage of the selected scope. repos_with_scans < repos_in_scope means the audit
+    #: saw only part of the project, and the UI says so.
+    repos_in_scope: int = 0
+    repos_with_scans: int = 0
+    newest_scan_at: datetime | None = None
     findings_truncated: bool = False
     ai_note: str | None = None
+    #: True when the trigger returned an existing identical audit instead of re-running one.
+    #: Not persisted — set by the router on that response only.
+    reused: bool = False
     controls: list[ControlResultOut] = Field(default_factory=list)

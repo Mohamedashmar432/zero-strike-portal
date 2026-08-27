@@ -7,6 +7,7 @@ from app.core.compliance_catalog import (
     FINDING_KINDS,
     FRAMEWORK_KEYS_ORDERED,
     FRAMEWORKS,
+    SUPPORTED_FRAMEWORK_KEYS,
 )
 from app.core.owasp import OWASP_CODES_ORDERED
 
@@ -81,6 +82,11 @@ def test_secret_and_dependency_evidence_is_reachable_in_every_framework():
         assert "sca" in kinds, f"{key} has no control selecting kind=sca"
 
 
-def test_framework_key_order_covers_every_framework():
-    assert set(FRAMEWORK_KEYS_ORDERED) == set(FRAMEWORKS)
-    assert len(FRAMEWORK_KEYS_ORDERED) == len(FRAMEWORKS)
+def test_framework_key_order_lists_exactly_the_supported_frameworks():
+    """The wizard is driven by this order, so it must never offer an unreviewed framework --
+    and every offered key must still resolve in FRAMEWORKS."""
+    assert set(FRAMEWORK_KEYS_ORDERED) == set(SUPPORTED_FRAMEWORK_KEYS)
+    assert len(FRAMEWORK_KEYS_ORDERED) == len(SUPPORTED_FRAMEWORK_KEYS)
+    assert SUPPORTED_FRAMEWORK_KEYS <= set(FRAMEWORKS)
+    # The scope the product commits to today. Widening it is a deliberate edit here too.
+    assert SUPPORTED_FRAMEWORK_KEYS == {"soc2", "iso27001"}
