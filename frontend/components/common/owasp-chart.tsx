@@ -5,8 +5,10 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { EmptyState } from "@/components/common/empty-state";
 import type { OwaspCategoryCount } from "@/lib/owasp";
 
+// Charts draw from the --chart-* ramp, not --primary, so the accent stays
+// reserved for interactive state and the chart palette can evolve separately.
 const chartConfig: ChartConfig = {
-  count: { label: "Findings", color: "var(--primary)" },
+  count: { label: "Findings", color: "var(--chart-1)" },
 };
 
 export function OwaspChart({
@@ -25,13 +27,30 @@ export function OwaspChart({
   return (
     <ChartContainer config={chartConfig} className="h-[280px] w-full">
       <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
-        <CartesianGrid horizontal={false} strokeDasharray="3 3" />
-        <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
-        <YAxis type="category" dataKey="code" tickLine={false} axisLine={false} width={64} fontSize={12} />
+        <CartesianGrid horizontal={false} stroke="var(--hairline)" strokeDasharray="2 4" />
+        <XAxis
+          type="number"
+          allowDecimals={false}
+          tickLine={false}
+          axisLine={false}
+          fontSize={11}
+          stroke="var(--muted-foreground)"
+          fontFamily="var(--font-mono)"
+        />
+        <YAxis
+          type="category"
+          dataKey="code"
+          tickLine={false}
+          axisLine={false}
+          width={64}
+          fontSize={11}
+          stroke="var(--muted-foreground)"
+          fontFamily="var(--font-mono)"
+        />
         <ChartTooltip
           content={<ChartTooltipContent labelFormatter={(_, payload) => payload?.[0]?.payload?.title ?? ""} />}
         />
-        <Bar dataKey="count" radius={4}>
+        <Bar dataKey="count" radius={[0, 2, 2, 0]} barSize={14}>
           {data.map((d) => (
             <Cell
               key={d.code}

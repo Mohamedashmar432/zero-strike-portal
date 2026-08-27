@@ -36,8 +36,20 @@ export function FilterBar({
       <div className="flex flex-wrap items-center gap-2">
         {facets.map((facet, i) =>
           facet.type === "select" ? (
-            <Select key={i} value={facet.value} onValueChange={(v) => v && facet.onChange(v)}>
-              <SelectTrigger size="sm" className="w-full sm:w-44 text-xs font-medium">
+            // base-ui's Select.Value renders the raw VALUE unless the root gets
+            // an items map, so every filter displayed the internal sentinel
+            // "__all__" instead of "All severities".
+            <Select
+              key={i}
+              value={facet.value}
+              onValueChange={(v) => v && facet.onChange(v)}
+              items={Object.fromEntries(facet.options.map((o) => [o.value, o.label]))}
+            >
+              <SelectTrigger
+                size="sm"
+                aria-label={facet.placeholder ?? "Filter"}
+                className="w-full sm:w-44 text-xs font-medium"
+              >
                 <SelectValue placeholder={facet.placeholder} />
               </SelectTrigger>
               <SelectContent>

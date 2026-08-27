@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PreviewNotice } from "@/components/common/preview-notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +48,7 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
       endpointsTested: 48,
       vulnerabilities: { high: 1, medium: 2, low: 4 },
       duration: "42s",
-      timestamp: new Date(Date.now() - 1000 * 60 * 45).toLocaleString(),
+      timestamp: "45 minutes ago",
       status: "completed",
     },
     {
@@ -57,32 +58,34 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
       endpointsTested: 32,
       vulnerabilities: { high: 0, medium: 1, low: 3 },
       duration: "18s",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 6).toLocaleString(),
+      timestamp: "6 hours ago",
       status: "completed",
     },
   ];
 
   function handleLaunchDast() {
     setIsScanning(true);
-    toast.info("DAST Engine initialized. Probing target endpoints and injecting test payloads...");
-    setTimeout(() => {
-      setIsScanning(false);
-      toast.success("DAST scan completed. 48 endpoints tested, 0 critical blockers.");
-    }, 2500);
+    // No DAST engine exists server-side, so this must not report a result.
+    // Claiming "0 critical blockers" for a scan that never ran is the kind of
+    // false assurance a security tool can never emit.
+    toast.info("DAST is a preview — no scan engine is connected yet.");
+    setTimeout(() => setIsScanning(false), 600);
   }
 
   return (
     <div className="space-y-6">
+      <PreviewNotice feature="DAST Live Endpoints" />
+
       {/* Top Banner Overview */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <Activity className="size-5 text-sky-400" />
+            <Activity className="size-5 text-severity-low" />
             <h2 className="text-base font-semibold tracking-tight text-foreground">
               Dynamic Application Security Testing (DAST)
             </h2>
-            <Badge variant="outline" className="font-mono text-[10px] text-sky-400 border-sky-500/30">
-              Live Engine
+            <Badge variant="outline" className="text-severity-medium border-severity-medium/40">
+              Not connected
             </Badge>
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -92,12 +95,14 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
 
         <Button
           onClick={handleLaunchDast}
-          disabled={isScanning}
+          disabled
+          title="No DAST engine is connected yet"
           size="sm"
-          className="gap-1.5 font-medium bg-sky-600 hover:bg-sky-500 text-white shrink-0"
+          variant="outline"
+          className="shrink-0 gap-1.5"
         >
-          {isScanning ? <RefreshCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
-          <span>{isScanning ? "Probing Endpoints…" : "Launch DAST Scan"}</span>
+          <Play className="size-3.5 fill-current" />
+          <span>Launch DAST Scan</span>
         </Button>
       </div>
 
@@ -128,7 +133,7 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-foreground">Scan Execution Profile</Label>
                   <Select value={profile} onValueChange={(v) => v && setProfile(v)}>
-                    <SelectTrigger className="text-xs">
+                    <SelectTrigger aria-label="Scan execution profile" className="text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

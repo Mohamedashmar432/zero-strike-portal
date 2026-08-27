@@ -25,6 +25,34 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The API host could not be reached at all — wrong port, backend down, DNS,
+ * offline. Distinct from ApiError, which means the server answered.
+ *
+ * Worth its own type because the two are indistinguishable to a user otherwise:
+ * a dead backend and a wrong password both used to surface as "Login failed",
+ * which sends people hunting for a credential problem that isn't there.
+ */
+export class NetworkError extends Error {
+  readonly url: string;
+
+  constructor(url: string, cause?: unknown) {
+    super(`Cannot reach the API at ${url}. Check that the backend is running and that NEXT_PUBLIC_API_BASE_URL points at it.`);
+    this.name = "NetworkError";
+    this.url = url;
+    this.cause = cause;
+  }
+}
+
+/** fetch() rejects (rather than resolving non-2xx) only when the request never completed. */
+async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    throw new NetworkError(API_BASE_URL, cause);
+  }
+}
+
 let refreshInFlight: Promise<boolean> | null = null;
 
 export async function tryRefresh(): Promise<boolean> {
@@ -59,7 +87,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _retr
     headers.set("Content-Type", "application/json");
   }
 
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const res = await fetchOrThrow(`${API_BASE_URL}${path}`, { ...options, headers });
 
   if (res.status === 401 && !_retried && accessToken) {
     const refreshed = await tryRefresh();
@@ -81,7 +109,7 @@ export async function apiFetchBlob(path: string, options: RequestInit = {}, _ret
   const headers = new Headers(options.headers);
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
 
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const res = await fetchOrThrow(`${API_BASE_URL}${path}`, { ...options, headers });
 
   if (res.status === 401 && !_retried && accessToken) {
     const refreshed = await tryRefresh();

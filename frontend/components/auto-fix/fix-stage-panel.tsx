@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 type Tone = "ok" | "warn" | "bad" | "idle";
 
 const TONE: Record<Tone, string> = {
-  ok: "text-emerald-500",
+  ok: "text-status-success",
   warn: "text-severity-medium",
   bad: "text-severity-critical",
   idle: "text-muted-foreground",

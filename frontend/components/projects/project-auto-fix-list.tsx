@@ -112,7 +112,7 @@ export function ProjectAutoFixList({ projectId }: { projectId: string }) {
                   <RiskBadge rating={item.summary.risk_rating} />
                 </TableCell>
                 <TableCell className="text-xs tabular-nums text-muted-foreground">
-                  <span className="text-emerald-500">{item.summary.ai_fixable} fixable</span>
+                  <span className="text-status-success">{item.summary.ai_fixable} fixable</span>
                   {" · "}
                   <span>{item.summary.needs_review_on_fix} review</span>
                   {" · "}

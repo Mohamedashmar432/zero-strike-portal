@@ -126,7 +126,7 @@ export function ProjectAutoFixSection({
           >
             <MessageSquare />
             {commentSummary && commentSummary.total > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 flex min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-medium text-white">
+              <span className="absolute -top-1.5 -right-1.5 flex min-w-4 items-center justify-center rounded-full bg-signal px-1 text-[10px] font-medium text-signal-foreground">
                 {commentSummary.total}
               </span>
             )}

@@ -28,7 +28,13 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <Button variant="ghost" size="icon" disabled aria-label="Toggle theme">
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        disabled
+        aria-label="Toggle theme"
+        className="text-sidebar-foreground/55"
+      >
         <Sun />
       </Button>
     );
@@ -39,8 +45,10 @@ export function ThemeToggle() {
   return (
     <Button
       variant="ghost"
-      size="icon"
+      size="icon-xs"
       aria-label="Toggle theme"
+      title={isDark ? "Switch to light" : "Switch to dark"}
+      className="text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {isDark ? <Sun /> : <Moon />}

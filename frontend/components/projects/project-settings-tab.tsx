@@ -147,8 +147,8 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
-            <p className="rounded-md bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100">
-              <span className="select-none text-emerald-400">$ </span>
+            <p className="rounded-sm border border-sidebar-border bg-sidebar px-3 py-2 font-mono text-[13px] text-sidebar-foreground">
+              <span className="select-none text-signal">$ </span>
               {deleteCommand}
             </p>
             <Input
@@ -157,7 +157,7 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
               autoComplete="off"
               spellCheck={false}
               placeholder="Type the command to confirm"
-              className="bg-zinc-950 font-mono text-zinc-100 placeholder:text-zinc-500"
+              className="border-sidebar-border bg-sidebar font-mono text-sidebar-foreground placeholder:text-sidebar-foreground/40"
             />
           </div>
           <DialogFooter>

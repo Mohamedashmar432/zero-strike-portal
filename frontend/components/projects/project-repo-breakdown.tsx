@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { projectRiskStatus, SeverityCountPills } from "@/components/severity/severity-count-pills";
+import { SeveritySpectrum } from "@/components/severity/severity-spectrum";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { SeverityCounts } from "@/lib/api/dashboard";
@@ -93,17 +94,28 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
               info: report.stats.by_severity.info ?? 0,
             }
           : EMPTY_COUNTS;
-        const risk = projectRiskStatus(counts);
+        const risk = projectRiskStatus(counts, scan?.status ?? "none");
+        const edge =
+          counts.critical > 0
+            ? "border-l-severity-critical"
+            : counts.high > 0
+              ? "border-l-severity-high"
+              : counts.medium > 0
+                ? "border-l-severity-medium"
+                : "border-l-status-success";
 
         return (
           <div
             key={repo.id}
-            className="flex flex-col gap-3 rounded-xl border border-border/80 bg-background p-3.5 shadow-xs transition-all hover:border-border hover:shadow-sm sm:flex-row sm:items-center sm:justify-between border-l-4 border-l-primary/60"
+            className={cn(
+              "flex flex-col gap-3 rounded-sm border border-border border-l-2 bg-background p-3.5 transition-colors duration-200 hover:border-muted-foreground/40 sm:flex-row sm:items-center sm:justify-between",
+              edge
+            )}
           >
             {/* Left Repository Metadata */}
             <div className="space-y-1.5 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+                <div className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground">
                   <FolderGit2 className="size-3.5" />
                 </div>
                 <span className="font-mono text-xs font-bold text-foreground truncate">
@@ -113,7 +125,7 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
                   {repo.provider}
                 </Badge>
                 <div className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                  <GitBranch className="size-3 text-primary/80" />
+                  <GitBranch className="size-3 text-muted-foreground/80" />
                   <span>{repo.selected_branch || "main"}</span>
                 </div>
               </div>
@@ -128,8 +140,13 @@ export function ProjectRepoBreakdown({ projectId }: { projectId: string }) {
             {/* Right Status & Scan Details */}
             <div className="flex flex-wrap items-center gap-3 shrink-0 pt-2 sm:pt-0 border-t border-border/40 sm:border-t-0">
               {/* Finding Severity Counts */}
-              <div className="shrink-0">
-                <SeverityCountPills counts={counts} />
+              <div className="flex shrink-0 flex-col gap-1.5">
+                {/* "none" when the repo has never been scanned: without a sentinel
+                    the zero counts render a green "Clean" right next to this
+                    row's own "No Scans" badge — a contradiction, and a false
+                    all-clear on a repo nobody has actually looked at. */}
+                <SeveritySpectrum counts={counts} className="w-32" scanStatus={scan?.status ?? "none"} />
+                <SeverityCountPills counts={counts} scanStatus={scan?.status ?? "none"} />
               </div>
 
               {/* Health Risk Badge */}

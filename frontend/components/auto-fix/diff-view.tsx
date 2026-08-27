@@ -51,7 +51,7 @@ function buildUnifiedRows(original: string, patched: string): UnifiedRow[] {
 }
 
 function Cell({ no, text, tone }: { no: number | null; text: string | null; tone: "same" | "add" | "del" | "empty" }) {
-  const bg = tone === "add" ? "bg-emerald-500/15 text-emerald-300" : tone === "del" ? "bg-severity-critical/15 text-rose-300" : "";
+  const bg = tone === "add" ? "bg-status-success/15 text-status-success" : tone === "del" ? "bg-severity-critical/15 text-severity-critical" : "";
   const sign = tone === "add" ? "+" : tone === "del" ? "-" : " ";
   return (
     <>
@@ -106,7 +106,7 @@ export function DiffView({
         <table className="w-full border-collapse font-mono text-xs leading-relaxed">
           <tbody>
             {buildUnifiedRows(original, patched).map((r, i) => {
-              const bg = r.kind === "add" ? "bg-emerald-500/15 text-emerald-300" : r.kind === "del" ? "bg-severity-critical/15 text-rose-300" : "";
+              const bg = r.kind === "add" ? "bg-status-success/15 text-status-success" : r.kind === "del" ? "bg-severity-critical/15 text-severity-critical" : "";
               const sign = r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ";
               return (
                 <tr key={i}>

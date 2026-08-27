@@ -171,8 +171,8 @@ export default function AutoFixSettingsPage() {
         </p>
       </div>
 
-      <Alert className={providerReady ? "border-emerald-500/50 bg-emerald-500/5" : undefined}>
-        {providerReady ? <CheckCircle2 className="text-emerald-500" /> : <XCircle />}
+      <Alert className={providerReady ? "border-status-success/50 bg-status-success/5" : undefined}>
+        {providerReady ? <CheckCircle2 className="text-status-success" /> : <XCircle />}
         <AlertTitle>{providerReady ? "AI is configured" : "AI provider not configured"}</AlertTitle>
         <AlertDescription>
           Auto-Fix needs an active, tool-capable AI provider (e.g. Anthropic or OpenAI).{" "}

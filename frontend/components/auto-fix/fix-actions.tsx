@@ -44,7 +44,7 @@ import { cn } from "@/lib/utils";
 export const FALLBACK_THRESHOLD = 80;
 
 export function confidenceTone(score: number, threshold = FALLBACK_THRESHOLD): string {
-  if (score >= threshold) return "text-emerald-500";
+  if (score >= threshold) return "text-status-success";
   if (score >= threshold / 2) return "text-severity-medium";
   return "text-muted-foreground";
 }

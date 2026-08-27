@@ -1,30 +1,26 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  AlertOctagon,
-  ChevronDown,
-  FolderGit2,
-  FolderKanban,
-  Layers,
-  Plus,
-  Radio,
-  ShieldAlert,
-} from "lucide-react";
+import { ChevronDown, FolderGit2, FolderKanban, Plus, Radio, Target } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
-import { StatCard } from "@/components/common/stat-card";
+import { MetricStrip } from "@/components/common/metric-strip";
 import { PageHeader } from "@/components/layout/page-header";
+import { SectionRule } from "@/components/layout/section-rule";
 import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { refetchWhileAnyRecentScanActive } from "@/lib/api/polling";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
-import { projectRiskStatus, SeverityCountPills, SEVERITY_PILL_CLASS } from "@/components/severity/severity-count-pills";
+import {
+  projectRiskStatus,
+  SEVERITY_ORDER,
+  SeverityCountPills,
+} from "@/components/severity/severity-count-pills";
+import { SeveritySpectrum } from "@/components/severity/severity-spectrum";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -36,7 +32,66 @@ function severityScore(counts: SeverityCounts) {
   return counts.critical * 1000 + counts.high * 100 + counts.medium * 10 + counts.low + counts.info * 0.1;
 }
 
+const SEVERITY_DOT: Record<string, string> = {
+  critical: "bg-severity-critical",
+  high: "bg-severity-high",
+  medium: "bg-severity-medium",
+  low: "bg-severity-low",
+  info: "bg-severity-info",
+};
+
 type SortBy = "recent" | "severity" | "status";
+
+/**
+ * Total exposure band. The page's hero is the actual severity distribution
+ * across the whole workspace — one wide spectrum plus a keyed legend — rather
+ * than a row of big numbers. The distribution is the thing a security engineer
+ * is trying to read on arrival; the totals are follow-up detail, which is why
+ * they sit in the strip *below* this.
+ */
+function ExposureBand({ counts, isLoading }: { counts?: SeverityCounts; isLoading: boolean }) {
+  const empty: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  const c = counts ?? empty;
+  const total = SEVERITY_ORDER.reduce((sum, s) => sum + c[s], 0);
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="legend text-muted-foreground">Total Exposure</h2>
+        {isLoading ? (
+          <Skeleton className="h-6 w-20" />
+        ) : (
+          <p className="readout text-xl leading-none text-foreground">
+            {total.toLocaleString()}
+            <span className="legend ml-1.5 text-muted-foreground">findings</span>
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3">
+        {isLoading ? (
+          <Skeleton className="h-2.5 w-full" />
+        ) : (
+          <SeveritySpectrum counts={c} height="h-2.5" />
+        )}
+      </div>
+
+      {/* Keyed legend — the spectrum is not the only carrier of the value, so
+          the reading survives colorblindness and greyscale printing. */}
+      <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
+        {SEVERITY_ORDER.map((severity) => (
+          <div key={severity} className="flex items-center gap-1.5">
+            <span className={cn("size-2 rounded-full", SEVERITY_DOT[severity])} aria-hidden="true" />
+            <dt className="legend text-muted-foreground">{severity}</dt>
+            <dd className="font-mono text-xs font-semibold tabular-nums text-foreground">
+              {isLoading ? "—" : c[severity].toLocaleString()}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({
@@ -62,44 +117,42 @@ export default function DashboardPage() {
     });
   }
 
-  const stats = [
+  const metrics = [
     {
       label: "Total Scans",
-      value: data?.scan_count ?? 0,
-      caption: "Across all active repositories",
+      value: (data?.scan_count ?? 0).toLocaleString(),
+      hint: "Across all active repositories",
     },
     {
-      label: "Total Projects",
-      value: data?.project_count ?? 0,
-      caption: "Monitored organizations",
+      label: "Projects",
+      value: (data?.project_count ?? 0).toLocaleString(),
+      hint: "Monitored workspaces",
     },
     {
-      label: "Critical Findings",
-      value: data?.findings_by_severity.critical ?? 0,
-      caption: "Immediate action required",
-      pillClassName: SEVERITY_PILL_CLASS.critical,
-      valueClassName: "text-severity-critical font-mono font-bold",
+      label: "Critical",
+      value: (data?.findings_by_severity.critical ?? 0).toLocaleString(),
+      hint: "Immediate action required",
+      tone: "critical" as const,
     },
     {
-      label: "High Findings",
-      value: data?.findings_by_severity.high ?? 0,
-      caption: "Security review needed",
-      pillClassName: SEVERITY_PILL_CLASS.high,
-      valueClassName: "text-severity-high font-mono font-bold",
+      label: "High",
+      value: (data?.findings_by_severity.high ?? 0).toLocaleString(),
+      hint: "Security review needed",
+      tone: "high" as const,
     },
   ];
 
-  const pinnedProjects = useMemo(() => {
+  const focusProjects = useMemo(() => {
     if (!data) return [];
     const seen = new Set<string>();
-    const pinned: { scan: RecentScanItem; project?: Project }[] = [];
+    const focus: { scan: RecentScanItem; project?: Project }[] = [];
     for (const scan of data.recent_scans) {
       if (seen.has(scan.project_id)) continue;
       seen.add(scan.project_id);
-      pinned.push({ scan, project: projectsPage?.items.find((p) => p.id === scan.project_id) });
-      if (pinned.length === 3) break;
+      focus.push({ scan, project: projectsPage?.items.find((p) => p.id === scan.project_id) });
+      if (focus.length === 3) break;
     }
-    return pinned;
+    return focus;
   }, [data, projectsPage]);
 
   const sortedScans = useMemo(() => {
@@ -114,106 +167,120 @@ export default function DashboardPage() {
   }, [data, sortBy]);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Security Overview"
-        description="Continuous SAST posture, vulnerability telemetry, and scan activity."
-        actions={
-          <Button nativeButton={false} render={<Link href="/projects" />} size="sm" className="gap-1.5 font-medium">
-            <Plus className="size-4" />
-            Add Project
-          </Button>
-        }
-      />
-
-      {/* Primary KPI Metrics */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-        {stats.map((stat) => (
-          <StatCard key={stat.label} isLoading={isLoading} {...stat} />
-        ))}
+    // One orchestrated entrance, staggered by --d, instead of scattered
+    // micro-animations. Respects prefers-reduced-motion via globals.css.
+    <div className="space-y-7">
+      <div className="signal-in">
+        <PageHeader
+          eyebrow="Workspace / Overview"
+          title="Security Posture"
+          description="Continuous SAST coverage, vulnerability distribution, and live scan activity."
+          actions={
+            <Button nativeButton={false} render={<Link href="/projects" />} size="lg">
+              <Plus className="size-4" />
+              Add Project
+            </Button>
+          }
+        />
       </div>
 
-      {/* Pinned Projects Section */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between border-b border-border/60 pb-2">
-          <div className="flex items-center gap-2">
-            <Layers className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">Pinned Projects</h2>
-          </div>
-          <Link href="/projects" className="text-xs font-medium text-primary hover:underline">
-            Manage Projects →
-          </Link>
-        </div>
+      <div className="signal-in" style={{ "--d": "60ms" } as React.CSSProperties}>
+        <ExposureBand counts={data?.findings_by_severity} isLoading={isLoading} />
+      </div>
+
+      <div className="signal-in" style={{ "--d": "120ms" } as React.CSSProperties}>
+        <MetricStrip metrics={metrics} isLoading={isLoading} />
+      </div>
+
+      {/* Focus */}
+      <section className="signal-in space-y-3" style={{ "--d": "180ms" } as React.CSSProperties}>
+        <SectionRule
+          label="Focus"
+          icon={Target}
+          actions={
+            <Link
+              href="/projects"
+              className="legend text-muted-foreground transition-colors hover:text-signal"
+            >
+              All projects
+            </Link>
+          }
+        />
         {isLoading ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-36 w-full rounded-xl" />
+              <Skeleton key={i} className="h-32 w-full" />
             ))}
           </div>
-        ) : pinnedProjects.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={FolderKanban}
-              title="No projects yet"
-              description="Run a scan on a project to see it featured here."
-            />
-          </Card>
+        ) : focusProjects.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title="No projects yet"
+            description="Run a scan on a project and it will surface here."
+            className="m-0"
+          />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {pinnedProjects.map(({ scan, project }) => {
-              const risk = projectRiskStatus(scan.findings_by_severity);
+            {focusProjects.map(({ scan, project }) => {
+              const risk = projectRiskStatus(scan.findings_by_severity, scan.status);
               return (
-                <Card key={scan.project_id} className="border-border/80 bg-card/60 transition-colors hover:border-border hover:bg-card/90">
-                  <CardContent className="flex h-full flex-col justify-between gap-3 p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FolderKanban className="size-4 shrink-0 text-primary" />
-                        <Link
-                          href={`/projects/${scan.project_id}`}
-                          className="font-semibold text-sm text-foreground truncate hover:text-primary transition-colors"
-                        >
-                          {scan.project_name}
-                        </Link>
-                      </div>
-                      <span className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium shrink-0", risk.className)}>
-                        {risk.label}
-                      </span>
-                    </div>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">
-                      {project?.description || "ZeroStrike SAST project."}
-                    </p>
-                    <div className="border-t border-border/60 pt-2.5">
-                      <SeverityCountPills counts={scan.findings_by_severity} />
-                    </div>
-                  </CardContent>
-                </Card>
+                <article
+                  key={scan.project_id}
+                  className="group flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-colors duration-200 hover:border-muted-foreground/40"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <Link
+                      href={`/projects/${scan.project_id}`}
+                      className="min-w-0 truncate font-mono text-[13px] font-bold tracking-[-0.02em] text-foreground transition-colors hover:text-signal"
+                    >
+                      {scan.project_name}
+                    </Link>
+                    <span className={cn("shrink-0 rounded-sm px-1.5 py-0.5", risk.className)}>
+                      {risk.label}
+                    </span>
+                  </div>
+
+                  <p className="line-clamp-2 min-h-8 text-xs leading-relaxed text-muted-foreground">
+                    {project?.description || "No description."}
+                  </p>
+
+                  <div className="mt-auto space-y-2">
+                    <SeveritySpectrum counts={scan.findings_by_severity} scanStatus={scan.status} />
+                    <SeverityCountPills counts={scan.findings_by_severity} scanStatus={scan.status} />
+                  </div>
+                </article>
               );
             })}
           </div>
         )}
       </section>
 
-      {/* Recent Scans Activity Section */}
-      <section className="space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-2">
-          <div className="flex items-center gap-2">
-            <Radio className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">Recent Scan Operations</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Sort by:</span>
-            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
-              <SelectTrigger size="sm" className="h-7 w-40 text-xs">
+      {/* Scan operations */}
+      <section className="signal-in space-y-3" style={{ "--d": "240ms" } as React.CSSProperties}>
+        <SectionRule
+          label="Scan Operations"
+          icon={Radio}
+          actions={
+            <Select
+              value={sortBy}
+              onValueChange={(v) => setSortBy(v as SortBy)}
+              items={{
+                recent: "Recent activity",
+                severity: "Severity (high–low)",
+                status: "Status",
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Sort scan operations" className="h-7 w-40 font-mono text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="recent" className="text-xs">Recent Activity</SelectItem>
-                <SelectItem value="severity" className="text-xs">Severity (High-Low)</SelectItem>
+                <SelectItem value="recent" className="text-xs">Recent activity</SelectItem>
+                <SelectItem value="severity" className="text-xs">Severity (high–low)</SelectItem>
                 <SelectItem value="status" className="text-xs">Status</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        </div>
+          }
+        />
         <DataTableCard
           isLoading={isLoading}
           isError={false}
@@ -222,26 +289,33 @@ export default function DashboardPage() {
         >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/40 text-xs">
-                <TableHead className="py-2.5">Project</TableHead>
-                <TableHead className="py-2.5">Type</TableHead>
-                <TableHead className="py-2.5">Status</TableHead>
-                <TableHead className="py-2.5">Findings</TableHead>
-                <TableHead className="py-2.5">Timestamp</TableHead>
-                <TableHead className="w-10 py-2.5" />
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
+                {/* Meter + digital readout, the way an instrument shows one
+                    value twice: the bar for scanning a long list, the numbers
+                    for acting on a single row. */}
+                <TableHead className="w-28">Spectrum</TableHead>
+                <TableHead>Findings</TableHead>
+                <TableHead>Timestamp</TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Expand row</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedScans.map((scan: RecentScanItem) => (
                 <Fragment key={scan.scan_id}>
                   <TableRow
-                    className="cursor-pointer transition-colors hover:bg-muted/30 text-xs"
+                    className="cursor-pointer"
                     onClick={() => toggleExpanded(scan.scan_id)}
+                    data-expanded={expandedScans.has(scan.scan_id)}
                   >
-                    <TableCell className="font-medium">
+                    <TableCell>
                       <Link
                         href={`/projects/${scan.project_id}/scans/${scan.scan_id}`}
-                        className="text-foreground hover:text-primary underline-offset-4 hover:underline font-semibold"
+                        className="font-mono text-[13px] font-semibold text-foreground underline-offset-4 transition-colors hover:text-signal hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {scan.project_name}
@@ -262,28 +336,43 @@ export default function DashboardPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <SeverityCountPills counts={scan.findings_by_severity} showLabel={false} />
+                      <SeveritySpectrum counts={scan.findings_by_severity} scanStatus={scan.status} />
                     </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                    <TableCell>
+                      <SeverityCountPills counts={scan.findings_by_severity} scanStatus={scan.status} />
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px] text-muted-foreground">
                       {new Date(scan.created_at).toLocaleString()}
                     </TableCell>
                     <TableCell>
-                      <ChevronDown
-                        className={cn(
-                          "size-3.5 text-muted-foreground transition-transform duration-150",
-                          expandedScans.has(scan.scan_id) && "rotate-180"
-                        )}
-                      />
+                      <button
+                        type="button"
+                        aria-expanded={expandedScans.has(scan.scan_id)}
+                        aria-label={`${expandedScans.has(scan.scan_id) ? "Hide" : "Show"} repositories for ${scan.project_name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(scan.scan_id);
+                        }}
+                        className="grid size-7 cursor-pointer place-items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring/60"
+                      >
+                        <ChevronDown
+                          className={cn(
+                            "size-3.5 transition-transform duration-200",
+                            expandedScans.has(scan.scan_id) && "rotate-180"
+                          )}
+                          aria-hidden="true"
+                        />
+                      </button>
                     </TableCell>
                   </TableRow>
                   {expandedScans.has(scan.scan_id) && (
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={6} className="bg-muted/30 p-0 border-b border-border/80">
-                        <div className="p-4 pl-8 border-l-2 border-primary/50 space-y-2.5 bg-muted/20">
+                    <TableRow className="hover:bg-transparent hover:before:opacity-0">
+                      <TableCell colSpan={7} className="bg-muted/40 p-0">
+                        <div className="space-y-2.5 border-l-2 border-signal/60 p-4 pl-6">
                           <div className="flex items-center gap-2">
-                            <FolderGit2 className="size-3.5 text-primary" />
-                            <span className="text-[11px] font-bold tracking-wider text-muted-foreground uppercase font-mono">
-                              Connected Repositories & Security Status
+                            <FolderGit2 className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                            <span className="legend text-muted-foreground">
+                              Connected repositories
                             </span>
                           </div>
                           <ProjectRepoBreakdown projectId={scan.project_id} />

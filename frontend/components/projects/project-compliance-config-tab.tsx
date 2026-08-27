@@ -112,7 +112,7 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <Sliders className="size-5 text-primary" />
+            <Sliders className="size-5 text-muted-foreground" />
             <h2 className="text-base font-semibold tracking-tight text-foreground">
               Compliance Governance & Policy Configuration
             </h2>
@@ -125,7 +125,7 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
           </p>
         </div>
 
-        <Button onClick={handleSave} size="sm" className="gap-1.5 font-medium shrink-0 shadow-xs">
+        <Button onClick={handleSave} size="sm" className="gap-1.5 font-medium shrink-0">
           <Save className="size-3.5" />
           <span>Save Changes</span>
         </Button>
@@ -142,7 +142,7 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
             <Card
               key={framework.id}
               className={`border-border/80 bg-card/60 transition-all ${
-                framework.enabled ? "border-primary/40 bg-card/90 shadow-xs" : "opacity-70"
+                framework.enabled ? "border-primary/40 bg-card/90" : "opacity-70"
               }`}
             >
               <CardHeader className="p-4 pb-2">
@@ -195,7 +195,7 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
         <Card className="border-border/80 bg-card/60">
           <CardHeader className="p-4 pb-3 border-b border-border/60">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-2">
-              <ShieldCheck className="size-4 text-emerald-400" />
+              <ShieldCheck className="size-4 text-status-success" />
               Automated Audit Policies
             </CardTitle>
           </CardHeader>
@@ -236,7 +236,7 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
         <Card className="border-border/80 bg-card/60">
           <CardHeader className="p-4 pb-3 border-b border-border/60">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-2">
-              <Bell className="size-4 text-primary" />
+              <Bell className="size-4 text-muted-foreground" />
               Drift & Violation Alerts
             </CardTitle>
           </CardHeader>

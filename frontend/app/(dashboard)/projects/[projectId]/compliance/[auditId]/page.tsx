@@ -115,7 +115,7 @@ function groupControlsByDomain(controls: ControlResult[]): {
 function ComplianceDisclaimer() {
   return (
     <Alert className="border-border/60 bg-muted/20">
-      <Info className="size-4 text-primary" />
+      <Info className="size-4 text-muted-foreground" />
       <AlertTitle className="text-sm font-semibold">
         Automated Technical Assessment — Regulatory Alignment Preview
       </AlertTitle>
@@ -157,7 +157,7 @@ function PostureGaugeCard({ summary }: { summary: FrameworkSummary }) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
-            <Shield className="size-4 text-primary" />
+            <Shield className="size-4 text-muted-foreground" />
             {summary.framework_title}
           </CardTitle>
           <span
@@ -335,7 +335,7 @@ function ControlRow({
       className={cn(
         "rounded-xl border transition-all",
         expanded
-          ? "border-primary/40 bg-card shadow-sm"
+          ? "border-primary/40 bg-card"
           : "border-border/70 bg-card/40 hover:border-border hover:bg-card/70"
       )}
     >
@@ -382,7 +382,7 @@ function ControlRow({
           {control.description && (
             <div className="rounded-lg border border-border/60 bg-background/60 p-3">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                <FileText className="size-3.5 text-primary" />
+                <FileText className="size-3.5 text-muted-foreground" />
                 Control Description & Requirement
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-foreground">
@@ -394,7 +394,7 @@ function ControlRow({
           {/* Assessment Verdict & Rationale */}
           <div className="rounded-lg border border-border/60 bg-background/60 p-3">
             <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <CheckCircle2 className="size-3.5 text-primary" />
+              <CheckCircle2 className="size-3.5 text-muted-foreground" />
               Assessment Rationale
             </p>
             <p className="mt-1.5 text-xs leading-relaxed text-foreground">{control.rationale}</p>
@@ -404,7 +404,7 @@ function ControlRow({
           {control.recommendation && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                <Sparkles className="size-3.5 text-primary" />
+                <Sparkles className="size-3.5 text-muted-foreground" />
                 Remediation Guidance
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-foreground">
@@ -415,8 +415,8 @@ function ControlRow({
 
           {/* AI Explanation */}
           {control.ai_explanation && (
-            <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-purple-400">
+            <div className="rounded-lg border border-ai/20 bg-ai/5 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ai">
                 <Sparkles className="size-3.5" />
                 AI Auditor Analysis
               </p>
@@ -428,8 +428,8 @@ function ControlRow({
 
           {/* AI Remediation */}
           {control.ai_remediation && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400">
+            <div className="rounded-lg border border-status-success/20 bg-status-success/5 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-status-success">
                 <Code2 className="size-3.5" />
                 AI Suggested Code Fix
               </p>
@@ -444,7 +444,7 @@ function ControlRow({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Code2 className="size-3.5 text-primary" />
+                  <Code2 className="size-3.5 text-muted-foreground" />
                   Affected Source Code Evidence ({control.evidence_total})
                 </p>
                 {control.evidence_total > control.evidence.length && (
@@ -514,7 +514,7 @@ function DomainGroupAccordion({
               !open && "-rotate-90"
             )}
           />
-          <Layers className="size-4 text-primary" />
+          <Layers className="size-4 text-muted-foreground" />
           <span className="text-sm font-semibold text-foreground">{domain}</span>
           <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
             {total} controls
@@ -772,7 +772,7 @@ function AuditResult({ audit, projectId }: { audit: ComplianceAudit; projectId: 
 
       {audit.ai_note && (
         <Alert className="border-border/60 bg-muted/15">
-          <Sparkles className="size-4 text-purple-400" />
+          <Sparkles className="size-4 text-ai" />
           <AlertDescription className="text-xs text-muted-foreground">
             {audit.ai_note}
           </AlertDescription>
@@ -935,7 +935,7 @@ export default function ComplianceAuditPage() {
         {running ? (
           <div className="space-y-4 p-6 text-center">
             <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10">
-              <Shield className="size-6 animate-pulse text-primary" />
+              <Shield className="size-6 animate-pulse text-muted-foreground" />
             </div>
             <p className="text-sm font-semibold">
               Evaluating compliance controls against source code findings…

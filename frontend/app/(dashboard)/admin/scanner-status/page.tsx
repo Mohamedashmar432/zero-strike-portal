@@ -44,7 +44,7 @@ export default function ScannerStatusPage() {
       {/* Cloud Scan Queue KPIs */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 border-b border-border/60 pb-2">
-          <Cpu className="size-4 text-primary" />
+          <Cpu className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold tracking-tight text-foreground">Cloud Execution Queue</h2>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -92,7 +92,7 @@ export default function ScannerStatusPage() {
       {/* Binary Checklist Section */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 border-b border-border/60 pb-2">
-          <Binary className="size-4 text-primary" />
+          <Binary className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold tracking-tight text-foreground">Published Binaries Distribution</h2>
         </div>
         <DataTableCard
@@ -142,7 +142,7 @@ export default function ScannerStatusPage() {
       {/* Recent Failures Section */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 border-b border-border/60 pb-2">
-          <Activity className="size-4 text-primary" />
+          <Activity className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold tracking-tight text-foreground">Recent Scan Failures</h2>
         </div>
         <DataTableCard

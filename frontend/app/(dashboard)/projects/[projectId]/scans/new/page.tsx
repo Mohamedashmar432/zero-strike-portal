@@ -187,7 +187,7 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
       </div>
       {rawToken ? (
         <div className="space-y-1">
-          <p className="text-sm font-medium text-amber-500">
+          <p className="text-sm font-medium text-severity-medium">
             Copy this project token now — it won&apos;t be shown again.
           </p>
           <CopyBlock text={rawToken} />

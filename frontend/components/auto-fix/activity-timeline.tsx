@@ -21,11 +21,11 @@ import { cn } from "@/lib/utils";
 const STYLE: Record<string, { icon: typeof History; tone: string }> = {
   "AI Fix Proposals Generated": { icon: Sparkles, tone: "text-brand" },
   "AI Fix Proposals Failed": { icon: TriangleAlert, tone: "text-severity-critical" },
-  "AI Fix Approved": { icon: CircleCheck, tone: "text-emerald-500" },
+  "AI Fix Approved": { icon: CircleCheck, tone: "text-status-success" },
   "AI Fix Proposal Dismissed": { icon: CircleX, tone: "text-muted-foreground" },
-  "AI Fix Validation Passed": { icon: ShieldCheck, tone: "text-emerald-500" },
+  "AI Fix Validation Passed": { icon: ShieldCheck, tone: "text-status-success" },
   "AI Fix Branch Pushed": { icon: GitBranch, tone: "text-brand" },
-  "AI Fix PR Opened": { icon: GitPullRequest, tone: "text-emerald-500" },
+  "AI Fix PR Opened": { icon: GitPullRequest, tone: "text-status-success" },
 };
 
 /** The few metadata keys worth surfacing, in a fixed order so the line reads consistently. */

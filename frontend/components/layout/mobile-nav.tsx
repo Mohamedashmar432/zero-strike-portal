@@ -20,6 +20,35 @@ import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks } from "./nav-links";
 
+// Same rack-row language as the desktop rail: flush lime marker, mono label,
+// square corners. Three near-identical link blocks previously repeated this.
+function MobileNavItem({
+  href,
+  label,
+  icon: Icon,
+  isActive,
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={isActive ? "page" : undefined}
+      className={cn(
+        "relative flex items-center gap-3 rounded-sm px-3 py-2.5 font-mono text-[13px] tracking-[-0.01em] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        isActive && "bg-accent font-semibold text-foreground"
+      )}
+    >
+      {isActive && <span className="absolute inset-y-1 left-0 w-[3px] bg-signal" />}
+      <Icon className={cn("size-4 shrink-0", isActive ? "text-signal" : "text-muted-foreground")} />
+      {label}
+    </Link>
+  );
+}
+
 export function MobileNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -46,7 +75,12 @@ export function MobileNav() {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         render={
-          <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open navigation menu">
+          <Button
+            variant="outline"
+            size="icon"
+            className="border-border bg-card md:hidden"
+            aria-label="Open navigation menu"
+          >
             <Menu />
           </Button>
         }
@@ -57,60 +91,49 @@ export function MobileNav() {
             <ZeroStrikeLogo size="sm" />
           </SheetTitle>
         </SheetHeader>
-        <nav className="flex-1 space-y-1 px-2">
+        <nav className="flex-1 space-y-0.5 px-2">
           {mainLinks.map((link) => (
-            <Link
+            <MobileNavItem
               key={link.href}
-              href={link.href}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                pathname?.startsWith(link.href) && "bg-accent text-foreground"
-              )}
-            >
-              <link.icon className="size-[18px]" />
-              {link.label}
-            </Link>
+              {...link}
+              isActive={pathname?.startsWith(link.href) ?? false}
+            />
           ))}
           <RequireRole role="admin">
-            <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Admin
-            </div>
+            <div className="legend px-3 pb-1.5 pt-4 text-muted-foreground">Administration</div>
             {adminLinks.map((link) => (
-              <Link
+              <MobileNavItem
                 key={link.href}
-                href={link.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                  pathname?.startsWith(link.href) && "bg-accent text-foreground"
-                )}
-              >
-                <link.icon className="size-[18px]" />
-                {link.label}
-              </Link>
+                {...link}
+                isActive={pathname?.startsWith(link.href) ?? false}
+              />
             ))}
           </RequireRole>
-          <Link
+          <div className="legend px-3 pb-1.5 pt-4 text-muted-foreground">Workspace</div>
+          <MobileNavItem
             href="/settings/profile"
-            className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-              pathname?.startsWith("/settings") && "bg-accent text-foreground"
-            )}
-          >
-            <Settings className="size-[18px]" />
-            Settings
-          </Link>
+            label="Settings"
+            icon={Settings}
+            isActive={pathname?.startsWith("/settings") ?? false}
+          />
         </nav>
         <div className="border-t border-border p-2">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent">
-                  <Avatar size="sm">
-                    <AvatarFallback>{getInitials(user?.name ?? user?.email ?? "?")}</AvatarFallback>
+                <button className="flex w-full cursor-pointer items-center gap-2.5 rounded-sm px-2 py-2 text-left transition-colors hover:bg-accent">
+                  <Avatar size="sm" className="rounded-sm">
+                    <AvatarFallback className="rounded-sm bg-signal/15 font-mono text-[11px] font-bold text-signal">
+                      {getInitials(user?.name ?? user?.email ?? "?")}
+                    </AvatarFallback>
                   </Avatar>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium text-foreground">{user?.name ?? "…"}</span>
-                    <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate font-mono text-[12px] font-semibold text-foreground">
+                      {user?.name ?? "…"}
+                    </span>
+                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                      {user?.email}
+                    </span>
                   </span>
                 </button>
               }

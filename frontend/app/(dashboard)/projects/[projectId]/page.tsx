@@ -732,7 +732,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
         <code>--token</code>. The token alone identifies this project — no project ID needed.
       </p>
       {revealedToken && (
-        <Alert className="border-amber-500/50 bg-amber-500/5">
+        <Alert className="border-severity-medium/50 bg-severity-medium/5">
           <AlertTitle>Copy this token now — you won&apos;t be able to see it again.</AlertTitle>
           <AlertDescription>
             <div className="flex items-center gap-2">

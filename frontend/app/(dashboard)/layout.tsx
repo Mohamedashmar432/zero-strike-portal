@@ -26,14 +26,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="fixed left-3 top-3 z-50 md:hidden">
         <MobileNav />
       </div>
-      {/* Desktop leaves room for the rail; pinned reserves the full width, unpinned just the icons. */}
+      {/* Desktop leaves room for the rail; pinned reserves the full width, unpinned just the icons.
+          `app-canvas` lays a 22px dot grid under the content — panels need something
+          to sit on, and a flat fill is the flattest possible generic-UI tell. */}
       <main
         className={cn(
-          "min-h-screen p-6 pt-16 transition-[margin] duration-200 md:pt-6",
+          "app-canvas min-h-screen p-6 pt-16 transition-[margin] duration-200 md:pt-8 md:px-8",
           pinned ? "md:ml-60" : "md:ml-16"
         )}
       >
-        {children}
+        {/* Content is capped and centred inside whatever space the rail leaves.
+            Without this it stretched edge-to-edge, so on a wide window the page
+            read as pushed against the right side rather than composed, and
+            tables grew to absurd line lengths. mx-auto keeps the remaining
+            gutter even on both sides. */}
+        <div className="mx-auto w-full max-w-[1680px]">{children}</div>
       </main>
     </div>
   );

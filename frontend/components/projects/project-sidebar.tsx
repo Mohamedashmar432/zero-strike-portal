@@ -29,7 +29,9 @@ export interface ProjectSidebarCategory {
     label: string;
     icon: typeof LayoutDashboard;
     badge?: string | number;
-    isNew?: boolean;
+    isPreview?: boolean;
+    /** Unreleased — omitted from the rail but the tab still exists. */
+    hidden?: boolean;
   }[];
 }
 
@@ -58,8 +60,12 @@ export function ProjectSidebar({
       title: "SECURITY ENGINES",
       items: [
         { id: "scans", label: "SAST Code Scanner", icon: Code2, badge: counts?.scans },
-        { id: "dast", label: "DAST Live Endpoints", icon: Activity, isNew: true },
-        { id: "attack-sim", label: "Attack Simulation", icon: Swords, isNew: true },
+        // DAST and Attack Simulation are unreleased — no scan engine exists
+        // server-side yet. Hidden rather than deleted: drop `hidden` to bring
+        // them back once the engines ship. The tab components and their
+        // PreviewNotice markers are untouched.
+        { id: "dast", label: "DAST Endpoints", icon: Activity, isPreview: true, hidden: true },
+        { id: "attack-sim", label: "Attack Simulation", icon: Swords, isPreview: true, hidden: true },
         { id: "history", label: "Scan History", icon: History },
       ],
     },
@@ -90,34 +96,37 @@ export function ProjectSidebar({
   ];
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col rounded-xl border border-border/80 bg-card/60 p-2.5 shadow-xs">
+    <aside className="flex w-56 shrink-0 flex-col rounded-lg border border-border bg-card py-2.5">
       {/* Overview Primary Button */}
       <button
         type="button"
         onClick={() => onTabChange("overview")}
         className={cn(
-          "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition-all duration-150 text-left mb-3",
+          "relative mb-3 flex w-full cursor-pointer items-center justify-between px-3.5 py-2 text-left font-mono text-[13px] tracking-[-0.01em] transition-colors duration-150",
           isOverview
-            ? "bg-primary text-primary-foreground shadow-sm"
-            : "text-foreground/80 hover:bg-muted/50 hover:text-foreground"
+            ? "bg-accent font-semibold text-foreground"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
         )}
       >
-        <div className="flex items-center gap-2">
-          <LayoutDashboard className={cn("size-4", isOverview ? "text-primary-foreground" : "text-primary")} />
+        {isOverview && <span className="absolute inset-y-0 left-0 w-[3px] bg-signal" />}
+        <div className="flex items-center gap-2.5">
+          <LayoutDashboard
+            className={cn("size-4", isOverview ? "text-signal" : "text-muted-foreground")}
+          />
           <span>Project Overview</span>
         </div>
-        {isOverview && <ChevronRight className="size-3.5 opacity-80" />}
+        {isOverview && <ChevronRight className="size-3.5 text-muted-foreground" />}
       </button>
 
       {/* Categorized Navigation Tree */}
-      <nav className="flex-1 space-y-3.5 overflow-y-auto">
+      <nav className="flex-1 space-y-3.5 overflow-y-auto overflow-x-hidden">
         {categories.map((cat) => (
           <div key={cat.title} className="space-y-1">
-            <h3 className="px-2 text-[10px] font-bold tracking-wider text-muted-foreground/80 uppercase font-mono">
+            <h3 className="legend px-3.5 text-muted-foreground">
               {cat.title}
             </h3>
             <div className="space-y-0.5">
-              {cat.items.map((item) => {
+              {cat.items.filter((item) => !item.hidden).map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 return (
@@ -126,34 +135,40 @@ export function ProjectSidebar({
                     type="button"
                     onClick={() => onTabChange(item.id)}
                     className={cn(
-                      "group flex w-full items-center justify-between rounded-lg py-1.5 text-xs font-medium transition-all duration-150 text-left",
+                      "group relative flex w-full cursor-pointer items-center justify-between py-1.5 pl-3.5 pr-2.5 text-left font-mono text-[12px] tracking-[-0.01em] transition-colors duration-150",
                       isActive
-                        ? "bg-primary/15 font-semibold text-primary shadow-xs border-l-2 border-primary pl-2 pr-2.5"
-                        : "text-muted-foreground hover:bg-muted/40 hover:text-foreground pl-2.5 pr-2.5"
+                        ? "bg-accent font-semibold text-foreground"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    {isActive && <span className="absolute inset-y-0 left-0 w-[3px] bg-signal" />}
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <Icon
                         className={cn(
                           "size-3.5 shrink-0 transition-colors",
-                          isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          isActive ? "text-signal" : "text-muted-foreground group-hover:text-foreground"
                         )}
                       />
                       <span className="truncate">{item.label}</span>
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      {item.isNew && (
-                        <span className="rounded bg-sky-500/15 px-1 py-0.2 font-mono text-[9px] font-bold text-sky-400">
-                          NEW
+                      {/* "NEW" reads as shipped; these tabs have no engine behind
+                          them, so they are labelled as previews instead. */}
+                      {item.isPreview && (
+                        <span
+                          title="Design preview — no scan engine connected"
+                          className="rounded-sm border-l-2 border-severity-medium bg-severity-medium-tint px-1 font-mono text-[9px] font-bold text-severity-medium"
+                        >
+                          PREVIEW
                         </span>
                       )}
                       {item.badge !== undefined && item.badge !== 0 && (
                         <span
                           className={cn(
-                            "rounded-full px-1.5 py-0.2 font-mono text-[10px] font-semibold",
+                            "rounded-sm px-1.5 font-mono text-[10px] font-semibold tabular-nums",
                             isActive
-                              ? "bg-primary/25 text-primary"
+                              ? "bg-signal/20 text-signal"
                               : "bg-muted-foreground/15 text-muted-foreground"
                           )}
                         >

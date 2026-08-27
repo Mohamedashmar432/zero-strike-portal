@@ -235,7 +235,7 @@ export function FindingItem({
             className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono"
             title={analysis?.insight?.severity_reasoning || "AI-adjusted severity"}
           >
-            <span className="font-semibold text-purple-400">AI→</span>
+            <span className="font-semibold text-ai">AI→</span>
             <SeverityBadge severity={adjustedSeverity} />
           </span>
         )}

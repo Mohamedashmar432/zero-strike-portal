@@ -373,7 +373,7 @@ function AiProvidersPanel() {
                 </TableCell>
                 <TableCell>
                   {p.is_active ? (
-                    <Badge className="bg-green-600 text-white">Active</Badge>
+                    <Badge className="bg-status-success text-background">Active</Badge>
                   ) : (
                     <Button
                       size="sm"

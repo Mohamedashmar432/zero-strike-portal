@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PreviewNotice } from "@/components/common/preview-notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,24 +99,25 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
 
   function handleRunSimulation(scenario: AttackScenario) {
     setIsRunning(true);
-    toast.info(`Executing adversary simulation: ${scenario.name}...`);
-    setTimeout(() => {
-      setIsRunning(false);
-      toast.success(`Simulation completed. Blast radius contained: 100% blocked at step 2.`);
-    }, 2000);
+    // Same reasoning as the DAST tab: no simulation engine exists, so no
+    // containment result may be reported.
+    toast.info(`Attack Simulation is a preview — "${scenario.name}" cannot be executed yet.`);
+    setTimeout(() => setIsRunning(false), 600);
   }
 
   return (
     <div className="space-y-6">
+      <PreviewNotice feature="Attack Simulation" />
+
       {/* Top Banner Overview */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <Swords className="size-5 text-rose-400" />
+            <Swords className="size-5 text-severity-critical" />
             <h2 className="text-base font-semibold tracking-tight text-foreground">
               Synthetic Attack Simulation & Threat Emulation
             </h2>
-            <Badge variant="outline" className="font-mono text-[10px] text-rose-400 border-rose-500/30">
+            <Badge variant="outline" className="font-mono text-[10px] text-severity-critical border-severity-critical/30">
               Adversary Suite
             </Badge>
           </div>
@@ -126,12 +128,14 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
 
         <Button
           onClick={() => handleRunSimulation(selectedScenario)}
-          disabled={isRunning}
+          disabled
+          title="No simulation engine is connected yet"
           size="sm"
-          className="gap-1.5 font-medium bg-rose-600 hover:bg-rose-500 text-white shrink-0"
+          variant="outline"
+          className="shrink-0 gap-1.5"
         >
-          {isRunning ? <RefreshCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
-          <span>{isRunning ? "Simulating Vector…" : "Run Selected Simulation"}</span>
+          <Play className="size-3.5 fill-current" />
+          <span>Run Selected Simulation</span>
         </Button>
       </div>
 
@@ -150,7 +154,7 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
                   key={scenario.id}
                   onClick={() => setSelectedScenario(scenario)}
                   className={`cursor-pointer transition-all border-border/80 bg-card/60 hover:border-border hover:bg-card/90 ${
-                    isSelected ? "border-rose-500/50 bg-rose-950/10 shadow-xs" : ""
+                    isSelected ? "border-severity-critical/50 bg-severity-critical/10" : ""
                   }`}
                 >
                   <CardContent className="p-3.5 space-y-2">
@@ -187,7 +191,7 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
                 <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono">
                   Attack Path & Blast Radius Visualizer
                 </CardTitle>
-                <Badge variant="outline" className="font-mono text-[10px] text-rose-400">
+                <Badge variant="outline" className="font-mono text-[10px] text-severity-critical">
                   {selectedScenario.mitreTechnique}
                 </Badge>
               </div>
@@ -210,7 +214,7 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
                           <ShieldCheck className="size-3" />
                         </div>
                       ) : (
-                        <div className="flex size-5 items-center justify-center rounded-full bg-rose-500/20 text-rose-400">
+                        <div className="flex size-5 items-center justify-center rounded-full bg-severity-critical/20 text-severity-critical">
                           <Flame className="size-3" />
                         </div>
                       )}
@@ -240,7 +244,7 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
                 <Button
                   size="xs"
                   onClick={() => handleRunSimulation(selectedScenario)}
-                  className="gap-1 bg-rose-600 hover:bg-rose-500 text-white font-medium"
+                  className="gap-1 bg-severity-critical hover:bg-severity-critical/85 text-white font-medium"
                 >
                   <Play className="size-3 fill-current" />
                   <span>Execute Vector</span>

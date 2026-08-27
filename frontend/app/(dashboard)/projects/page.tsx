@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/common/empty-state";
 import { FilterBar } from "@/components/common/filter-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdown";
+import { SeverityCountPills } from "@/components/severity/severity-count-pills";
+import { SeveritySpectrum } from "@/components/severity/severity-spectrum";
 import { ScanStatusSummaryPills } from "@/components/scans/scan-status-summary-pills";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -79,6 +81,7 @@ function ProjectsPageContent() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Workspace / Projects"
         title="Projects"
         description="Continuous code repositories, scan histories, and vulnerabilities."
         actions={
@@ -114,7 +117,7 @@ function ProjectsPageContent() {
       <FilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Search projects by name or description…"
+        searchPlaceholder="Search name or description…"
         facets={[
           {
             type: "select",
@@ -135,11 +138,11 @@ function ProjectsPageContent() {
             {filtered.map((p) => {
               const s = statsFor(p.id);
               return (
-                <Card key={p.id} className="border-border/80 bg-card/60 transition-all hover:border-border hover:bg-card/90">
+                <Card key={p.id} className="transition-colors hover:border-muted-foreground/40">
                   <CardContent className="space-y-3.5 p-4">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
-                        <FolderKanban className="size-4.5 shrink-0 text-primary" />
+                        <FolderKanban className="size-4.5 shrink-0 text-muted-foreground" />
                         <Link href={`/projects/${p.id}`} className="font-semibold text-foreground text-sm truncate hover:text-primary transition-colors">
                           {p.name}
                         </Link>
@@ -160,11 +163,16 @@ function ProjectsPageContent() {
                         {p.is_archived ? "Archived" : "Active"}
                       </Badge>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs font-bold text-foreground">
-                        {s.total_findings} finding{s.total_findings === 1 ? "" : "s"}
-                      </span>
-                      <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="readout text-sm text-foreground">
+                          {s.total_findings}
+                          <span className="legend ml-1.5 text-muted-foreground">findings</span>
+                        </span>
+                        <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                      </div>
+                      <SeveritySpectrum counts={s.findings_by_severity} />
+                      <SeverityCountPills counts={s.findings_by_severity} />
                     </div>
                     <button
                       type="button"
@@ -172,7 +180,7 @@ function ProjectsPageContent() {
                       className="flex w-full items-center justify-between rounded-md bg-muted/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <span className="flex items-center gap-1.5 font-mono text-[11px]">
-                        <FolderGit2 className="size-3.5 text-primary" />
+                        <FolderGit2 className="size-3.5 text-muted-foreground" />
                         Repositories ({s.total_repo_count})
                       </span>
                       <ChevronDown className={cn("size-3.5 transition-transform duration-150", expanded.has(p.id) && "rotate-180")} />
@@ -192,13 +200,16 @@ function ProjectsPageContent() {
         <DataTableCard isLoading={isLoading} isError={isError} errorMessage="Failed to load projects." isEmpty={isEmpty} emptyState={emptyState}>
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/40 text-xs">
-                <TableHead className="py-2.5">Project Name</TableHead>
-                <TableHead className="py-2.5">Findings</TableHead>
-                <TableHead className="py-2.5">Scan Status</TableHead>
-                <TableHead className="py-2.5">At-Risk Repos</TableHead>
-                <TableHead className="py-2.5">Status</TableHead>
-                <TableHead className="w-10 py-2.5" />
+              <TableRow>
+                <TableHead>Project Name</TableHead>
+                <TableHead className="w-28">Spectrum</TableHead>
+                <TableHead>Findings</TableHead>
+                <TableHead>Scan Status</TableHead>
+                <TableHead>At-Risk Repos</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Expand row</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -206,10 +217,14 @@ function ProjectsPageContent() {
                 const s = statsFor(p.id);
                 return (
                   <Fragment key={p.id}>
-                    <TableRow className="cursor-pointer transition-colors hover:bg-muted/30 text-xs" onClick={() => toggleExpanded(p.id)}>
+                    <TableRow
+                      className="cursor-pointer"
+                      onClick={() => toggleExpanded(p.id)}
+                      data-expanded={expanded.has(p.id)}
+                    >
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <FolderKanban className="size-4 shrink-0 text-primary" />
+                          <FolderKanban className="size-4 shrink-0 text-muted-foreground" />
                           <Link
                             href={`/projects/${p.id}`}
                             className="font-semibold text-foreground underline-offset-4 hover:underline hover:text-primary"
@@ -219,7 +234,10 @@ function ProjectsPageContent() {
                           </Link>
                         </div>
                       </TableCell>
-                      <TableCell className="font-mono font-bold text-foreground">{s.total_findings}</TableCell>
+                      <TableCell>
+                        <SeveritySpectrum counts={s.findings_by_severity} />
+                      </TableCell>
+                      <TableCell className="readout text-foreground">{s.total_findings}</TableCell>
                       <TableCell>
                         <ScanStatusSummaryPills counts={s.scan_status_counts} />
                       </TableCell>
@@ -246,10 +264,10 @@ function ProjectsPageContent() {
                     </TableRow>
                     {expanded.has(p.id) && (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 p-0 border-b border-border/80">
+                        <TableCell colSpan={7} className="bg-muted/40 p-0">
                           <div className="p-4 pl-8 border-l-2 border-primary/50 space-y-2.5 bg-muted/20">
                             <div className="flex items-center gap-2">
-                              <FolderGit2 className="size-3.5 text-primary" />
+                              <FolderGit2 className="size-3.5 text-muted-foreground" />
                               <span className="text-[11px] font-bold tracking-wider text-muted-foreground uppercase font-mono">
                                 Connected Repositories & Security Status
                               </span>
