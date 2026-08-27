@@ -291,3 +291,94 @@ def test_allocate_409s_when_exhausted_and_all_findings_are_new(client):
         asyncio.run(auto_fix_quota_service.allocate(scan_id, fresh))
     assert exc.value.status_code == 409
     assert "allowance" in exc.value.detail
+
+
+# --- gaps found by measuring coverage ---------------------------------------
+
+
+def test_single_finding_gate_blocks_when_exhausted_but_reruns_are_free(client):
+    """assert_can_fix_one backs POST /findings/{id}/auto-fix, a different path to allocate()."""
+    import pytest
+    from fastapi import HTTPException
+
+    from app.services import auto_fix_quota_service
+
+    headers, project, scan_id = _setup(client, "onegate")
+    charged = []
+    for i in range(10):
+        fid = _insert_finding(project["id"], scan_id, f"fp-gate-{i}")
+        _insert_proposal(project["id"], scan_id, fid)
+        charged.append(fid)
+
+    # a finding that already has a proposal is free even at the limit
+    asyncio.run(auto_fix_quota_service.assert_can_fix_one(scan_id, charged[0]))
+
+    # a brand-new one is not
+    fresh = _insert_finding(project["id"], scan_id, "fp-gate-new")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(auto_fix_quota_service.assert_can_fix_one(scan_id, fresh))
+    assert exc.value.status_code == 409
+    assert "allowance" in exc.value.detail
+
+    # and it passes again once headroom is granted
+    _set_extra(scan_id, project["id"], 5)
+    asyncio.run(auto_fix_quota_service.assert_can_fix_one(scan_id, fresh))
+
+
+def test_second_grant_stacks_onto_the_first(client):
+    """Two approvals must ADD, not overwrite — the second hits the existing-quota branch."""
+    headers, project, scan_id = _setup(client, "stack")
+    admin = _admin_headers(client)
+    url = f"/api/v1/scans/{scan_id}/auto-fix/quota/requests"
+
+    for grant in (7, 5):
+        req = client.post(
+            url, json={"requested_additional": grant, "reason": "more please"}, headers=headers
+        ).json()
+        d = client.post(
+            f"/api/v1/admin/auto-fix-quota/requests/{req['id']}/decide",
+            json={"approve": True, "granted_additional": grant},
+            headers=admin,
+        )
+        assert d.status_code == 200, d.text
+
+    body = client.get(f"/api/v1/scans/{scan_id}/auto-fix/quota", headers=headers).json()
+    assert body["extra_granted"] == 12  # 7 + 5, not 5
+    assert body["limit"] == 22
+
+
+def test_deciding_an_unknown_request_404s(client):
+    admin = _admin_headers(client)
+    r = client.post(
+        "/api/v1/admin/auto-fix-quota/requests/6a8f000000000000000000ff/decide",
+        json={"approve": True},
+        headers=admin,
+    )
+    assert r.status_code == 404
+
+
+def test_unknown_status_filter_is_rejected(client):
+    admin = _admin_headers(client)
+    assert client.get("/api/v1/admin/auto-fix-quota/requests?status=bogus", headers=admin).status_code == 400
+    # and the valid ones still work
+    for s in ("pending", "approved", "rejected"):
+        assert client.get(f"/api/v1/admin/auto-fix-quota/requests?status={s}", headers=admin).status_code == 200
+
+
+def test_grant_above_the_hard_ceiling_is_rejected(client):
+    """The 500 cap must hold at the DECISION layer too, not just on the request."""
+    headers, project, scan_id = _setup(client, "ceiling")
+    req = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix/quota/requests",
+        json={"requested_additional": 10, "reason": "modest ask"},
+        headers=headers,
+    ).json()
+    admin = _admin_headers(client)
+    r = client.post(
+        f"/api/v1/admin/auto-fix-quota/requests/{req['id']}/decide",
+        json={"approve": True, "granted_additional": 100000},
+        headers=admin,
+    )
+    assert r.status_code == 422  # schema bound
+    # request survives as pending so it can still be decided properly
+    assert client.get(f"/api/v1/scans/{scan_id}/auto-fix/quota", headers=headers).json()["pending_request_count"] == 1
