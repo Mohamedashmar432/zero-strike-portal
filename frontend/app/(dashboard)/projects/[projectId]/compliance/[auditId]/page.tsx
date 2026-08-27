@@ -145,6 +145,21 @@ function ComplianceDisclaimer({ withAiNarrative }: { withAiNarrative: boolean })
 }
 
 /**
+ * How much of a framework a code scanner can speak to at all, as a percentage.
+ *
+ * Derived, never read from `summary.coverage_percent` — audits that ran before that field
+ * existed have no value stored, and Pydantic serialises the gap as `0`, not `null`. A `??`
+ * fallback therefore would NOT fire, and a historical audit would claim "only 0% of this
+ * framework can be assessed from code", which is exactly the kind of false line in a
+ * compliance report this whole area is meant to prevent. assessed_total/controls_total are on
+ * every summary ever written, so recomputing is both cheaper and always right.
+ */
+export function coveragePercentOf(summary: FrameworkSummary): number {
+  if (summary.controls_total <= 0) return 0;
+  return Math.round((summary.assessed_total / summary.controls_total) * 100);
+}
+
+/**
  * Per-framework score card.
  *
  * The score is passed / code-assessable, so it is deliberately NOT called a compliance score:
@@ -158,11 +173,7 @@ function PostureGaugeCard({ summary }: { summary: FrameworkSummary }) {
     (summary.assessed_total > 0
       ? Math.round((summary.passed / summary.assessed_total) * 100)
       : 0);
-  const coverage =
-    summary.coverage_percent ??
-    (summary.controls_total > 0
-      ? Math.round((summary.assessed_total / summary.controls_total) * 100)
-      : 0);
+  const coverage = coveragePercentOf(summary);
 
   let scoreColor = "text-status-success";
   let scoreBg = "bg-status-success/10 border-status-success/30";
@@ -967,7 +978,9 @@ export default function ComplianceAuditPage() {
     <div className="space-y-6">
       <PageHeader
         title="Regulatory Compliance Dashboard"
-        description="Azure-aligned continuous regulatory posture assessment evaluated against source code findings."
+        // Not "continuous": an audit is a point-in-time read of the scans that existed when it
+        // ran, started by hand. Nothing here re-evaluates itself.
+        description="A point-in-time control assessment, evaluated from the scan findings in scope when this audit ran."
         breadcrumb={
           <Breadcrumbs
             items={[

@@ -5,7 +5,7 @@ import type {
   ControlStatus,
   FrameworkSummary,
 } from "@/lib/api/compliance";
-import { groupControlsByFramework, scanCoverageGaps } from "./page";
+import { coveragePercentOf, groupControlsByFramework, scanCoverageGaps } from "./page";
 
 function summary(framework: string): FrameworkSummary {
   return {
@@ -153,5 +153,24 @@ describe("scanCoverageGaps", () => {
     // while scan_ids is longer -- the counts must not go out of range either way.
     expect(scanCoverageGaps(auditFixture({ repos_in_scope: 1, repos_with_scans: 3 })).missingRepos)
       .toBe(0);
+  });
+});
+
+describe("coveragePercentOf", () => {
+  test("is derived from the control counts, not from the stored field", () => {
+    // An audit that ran before coverage_percent existed serialises it as 0, not null -- so a
+    // `??` fallback would not fire and the card would claim 0% assessable. Deriving is correct
+    // for historical and new audits alike.
+    const legacy: FrameworkSummary = {
+      ...summary("soc2"),
+      controls_total: 18,
+      assessed_total: 10,
+      coverage_percent: 0,
+    };
+    expect(coveragePercentOf(legacy)).toBe(56);
+  });
+
+  test("a framework with no controls is 0%, not a divide-by-zero", () => {
+    expect(coveragePercentOf(summary("soc2"))).toBe(0);
   });
 });
