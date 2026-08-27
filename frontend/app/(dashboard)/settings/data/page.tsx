@@ -52,7 +52,11 @@ export default function DataSettingsPage() {
     enabled: isAdmin,
   });
 
-  const { data: stats, isPending } = useQuery({
+  const {
+    data: stats,
+    isPending,
+    isFetching,
+  } = useQuery({
     queryKey: queryKeys.admin.dataStats(projectId),
     queryFn: () => getDataStats(projectId),
     enabled: isAdmin,
@@ -119,6 +123,14 @@ export default function DataSettingsPage() {
 
   const toggle = (key: string) =>
     setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  // One-click "clear the test data": portal-wide scope + the projects category, which
+  // implies every project-scoped category. Same dialog, same typed confirmation.
+  const resetPortal = () => {
+    setScope(ALL_PROJECTS);
+    setSelected(["projects"]);
+    setDialogOpen(true);
+  };
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -222,21 +234,33 @@ export default function DataSettingsPage() {
             <AlertTriangle className="size-4" /> Danger Zone
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-4">
-          <p className="text-sm text-muted-foreground">
-            {selected.length === 0
-              ? "Select at least one category above."
-              : `Deletes ${totalAffected.toLocaleString()} record${
-                  totalAffected === 1 ? "" : "s"
-                } from ${scopeLabel}. This cannot be undone.`}
-          </p>
-          <Button
-            variant="destructive"
-            disabled={selected.length === 0}
-            onClick={() => setDialogOpen(true)}
-          >
-            Delete Data
-          </Button>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <p className="text-sm text-muted-foreground">
+              {selected.length === 0
+                ? "Select at least one category above."
+                : `Deletes ${totalAffected.toLocaleString()} record${
+                    totalAffected === 1 ? "" : "s"
+                  } from ${scopeLabel}. This cannot be undone.`}
+            </p>
+            <Button
+              variant="destructive"
+              disabled={selected.length === 0}
+              onClick={() => setDialogOpen(true)}
+            >
+              Delete Data
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
+            <p className="text-sm text-muted-foreground">
+              Wipe every project in the portal and everything under it — the one-click reset for
+              clearing test data. User accounts and settings are kept.
+            </p>
+            <Button variant="destructive" onClick={resetPortal}>
+              Delete all projects
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -305,10 +329,12 @@ export default function DataSettingsPage() {
             </Button>
             <Button
               variant="destructive"
-              disabled={confirmText !== CONFIRM_PHRASE || purge.isPending}
+              // isFetching: switching scope refetches the counts, and confirming an
+              // irreversible wipe against a stale/zero total is worse than a short wait.
+              disabled={confirmText !== CONFIRM_PHRASE || purge.isPending || isFetching}
               onClick={() => purge.mutate()}
             >
-              {purge.isPending ? "Deleting…" : "Delete Data"}
+              {purge.isPending ? "Deleting…" : isFetching ? "Counting…" : "Delete Data"}
             </Button>
           </DialogFooter>
         </DialogContent>
