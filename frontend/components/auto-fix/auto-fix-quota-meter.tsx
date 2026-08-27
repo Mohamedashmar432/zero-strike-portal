@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Gauge, ShieldCheck } from "lucide-react";
+import { Clock, Gauge } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,22 +27,23 @@ import { queryKeys } from "@/lib/api/query-keys";
 import { cn } from "@/lib/utils";
 
 /**
- * Per-scan auto-fix allowance, shown at the top of the Auto-Fix section.
+ * Per-scan auto-fix allowance, as a compact readout in the section's control row.
  *
- * Reads as an instrument gauge rather than a billing banner: a mono readout, a
- * segmented bar, and a tone that escalates as the budget is consumed. The whole
- * thing is one button — clicking it opens the request dialog — because the moment
- * you care about the number is the moment you have run out.
+ * Deliberately just the number. This is a budget you glance at, not a panel you
+ * read — it previously occupied a full-width band above the stats, which gave a
+ * secondary constraint more weight than the findings themselves. The detail
+ * (remaining, granted extra, last decision, how the allowance works) all lives
+ * in the dialog, one click away, which is the only moment any of it matters.
  */
 const TONE = {
-  ok: { text: "text-foreground", bar: "bg-status-success", edge: "border-l-status-success" },
-  warn: { text: "text-severity-medium", bar: "bg-severity-medium", edge: "border-l-severity-medium" },
-  spent: { text: "text-severity-critical", bar: "bg-severity-critical", edge: "border-l-severity-critical" },
+  ok: "border-border text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground",
+  warn: "border-severity-medium/50 bg-severity-medium-tint text-severity-medium hover:border-severity-medium",
+  spent: "border-severity-critical/50 bg-severity-critical-tint text-severity-critical hover:border-severity-critical",
 } as const;
 
-function toneFor(used: number, limit: number) {
-  if (limit <= 0 || used >= limit) return TONE.spent;
-  return used / limit >= 0.7 ? TONE.warn : TONE.ok;
+function toneFor(used: number, limit: number): keyof typeof TONE {
+  if (limit <= 0 || used >= limit) return "spent";
+  return used / limit >= 0.7 ? "warn" : "ok";
 }
 
 export function AutoFixQuotaMeter({ scanId }: { scanId: string }) {
@@ -78,11 +79,10 @@ export function AutoFixQuotaMeter({ scanId }: { scanId: string }) {
       toast.error(err instanceof ApiError ? err.message : "Could not send the request."),
   });
 
-  if (isLoading) return <Skeleton className="h-[74px] w-full" />;
+  if (isLoading) return <Skeleton className="h-8 w-20" />;
   if (!quota) return null;
 
   const tone = toneFor(quota.used, quota.limit);
-  const pct = quota.limit > 0 ? Math.min(100, (quota.used / quota.limit) * 100) : 100;
   const hasPending = quota.pending_request_count > 0;
   const lastDecided = requests?.items.find((r) => r.status !== "pending");
 
@@ -90,68 +90,44 @@ export function AutoFixQuotaMeter({ scanId }: { scanId: string }) {
   const amountValid = Number.isInteger(amountNum) && amountNum >= 1 && amountNum <= 500;
   const canSubmit = amountValid && reason.trim().length > 0 && !submit.isPending;
 
+  const hint = hasPending
+    ? `Auto-fix allowance: ${quota.used} of ${quota.limit} used. A request for more is awaiting review.`
+    : quota.remaining > 0
+      ? `Auto-fix allowance: ${quota.used} of ${quota.limit} used on this scan, ${quota.remaining} remaining. Click to request more.`
+      : `Auto-fix allowance for this scan is used up (${quota.limit}). Click to request more.`;
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Auto-fix allowance for this scan — request more"
+        title={hint}
+        aria-label={hint}
         className={cn(
-          "group w-full cursor-pointer rounded-lg border border-border border-l-2 bg-card px-4 py-3 text-left transition-colors",
-          "hover:border-muted-foreground/40 focus-visible:outline-2 focus-visible:outline-ring/60",
-          tone.edge
+          "inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-clip-padding px-2 font-mono text-[12px] tabular-nums transition-colors",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/60",
+          TONE[tone]
         )}
       >
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <span className="legend flex items-center gap-1.5 text-muted-foreground">
-            <Gauge className="size-3.5" aria-hidden="true" />
-            Auto-Fix allowance · this scan
-          </span>
-          <span className="legend text-muted-foreground transition-colors group-hover:text-signal">
-            {hasPending ? "Request pending" : "Request more"}
-          </span>
-        </div>
-
-        <div className="mt-2 flex items-end justify-between gap-4">
-          <p className={cn("readout text-2xl leading-none", tone.text)}>
-            {quota.used}
-            <span className="text-muted-foreground"> / {quota.limit}</span>
-            <span className="legend ml-2 text-muted-foreground">findings fixed</span>
-          </p>
-          {hasPending && (
-            <span className="legend flex items-center gap-1.5 rounded-sm bg-severity-medium-tint px-1.5 py-0.5 text-severity-medium">
-              <Clock className="size-3" aria-hidden="true" />
-              Awaiting review
-            </span>
-          )}
-          {!hasPending && quota.extra_granted > 0 && (
-            <span className="legend flex items-center gap-1.5 rounded-sm bg-status-success-tint px-1.5 py-0.5 text-status-success">
-              <ShieldCheck className="size-3" aria-hidden="true" />
-              +{quota.extra_granted} granted
-            </span>
-          )}
-        </div>
-
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-sm bg-muted">
-          <div className={cn("h-full transition-[width] duration-300", tone.bar)} style={{ width: `${pct}%` }} />
-        </div>
-
-        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          {quota.remaining > 0
-            ? `${quota.remaining} more finding${quota.remaining === 1 ? "" : "s"} can be auto-fixed on this scan. Re-running a fix on a finding you already fixed is free.`
-            : "This scan's allowance is used up. Request more to keep going — scanning the repo again starts a fresh allowance."}
-        </p>
+        <Gauge className="size-3.5" aria-hidden="true" />
+        <span className="font-semibold">
+          {quota.used}
+          <span className="opacity-60">/{quota.limit}</span>
+        </span>
+        {hasPending && <Clock className="size-3 shrink-0" aria-hidden="true" />}
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Request more auto-fix allowance</DialogTitle>
+            <DialogTitle>Auto-fix allowance</DialogTitle>
             <DialogDescription>
-              This scan has fixed {quota.used} of {quota.limit} permitted findings. An
-              administrator reviews the request, and may grant a different amount than you ask
-              for. Each new scan of this repository starts with a fresh allowance of{" "}
-              {quota.default_limit}.
+              This scan has fixed {quota.used} of {quota.limit} permitted findings
+              {quota.extra_granted > 0
+                ? ` (${quota.default_limit} standard, +${quota.extra_granted} granted)`
+                : ""}
+              . Re-running a fix on a finding you already fixed is free. Each new scan of this
+              repository starts with a fresh allowance of {quota.default_limit}.
             </DialogDescription>
           </DialogHeader>
 
@@ -203,11 +179,17 @@ export function AutoFixQuotaMeter({ scanId }: { scanId: string }) {
           {lastDecided && (
             <p className="border-t border-hairline pt-3 text-[11px] leading-relaxed text-muted-foreground">
               Last decision:{" "}
-              <span className={lastDecided.status === "approved" ? "text-status-success" : "text-severity-critical"}>
+              <span
+                className={
+                  lastDecided.status === "approved"
+                    ? "text-status-success"
+                    : "text-severity-critical"
+                }
+              >
                 {lastDecided.status}
               </span>
               {lastDecided.granted_additional ? ` (+${lastDecided.granted_additional})` : ""}
-              {lastDecided.decision_note ? ` — "${lastDecided.decision_note}"` : ""}
+              {lastDecided.decision_note ? ` — “${lastDecided.decision_note}”` : ""}
             </p>
           )}
 

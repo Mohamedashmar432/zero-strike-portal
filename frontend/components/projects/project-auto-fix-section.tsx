@@ -69,7 +69,8 @@ export function ProjectAutoFixSection({
     mutationFn: () => triggerScanAutoFix(scanId),
     onSuccess: (job) => {
       qc.setQueryData(key, job);
-      // A run draws down the scan's allowance, so the gauge above must not go stale.
+      // A run draws down the scan's allowance, so the readout in the control row
+      // must not go stale.
       qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.quota(scanId) });
     },
     // Surfaces the 409 from an exhausted allowance verbatim, which already tells the
@@ -122,7 +123,11 @@ export function ProjectAutoFixSection({
             applied. Nothing auto-commits.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Per-scan allowance: a glanceable number in the control row rather
+              than a band across the page. Detail + the request form live behind
+              the click. */}
+          <AutoFixQuotaMeter scanId={scanId} />
           {summary && <RiskBadge rating={summary.risk_rating} />}
           <Button
             variant="outline"
@@ -161,11 +166,6 @@ export function ProjectAutoFixSection({
           </Button>
         </div>
       </div>
-
-      {/* Per-scan auto-fix allowance. Sits above the stats because the moment it
-          matters is before you press Generate, and it is the control for asking an
-          admin for more. */}
-      <AutoFixQuotaMeter scanId={scanId} />
 
       {summary && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
