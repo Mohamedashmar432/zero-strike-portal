@@ -14,6 +14,7 @@ from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
     admin_ai_analytics,
     admin_data,
+    auto_fix_quota,
     admin_downloads,
     admin_scanner_status,
     ai_analysis,
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_downloads.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(admin_data.router, prefix="/api/v1")
+    app.include_router(auto_fix_quota.router, prefix="/api/v1")
     app.include_router(report_templates.router, prefix="/api/v1")
     app.include_router(ai_analysis.router, prefix="/api/v1")
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")

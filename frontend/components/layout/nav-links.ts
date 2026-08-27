@@ -5,6 +5,7 @@ import {
   Database,
   FileText,
   FolderKanban,
+  Inbox,
   LayoutDashboard,
   Plug,
   ScrollText,
@@ -22,6 +23,7 @@ export const mainLinks = [
 
 export const adminLinks = [
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/auto-fix-requests", label: "Auto-Fix Requests", icon: Inbox },
   { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },
   { href: "/admin/ai-analytics", label: "AI Analytics", icon: ChartColumn },

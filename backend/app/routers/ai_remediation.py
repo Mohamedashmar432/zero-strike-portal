@@ -47,6 +47,7 @@ from app.services import (
     ai_remediation_queue_service,
     ai_remediation_service,
     audit_service,
+    auto_fix_quota_service,
     fix_pattern_service,
     llm_client,
     project_service,
@@ -270,6 +271,13 @@ async def trigger_scan_auto_fix(
     if not finding_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Scan has no findings to fix")
 
+    # Per-scan allowance. Clamps rather than rejecting: submitting 10 findings with 3
+    # left fixes the 3 highest-priority ones and reports the shortfall, which beats
+    # failing the whole run. 409s only when nothing at all can be fixed.
+    requested_count = len(finding_ids)
+    finding_ids = await auto_fix_quota_service.allocate(scan_id, finding_ids)
+    quota_skipped = requested_count - len(finding_ids)
+
     now = datetime.now(timezone.utc)
     job = RemediationJob(
         kind="propose",
@@ -290,7 +298,11 @@ async def trigger_scan_auto_fix(
         project_id=scan.project_id,
         target_type="scan",
         target_id=scan_id,
-        metadata={"findings": len(finding_ids), "force": payload.force},
+        metadata={
+            "findings": len(finding_ids),
+            "force": payload.force,
+            "quota_skipped": quota_skipped,
+        },
     )
     return await _scan_response(scan_id, job)
 
@@ -421,6 +433,10 @@ async def trigger_finding_auto_fix(
     active = await _active_job(scope_key)
     if active is not None:
         return await _finding_response(finding, active)
+
+    # Per-scan allowance. Free if this finding already has a proposal (a re-run or
+    # revision was already paid for when it was first generated).
+    await auto_fix_quota_service.assert_can_fix_one(finding.scan_id, str(finding.id))
 
     now = datetime.now(timezone.utc)
     job = RemediationJob(

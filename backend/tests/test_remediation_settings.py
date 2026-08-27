@@ -26,6 +26,9 @@ def test_get_returns_lazy_created_defaults(client):
         "enabled": True,
         "confidence_threshold": 80.0,
         "max_findings_per_job": 20,
+        # Base per-scan AI Auto-Fix allowance; raised per-scan by approving an
+        # AutoFixQuotaRequest (see test_auto_fix_quota.py).
+        "auto_fix_findings_per_scan": 10,
         "blocking_severities": ["critical", "high", "medium"],
     }
 

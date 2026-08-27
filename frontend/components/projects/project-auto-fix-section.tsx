@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/auto-fix/activity-timeline";
+import { AutoFixQuotaMeter } from "@/components/auto-fix/auto-fix-quota-meter";
 import { AutoFixWorkspace } from "@/components/auto-fix/auto-fix-workspace";
 import { CommentsDrawer } from "@/components/auto-fix/comments-drawer";
 import { EmptyState } from "@/components/common/empty-state";
@@ -66,7 +67,13 @@ export function ProjectAutoFixSection({
 
   const trigger = useMutation({
     mutationFn: () => triggerScanAutoFix(scanId),
-    onSuccess: (job) => qc.setQueryData(key, job),
+    onSuccess: (job) => {
+      qc.setQueryData(key, job);
+      // A run draws down the scan's allowance, so the gauge above must not go stale.
+      qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.quota(scanId) });
+    },
+    // Surfaces the 409 from an exhausted allowance verbatim, which already tells the
+    // user to request more headroom.
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed to start Auto-Fix"),
   });
 
@@ -154,6 +161,11 @@ export function ProjectAutoFixSection({
           </Button>
         </div>
       </div>
+
+      {/* Per-scan auto-fix allowance. Sits above the stats because the moment it
+          matters is before you press Generate, and it is the control for asking an
+          admin for more. */}
+      <AutoFixQuotaMeter scanId={scanId} />
 
       {summary && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

@@ -7,6 +7,7 @@ class RemediationSettingsResponse(BaseModel):
     enabled: bool
     confidence_threshold: float
     max_findings_per_job: int
+    auto_fix_findings_per_scan: int
     blocking_severities: list[str]
 
 
@@ -16,6 +17,7 @@ class RemediationSettingsUpdateRequest(BaseModel):
     enabled: bool | None = None
     confidence_threshold: float | None = Field(default=None, ge=0, le=100)
     max_findings_per_job: int | None = Field(default=None, ge=1, le=100)
+    auto_fix_findings_per_scan: int | None = Field(default=None, ge=1, le=500)
     blocking_severities: list[str] | None = None
 
     @field_validator("blocking_severities")
