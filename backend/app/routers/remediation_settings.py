@@ -21,6 +21,7 @@ def _to_response(cfg: RemediationSettings) -> RemediationSettingsResponse:
         enabled=cfg.enabled,
         confidence_threshold=cfg.confidence_threshold,
         max_findings_per_job=cfg.max_findings_per_job,
+        auto_fix_findings_per_scan=cfg.auto_fix_findings_per_scan,
         blocking_severities=cfg.blocking_severities,
     )
 

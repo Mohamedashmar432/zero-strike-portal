@@ -123,6 +123,29 @@ function AutoFixPolicyCard() {
         </div>
 
         <div className="space-y-2">
+          <Label htmlFor="per-scan-allowance">Auto-fix allowance per scan</Label>
+          <Input
+            id="per-scan-allowance"
+            type="number"
+            min={1}
+            max={500}
+            className="max-w-32"
+            value={form.auto_fix_findings_per_scan}
+            onChange={(e) =>
+              setForm({ ...form, auto_fix_findings_per_scan: Number(e.target.value) })
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Total distinct findings that may ever be auto-fixed on one scan. Separate from
+            &ldquo;max findings per job&rdquo;, which caps a single run — a scan can be run
+            through several. Each new scan of a repository starts a fresh allowance. Teams that
+            need more on a specific scan request it, and you approve it under{" "}
+            <span className="font-mono">Administration → Auto-Fix Requests</span>. Changing this
+            number lifts every scan at once.
+          </p>
+        </div>
+
+        <div className="space-y-2">
           <Label>Block a pull request when a fix introduces a new finding of</Label>
           <div className="flex flex-wrap gap-4">
             {SEVERITIES.map((sev) => (

@@ -7,7 +7,12 @@
 export const queryKeys = {
   admin: {
     auditLogs: () => ["admin", "audit-logs"] as const,
+    dataStats: (projectId?: string) => ["admin", "data-stats", projectId ?? ""] as const,
     scannerStatus: () => ["admin", "scanner-status"] as const,
+    autoFixQuotaRequests: (status?: string) =>
+      status === undefined
+        ? (["admin", "auto-fix-quota-requests"] as const)
+        : (["admin", "auto-fix-quota-requests", status] as const),
     users: (page?: number) =>
       page === undefined ? (["admin", "users"] as const) : (["admin", "users", page] as const),
   },
@@ -79,6 +84,9 @@ export const queryKeys = {
       proposal: (proposalId: string) => ["ai", "autofix", "proposal", proposalId] as const,
       projectList: (projectId: string) => ["ai", "autofix", "project", projectId] as const,
       conversation: (proposalId: string) => ["ai", "autofix", "conversation", proposalId] as const,
+      // Per-scan auto-fix allowance, and the request queue behind it.
+      quota: (scanId: string) => ["ai", "autofix", "quota", scanId] as const,
+      quotaRequests: (scanId: string) => ["ai", "autofix", "quota-requests", scanId] as const,
       comments: (findingId: string) => ["ai", "autofix", "comments", findingId] as const,
       commentSummary: (scanId: string) => ["ai", "autofix", "commentSummary", scanId] as const,
       activity: (scanId: string) => ["ai", "autofix", "activity", scanId] as const,

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/auto-fix/activity-timeline";
+import { AutoFixQuotaMeter } from "@/components/auto-fix/auto-fix-quota-meter";
 import { AutoFixWorkspace } from "@/components/auto-fix/auto-fix-workspace";
 import { CommentsDrawer } from "@/components/auto-fix/comments-drawer";
 import { EmptyState } from "@/components/common/empty-state";
@@ -66,7 +67,14 @@ export function ProjectAutoFixSection({
 
   const trigger = useMutation({
     mutationFn: () => triggerScanAutoFix(scanId),
-    onSuccess: (job) => qc.setQueryData(key, job),
+    onSuccess: (job) => {
+      qc.setQueryData(key, job);
+      // A run draws down the scan's allowance, so the readout in the control row
+      // must not go stale.
+      qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.quota(scanId) });
+    },
+    // Surfaces the 409 from an exhausted allowance verbatim, which already tells the
+    // user to request more headroom.
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed to start Auto-Fix"),
   });
 
@@ -115,7 +123,11 @@ export function ProjectAutoFixSection({
             applied. Nothing auto-commits.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Per-scan allowance: a glanceable number in the control row rather
+              than a band across the page. Detail + the request form live behind
+              the click. */}
+          <AutoFixQuotaMeter scanId={scanId} />
           {summary && <RiskBadge rating={summary.risk_rating} />}
           <Button
             variant="outline"

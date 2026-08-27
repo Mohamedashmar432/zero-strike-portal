@@ -21,6 +21,7 @@ async def update_settings(
     enabled: bool | None = None,
     confidence_threshold: float | None = None,
     max_findings_per_job: int | None = None,
+    auto_fix_findings_per_scan: int | None = None,
     blocking_severities: list[str] | None = None,
 ) -> RemediationSettings:
     cfg = await get_settings()
@@ -30,6 +31,8 @@ async def update_settings(
         cfg.confidence_threshold = confidence_threshold
     if max_findings_per_job is not None:
         cfg.max_findings_per_job = max_findings_per_job
+    if auto_fix_findings_per_scan is not None:
+        cfg.auto_fix_findings_per_scan = auto_fix_findings_per_scan
     if blocking_severities is not None:
         cfg.blocking_severities = blocking_severities
     cfg.updated_at = datetime.now(timezone.utc)

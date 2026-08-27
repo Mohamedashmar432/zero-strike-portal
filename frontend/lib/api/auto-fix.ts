@@ -151,7 +151,13 @@ export function listProjectAutoFix(projectId: string) {
 export type RemediationSettings = {
   enabled: boolean;
   confidence_threshold: number; // 0-100
-  max_findings_per_job: number;
+  max_findings_per_job: number; // caps ONE propose run
+  /**
+   * Base total distinct findings that may ever be auto-fixed on a single scan.
+   * Distinct from max_findings_per_job: a scan can be run through several jobs.
+   * Raised per-scan by approving an allowance request.
+   */
+  auto_fix_findings_per_scan: number;
   blocking_severities: string[]; // subset of critical/high/medium/low/info
 };
 
