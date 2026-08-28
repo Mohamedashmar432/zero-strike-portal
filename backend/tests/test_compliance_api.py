@@ -672,3 +672,86 @@ def test_a_new_scan_invalidates_reuse(client):
     second = _run_audit(client, headers, project["id"]).json()
     assert second["id"] != first
     assert second["reused"] is False
+
+
+# --- one-click run: the audit's shape comes from the project's saved config ---
+
+
+def test_empty_body_runs_the_configured_frameworks_scope_and_depth(client):
+    """The Run Audit button posts `{}`. Everything it used to ask in a three-step wizard now
+    comes from the project's Compliance Config, resolved server-side."""
+    admin = _admin_headers(client, email="cfg-run@zs.dev")
+    project = _create_project(client, admin, name="Configured Audit")
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "f1"}])
+
+    r = client.put(
+        f"/api/v1/projects/{project['id']}/policy",
+        json={"compliance_frameworks": ["iso27001"], "compliance_audit_scope": "history"},
+        headers=admin,
+    )
+    assert r.status_code == 200
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/compliance-audits", json={}, headers=admin
+    )
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["frameworks"] == ["iso27001"]
+    assert body["scope"] == "history"
+    # Narrative is off by default workspace-wide, and a project cannot switch it on.
+    assert body["depth"] == "deterministic"
+
+
+def test_no_configured_frameworks_falls_back_to_every_supported_one(client):
+    from app.core.compliance_catalog import SUPPORTED_FRAMEWORK_KEYS
+
+    admin = _admin_headers(client, email="cfg-fallback@zs.dev")
+    project = _create_project(client, admin, name="Unconfigured Audit")
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "f1"}])
+
+    body = client.post(
+        f"/api/v1/projects/{project['id']}/compliance-audits", json={}, headers=admin
+    ).json()
+    assert sorted(body["frameworks"]) == sorted(SUPPORTED_FRAMEWORK_KEYS)
+
+
+def test_configured_narrative_downgrades_instead_of_refusing_when_no_ai_provider(client):
+    """Narrative that came from workspace config must not block the audit — the verdicts are
+    deterministic either way. An *explicit* with_ai_narrative request still 409s, since the
+    caller asked for something that cannot be produced."""
+    admin = _admin_headers(client, email="cfg-narrative@zs.dev")
+    project = _create_project(client, admin, name="Narrative Config")
+    _seed_scan_with_findings(project["id"], findings=[{"fingerprint": "f1"}])
+
+    r = client.put(
+        "/api/v1/workspace-settings",
+        json={"compliance_audit_ai_narrative": True},
+        headers=admin,
+    )
+    assert r.status_code == 200
+    assert r.json()["compliance_audit_ai_narrative"] is True
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/compliance-audits", json={}, headers=admin
+    )
+    assert r.status_code == 202, r.text
+    assert r.json()["depth"] == "deterministic"
+
+    # Explicit ask, no provider -> still refused rather than silently downgraded.
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/compliance-audits",
+        json={"depth": "with_ai_narrative"},
+        headers=admin,
+    )
+    assert r.status_code == 409
+
+
+def test_a_project_may_not_widen_scope_config_to_an_unsupported_framework(client):
+    admin = _admin_headers(client, email="cfg-unsupported@zs.dev")
+    project = _create_project(client, admin, name="Bad Config")
+    r = client.put(
+        f"/api/v1/projects/{project['id']}/policy",
+        json={"compliance_frameworks": ["hipaa"]},
+        headers=admin,
+    )
+    assert r.status_code == 422

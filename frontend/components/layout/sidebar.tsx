@@ -1,10 +1,9 @@
 "use client";
 
-import { Bell, PanelLeftClose, PanelLeftOpen, Search, Settings } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Search, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RequireRole } from "@/components/auth/require-role";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { ZeroStrikeLogoIcon } from "@/components/brand/logo";
 import { cn, getInitials } from "@/lib/utils";
@@ -144,16 +144,7 @@ export function Sidebar({ pinned, onTogglePin }: { pinned: boolean; onTogglePin:
           >
             {pinned ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Notifications"
-            className="relative text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            onClick={() => toast.info("No new notifications")}
-          >
-            <Bell className="size-4" />
-            <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-signal" />
-          </Button>
+          <NotificationBell />
           <ThemeToggle />
         </div>
       </div>

@@ -41,10 +41,23 @@ class FrameworkListResponse(BaseModel):
 
 
 class ComplianceAuditCreateRequest(BaseModel):
-    frameworks: list[str] = Field(min_length=1)
-    scope: AuditScope = "latest"
+    """Every field is optional: an empty body means "run the audit this project is
+    configured for", which is what the Run Audit button sends.
+
+    The three settings that used to be asked at run time by a three-step wizard --
+    frameworks, evidence scope, and whether to pay for the AI narrative -- are now
+    configured on the project's Compliance Config tab and resolved from
+    workspace_settings_service.effective_compliance_policy. They stay accepted here so a
+    CI client or a one-off run can still be explicit, but nothing has to be.
+    """
+
+    #: Empty = the configured frameworks (and, if none are configured, every supported one).
+    frameworks: list[str] = Field(default_factory=list)
+    #: None = the configured evidence scope.
+    scope: AuditScope | None = None
     project_repo_ids: list[str] = Field(default_factory=list)  # empty = every repo
-    depth: AuditDepth = "deterministic"
+    #: None = with_ai_narrative when the workspace has authorised it, deterministic otherwise.
+    depth: AuditDepth | None = None
     #: Re-run even when an identical completed audit over the same scans exists. Default False
     #: returns that audit instead, because the evaluator is deterministic — the verdicts would
     #: be byte-identical and the AI narrative would be paid for twice.

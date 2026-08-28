@@ -55,6 +55,7 @@ from app.services import (
     remediation_project_doc_service,
     remediation_settings_service,
     scan_service,
+    workspace_settings_service,
 )
 
 router = APIRouter(tags=["ai-remediation"])
@@ -147,6 +148,21 @@ def _to_out(p: AIFixProposal, fmap: dict[str, Finding]) -> FixProposalOut:
     )
 
 
+_DISABLED_409 = (
+    "AI Auto-Fix is disabled for this project — either workspace-wide "
+    "(Settings → Auto-Fix) or on the project itself (Project → Settings)."
+)
+
+
+async def _auto_fix_enabled(project_id: str) -> bool:
+    """Workspace policy AND the project's own switch. A project may opt out; it cannot opt
+    in past a workspace-wide disable (enforced in workspace_settings_service)."""
+    policy = await workspace_settings_service.effective_remediation_policy(
+        await workspace_settings_service.load_project(project_id)
+    )
+    return policy.enabled
+
+
 # Severity -> coarse risk rank. Unknown/missing severities don't raise the rating.
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 _RANK_TO_RATING = {4: "critical", 3: "high", 2: "medium", 1: "low", 0: "low"}
@@ -220,7 +236,13 @@ async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFi
     status_value, error, started_at, done, total = _resolve_status(job, bool(outs))
     # ponytail: one singleton read per scan (also inside the project-list loop); it's an indexed
     # find_one — thread `threshold` down if a project ever has many scans-with-fixes.
-    cfg = await remediation_settings_service.get_settings()
+    # Project-effective, not workspace-raw: a project that raised its confidence bar must see
+    # its own bar here, or the summary would count proposals as auto-fixable that the apply
+    # path will then hold for review.
+    scan = await Scan.get(scan_id)
+    policy = await workspace_settings_service.effective_remediation_policy(
+        await workspace_settings_service.load_project(scan.project_id if scan else None)
+    )
     return ScanAutoFixResponse(
         status=status_value,
         error_message=error,
@@ -232,7 +254,7 @@ async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFi
         quota_skipped=job.quota_skipped if job else 0,
         skipped_existing=job.skipped_existing if job else 0,
         insight=AutoFixInsight(
-            summary=_summary(outs, total_findings=len(findings), threshold=cfg.confidence_threshold),
+            summary=_summary(outs, total_findings=len(findings), threshold=policy.confidence_threshold),
             proposals=outs,
         ),
     )
@@ -249,12 +271,8 @@ async def trigger_scan_auto_fix(
     user: User = Depends(get_current_user),
 ):
     scan = await _get_scan_or_404_and_authorize(scan_id, user)
-    cfg = await remediation_settings_service.get_settings()
-    if not cfg.enabled:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "AI Auto-Fix is disabled by an administrator (Settings → Auto-Fix).",
-        )
+    if not await _auto_fix_enabled(scan.project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _DISABLED_409)
     if not await llm_client.active_provider_supports_tools(scan.project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _TOOL_PROVIDER_409)
     scope_key = f"{scan_id}:propose"
@@ -262,6 +280,9 @@ async def trigger_scan_auto_fix(
     if active is not None:
         return await _scan_response(scan_id, active)
 
+    # max_findings_per_job is spend policy, so it stays workspace-wide (admin-only) and has
+    # no project override -- unlike `enabled` and the confidence threshold above.
+    cfg = await remediation_settings_service.get_settings()
     if payload.finding_ids:
         finding_ids = payload.finding_ids[: cfg.max_findings_per_job]
     else:
@@ -427,12 +448,8 @@ async def trigger_finding_auto_fix(
     user: User = Depends(get_current_user),
 ):
     finding = await _get_finding_or_404_and_authorize(finding_id, user)
-    cfg = await remediation_settings_service.get_settings()
-    if not cfg.enabled:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "AI Auto-Fix is disabled by an administrator (Settings → Auto-Fix).",
-        )
+    if not await _auto_fix_enabled(finding.project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _DISABLED_409)
     if not await llm_client.active_provider_supports_tools(finding.project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _TOOL_PROVIDER_409)
     scope_key = f"{finding.scan_id}:propose:{finding_id}"

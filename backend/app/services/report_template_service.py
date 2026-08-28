@@ -1,29 +1,25 @@
-"""Resolves which PDF report template applies: a project's own override, falling back
-to the single workspace-wide default. See WorkspaceSettings — at most one document
-ever exists, created lazily on first read.
+"""Which PDF report template applies: a project's own override, falling back to the
+workspace-wide default.
+
+The singleton itself is owned by workspace_settings_service — this module is the
+report-template-shaped view of it, kept as its own name because that is what the
+report routers and PDF service already ask for.
 """
 
 from app.models.project import Project
 from app.models.workspace_settings import ReportTemplate, WorkspaceSettings
+from app.services import workspace_settings_service
 
 
 async def get_workspace_settings() -> WorkspaceSettings:
-    settings = await WorkspaceSettings.find_one()
-    if settings is None:
-        settings = WorkspaceSettings()
-        await settings.insert()
-    return settings
+    return await workspace_settings_service.get_workspace_settings()
 
 
 async def set_default_report_template(template: ReportTemplate) -> WorkspaceSettings:
-    settings = await get_workspace_settings()
-    settings.default_report_template = template
-    await settings.save()
-    return settings
+    return await workspace_settings_service.update_workspace_settings(
+        default_report_template=template
+    )
 
 
 async def get_effective_template(project: Project) -> ReportTemplate:
-    if project.report_template is not None:
-        return project.report_template
-    settings = await get_workspace_settings()
-    return settings.default_report_template
+    return await workspace_settings_service.effective_report_template(project)

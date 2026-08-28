@@ -119,11 +119,16 @@ export type ComplianceAudit = ComplianceAuditSummary & {
   controls: ControlResult[];
 };
 
+/**
+ * Everything is optional. Sending `{}` runs the audit the project is *configured* for —
+ * frameworks, evidence scope and AI depth all come from its Compliance Config, resolved
+ * server-side so this file never re-derives the workspace/project precedence.
+ */
 export type RunAuditInput = {
-  frameworks: string[];
-  scope: AuditScope;
-  project_repo_ids: string[];
-  depth: AuditDepth;
+  frameworks?: string[];
+  scope?: AuditScope;
+  project_repo_ids?: string[];
+  depth?: AuditDepth;
   // Force a fresh run even when an identical completed audit over the same scans exists.
   refresh?: boolean;
 };
@@ -145,7 +150,7 @@ export function getAudit(auditId: string) {
   return apiFetch<ComplianceAudit>(`/compliance/audits/${auditId}`);
 }
 
-export function runAudit(projectId: string, input: RunAuditInput) {
+export function runAudit(projectId: string, input: RunAuditInput = {}) {
   return apiFetch<ComplianceAudit>(`/projects/${projectId}/compliance-audits`, {
     method: "POST",
     body: JSON.stringify(input),

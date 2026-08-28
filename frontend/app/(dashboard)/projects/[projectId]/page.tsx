@@ -847,8 +847,10 @@ export default function ProjectDetailPage() {
     "settings",
   ];
 
-  const initialTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
-  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  // Derived from the URL, not held in state. This page never remounts on a same-route
+  // navigation, so a `?tab=…` link from inside it (Compliance → Configure) changed the URL
+  // and left the old tab rendered while the state was the source of truth.
+  const activeTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
 
   const { data: project, isLoading: isProjectLoading } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
@@ -876,7 +878,6 @@ export default function ProjectDetailPage() {
   });
 
   function handleTabChange(tabId: string) {
-    setActiveTab(tabId);
     const params = new URLSearchParams(searchParams.toString());
     if (tabId === "overview") {
       params.delete("tab");

@@ -578,6 +578,9 @@ async def run_job(job: AIAnalysisJob) -> None:
         await job.save()
         await audit_service.record(
             "AI Analysis Job Failed",
+            # Background worker, no person behind it. Without this the default actor_type
+            # ("user") makes the trail claim a user did something no user did.
+            actor_type="system",
             project_id=job.project_id,
             target_type="ai_analysis_job",
             target_id=str(job.id),
@@ -592,6 +595,7 @@ async def run_job(job: AIAnalysisJob) -> None:
     await job.save()
     await audit_service.record(
         "AI Analysis Job Completed",
+        actor_type="system",
         project_id=job.project_id,
         target_type="ai_analysis_job",
         target_id=str(job.id),

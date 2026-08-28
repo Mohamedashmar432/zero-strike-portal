@@ -356,6 +356,16 @@ async def run_job(job: RemediationJob) -> None:
             "AI Fix Failed", actor_user_id=job.approver_user_id, project_id=proposal.project_id,
             target_type="remediation_job", target_id=str(job.id), metadata={"error": str(exc)[:500]},
         )
+        from app.services import notification_service
+
+        await notification_service.notify(
+            "autofix.apply_failed",
+            project_id=proposal.project_id,
+            title="Auto-fix could not be applied",
+            body=proposal.failure_reason or "See the fix's failure detail.",
+            link=f"/projects/{proposal.project_id}/auto-fix/{proposal.scan_id}",
+            severity="error",
+        )
         structlog.contextvars.clear_contextvars()
         return
 

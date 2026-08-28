@@ -2,8 +2,6 @@
 
 import {
   Activity,
-  AlertOctagon,
-  CheckCircle2,
   ChevronRight,
   Code2,
   FolderGit2,
@@ -18,11 +16,17 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Project, ProjectScanActivity } from "@/lib/api/projects";
 
+/**
+ * A group is now purely a visual cluster — a hairline and some space between related items,
+ * no heading. The headings ("SECURITY ENGINES", "AI & AUTOMATION", …) shouted four labels at
+ * a rail of eleven items, which is more chrome than the items themselves. The grouping still
+ * carries the meaning; it just does it with spacing instead of words.
+ */
 export interface ProjectSidebarCategory {
+  /** Not rendered — kept as the React key and as a note on what the cluster is. */
   title: string;
   items: {
     id: string;
@@ -118,13 +122,16 @@ export function ProjectSidebar({
         {isOverview && <ChevronRight className="size-3.5 text-muted-foreground" />}
       </button>
 
-      {/* Categorized Navigation Tree */}
-      <nav className="flex-1 space-y-3.5 overflow-y-auto overflow-x-hidden">
-        {categories.map((cat) => (
-          <div key={cat.title} className="space-y-1">
-            <h3 className="legend px-3.5 text-muted-foreground">
-              {cat.title}
-            </h3>
+      {/* Navigation. Clusters separated by a hairline, not by a heading. */}
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden">
+        {categories.map((cat, i) => (
+          <div
+            key={cat.title}
+            className={cn(
+              "py-1.5",
+              i > 0 && "mt-1.5 border-t border-border/60"
+            )}
+          >
             <div className="space-y-0.5">
               {cat.items.filter((item) => !item.hidden).map((item) => {
                 const Icon = item.icon;

@@ -21,6 +21,26 @@ class Project(Document):
     # None = inherit the workspace-wide default (see report_template_service, added in a
     # later task).
     report_template: Literal["standard", "executive"] | None = None
+
+    # --- policy overrides ----------------------------------------------------
+    # Every field below is None-means-inherit, twinned with a WorkspaceSettings field and
+    # resolved by workspace_settings_service.effective_*. A project owner may set these;
+    # the service enforces that an override can only ever tighten the workspace policy.
+    scan_enable_secrets: bool | None = None
+    scan_enable_sca: bool | None = None
+    scan_enable_framework_checks: bool | None = None
+    compliance_frameworks: list[str] | None = None
+    compliance_audit_scope: Literal["latest", "history"] | None = None
+    compliance_auto_audit_on_scan: bool | None = None
+    compliance_evidence_retention_days: int | None = None
+    # No twin for compliance_audit_ai_narrative on purpose: it authorises LLM spend, so it
+    # stays workspace-only under require_admin.
+    # Auto-fix: a project may switch it off, and may raise the confidence threshold. It can
+    # neither switch it on against a workspace-wide disable nor lower the threshold --
+    # enforced in effective_remediation_policy, not here.
+    auto_fix_enabled: bool | None = None
+    auto_fix_confidence_threshold: float | None = None
+
     created_at: datetime
     updated_at: datetime
 

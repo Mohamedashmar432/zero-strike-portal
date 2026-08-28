@@ -6,7 +6,8 @@
  */
 export const queryKeys = {
   admin: {
-    auditLogs: () => ["admin", "audit-logs"] as const,
+    auditLogs: (days: number, category?: string) =>
+      ["admin", "audit-logs", days, category ?? ""] as const,
     dataStats: (projectId?: string) => ["admin", "data-stats", projectId ?? ""] as const,
     scannerStatus: () => ["admin", "scanner-status"] as const,
     autoFixQuotaRequests: (status?: string) =>
@@ -38,6 +39,7 @@ export const queryKeys = {
       ["projects", projectId, "ai-analytics", days] as const,
     aiEvents: (projectId: string, filters: Record<string, unknown>) =>
       ["projects", projectId, "ai-events", filters] as const,
+    policy: (projectId: string) => ["projects", projectId, "policy"] as const,
   },
   scans: {
     detail: (scanId: string) => ["scans", scanId] as const,
@@ -107,5 +109,10 @@ export const queryKeys = {
   },
   settings: {
     reportTemplate: () => ["settings", "report-template"] as const,
+    workspace: () => ["settings", "workspace"] as const,
+  },
+  notifications: {
+    list: () => ["notifications"] as const,
+    preferences: () => ["notifications", "preferences"] as const,
   },
 };

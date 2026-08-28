@@ -629,4 +629,14 @@ async def run_job(job: RemediationJob) -> None:
         target_id=str(job.id),
         metadata={"scan_id": job.scan_id, "findings": len(findings), "fixable": fixable},
     )
+    if fixable:
+        from app.services import notification_service
+
+        await notification_service.notify(
+            "autofix.proposal_created",
+            project_id=job.project_id,
+            title=f"{fixable} auto-fix proposal(s) ready for review",
+            body="Every proposal needs human approval before it can be applied.",
+            link=f"/projects/{job.project_id}/auto-fix/{job.scan_id}",
+        )
     structlog.contextvars.clear_contextvars()
