@@ -33,6 +33,7 @@ class ApproveRequest(BaseModel):
     branch_name: str | None = None
 
 
+
 class AskRequest(BaseModel):
     question: str
 
@@ -222,3 +223,24 @@ class FindingAutoFixResponse(BaseModel):
     progress_completed: int = 0
     progress_total: int = 0
     insight: FixProposalOut | None = None
+
+
+class BatchApproveRequest(BaseModel):
+    """Approve several proposals from ONE scan as a single apply job -> one branch, one PR.
+    Scan scope is what makes the batch safe: same repo, same base branch, by construction."""
+
+    proposal_ids: list[str] = Field(min_length=1)
+    branch_name: str | None = None
+
+
+class BatchApproveResponse(BaseModel):
+    # What was actually queued vs. left out, so the UI states the trim instead of silently
+    # dropping proposals the reviewer ticked.
+    job_id: str | None = None
+    approved: list[FixProposalOut]
+    skipped: list["BatchSkipped"] = Field(default_factory=list)
+
+
+class BatchSkipped(BaseModel):
+    proposal_id: str
+    reason: str

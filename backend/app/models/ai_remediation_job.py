@@ -5,8 +5,8 @@ app.core.job_queue, driven by ai_remediation_queue_service. See docs/AI_AUTOFIX_
 
 Two kinds, one document, one queue:
 - kind="propose": read-only agent generates AIFixProposal(s) for `finding_ids` (no clone).
-- kind="apply":   after human approval, clones + validates + pushes a branch + opens a PR for a
-  single already-approved `proposal_id`.
+- kind="apply":   after human approval, clones + validates + pushes a branch + opens ONE PR for
+  the already-approved `proposal_ids` (a batch of one for the single-proposal approve route).
 
 `scope_key` is the app-level de-duplication key (routers/ai_remediation.py looks for an active
 queued/running job with the same key before inserting) -- the same pattern AIAnalysisJob uses,
@@ -42,7 +42,14 @@ class RemediationJob(Document):
     # kind="propose": the findings to generate proposals for. kind="apply": empty (uses proposal_id).
     finding_ids: list[str] = Field(default_factory=list)
     # kind="apply": the AIFixProposal being applied. None for kind="propose".
+    # Legacy singular form: rows written before batch apply set only this. The worker reads
+    # `proposal_ids or [proposal_id]`, so both shapes run. New rows set both (proposal_id = the
+    # first of the batch) so anything keying off the singular field keeps resolving.
     proposal_id: str | None = None
+    # kind="apply": every proposal in this batch, in apply order. One job = one branch = one PR.
+    # The job IS the batch entity (see docs/AUTOFIX_BATCH_PR.md) -- it already carries status,
+    # stage, trace_id, approver and the dedup scope_key a separate batch document would duplicate.
+    proposal_ids: list[str] = Field(default_factory=list)
     target_ref: str = ""  # base branch to propose against / branch from
     # kind="propose" only: a developer's "change the fix to X" instruction from the review UI. Threaded
     # (as trusted input) into the agent so the re-proposed patch honors it. None for a first proposal.

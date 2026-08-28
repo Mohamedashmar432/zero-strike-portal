@@ -3,6 +3,7 @@ async-job envelope + app-level active-job dedup). Generation requires a tool-cap
 (409 otherwise). The approve/apply write endpoint is added alongside the apply service.
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 
@@ -27,6 +28,9 @@ from app.schemas.ai_remediation import (
     AskRequest,
     AutoFixInsight,
     AutoFixSummary,
+    BatchApproveRequest,
+    BatchApproveResponse,
+    BatchSkipped,
     CommentCreate,
     CommentListResponse,
     CommentOut,
@@ -558,6 +562,82 @@ async def dismiss_fix_proposal(
     return _to_out(proposal, {proposal.finding_id: finding} if finding else {})
 
 
+# review_states an approved write may still be started from. pr_open is excluded (already
+# shipped) and so are approved/applying (a write is already in flight for that proposal).
+_APPROVABLE_STATES = ("proposed", "validated", "failed", "manual_review")
+
+
+def _apply_scope_key(proposal_ids: list[str]) -> str:
+    """Dedup key for an apply job. A batch of one keeps the historical `apply:{id}` shape so the
+    existing single-proposal dedup (and any job queued before batching) still matches."""
+    if len(proposal_ids) == 1:
+        return f"apply:{proposal_ids[0]}"
+    return "apply:batch:" + hashlib.sha1(",".join(sorted(proposal_ids)).encode()).hexdigest()[:16]
+
+
+async def _apply_in_flight(proposal_id: str) -> bool:
+    """True if a queued/running apply job already covers this proposal. Scope keys can't answer
+    this for batches -- the same proposal may sit inside a differently-keyed selection -- and a
+    second write would open a second PR for the same fix."""
+    jobs = await RemediationJob.find(
+        RemediationJob.kind == "apply",
+        In(RemediationJob.status, ["queued", "running"]),
+    ).to_list()
+    return any(
+        proposal_id in (j.proposal_ids or ([j.proposal_id] if j.proposal_id else [])) for j in jobs
+    )
+
+
+async def _enqueue_apply(
+    proposals: list[AIFixProposal],
+    user: User,
+    branch_name: str | None,
+    background: BackgroundTasks,
+) -> RemediationJob:
+    """The one place a set of approved proposals becomes an apply job. Both approve routes go
+    through it, so the single and batch paths cannot drift on approval semantics.
+
+    `proposals` must be non-empty and share a scan: one job is one branch and one PR, and a PR
+    cannot span repositories. See docs/AUTOFIX_BATCH_PR.md."""
+    ids = [str(p.id) for p in proposals]
+    now = datetime.now(timezone.utc)
+    for proposal in proposals:
+        proposal.review_state = "approved"
+        proposal.approved_by = str(user.id)
+        proposal.approved_at = now
+        proposal.branch_name = branch_name or proposal.branch_name
+        proposal.updated_at = now
+        await proposal.save()
+
+    lead = proposals[0]
+    job = RemediationJob(
+        kind="apply",
+        project_id=lead.project_id,
+        scan_id=lead.scan_id,
+        proposal_id=ids[0],  # legacy singular field, kept in sync for anything still reading it
+        proposal_ids=ids,
+        scope_key=_apply_scope_key(ids),
+        trace_id=uuid.uuid4().hex,
+        max_attempts=1,  # a write must never auto-retry
+        approver_user_id=str(user.id),
+        created_by=str(user.id),
+        created_at=now,
+        updated_at=now,
+    )
+    await job.insert()
+    background.add_task(ai_remediation_queue_service.drain_queue)
+    for proposal in proposals:
+        await audit_service.record(
+            "AI Fix Approved",
+            actor_user_id=str(user.id),
+            project_id=proposal.project_id,
+            target_type="ai_fix_proposal",
+            target_id=str(proposal.id),
+            metadata={"finding_id": proposal.finding_id, "batch_size": len(proposals)},
+        )
+    return job
+
+
 @router.post("/fix-proposals/{proposal_id}/approve", response_model=FixProposalOut)
 async def approve_fix_proposal(
     proposal_id: str,
@@ -567,7 +647,9 @@ async def approve_fix_proposal(
 ):
     """Approve a proposal and enqueue the write (branch + PR). Pushing to a customer repo is a
     privileged action -- owner/admin only, not any project member. Idempotent: a proposal already
-    PR'd or with an active apply job returns as-is instead of enqueuing a second write."""
+    PR'd or with an active apply job returns as-is instead of enqueuing a second write.
+
+    A batch of one: the apply service takes a list, and this route hands it a one-element list."""
     proposal = await AIFixProposal.get(proposal_id)
     if not proposal:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Fix proposal not found")
@@ -582,44 +664,70 @@ async def approve_fix_proposal(
     # diff may approve a low-confidence fix; the apply job still clones, re-scans, and refuses to
     # push if the patch fails to clear the finding or introduces new >=medium findings.
 
-    scope_key = f"apply:{proposal_id}"
-    if await _active_job(scope_key) is not None:
+    if await _active_job(_apply_scope_key([proposal_id])) is not None or await _apply_in_flight(proposal_id):
         finding = await Finding.get(proposal.finding_id)
         return _to_out(proposal, {proposal.finding_id: finding} if finding else {})
 
-    now = datetime.now(timezone.utc)
-    proposal.review_state = "approved"
-    proposal.approved_by = str(user.id)
-    proposal.approved_at = now
-    proposal.branch_name = payload.branch_name or proposal.branch_name
-    proposal.updated_at = now
-    await proposal.save()
-
-    job = RemediationJob(
-        kind="apply",
-        project_id=proposal.project_id,
-        scan_id=proposal.scan_id,
-        proposal_id=proposal_id,
-        scope_key=scope_key,
-        trace_id=uuid.uuid4().hex,
-        max_attempts=1,  # a write must never auto-retry
-        approver_user_id=str(user.id),
-        created_by=str(user.id),
-        created_at=now,
-        updated_at=now,
-    )
-    await job.insert()
-    background.add_task(ai_remediation_queue_service.drain_queue)
-    await audit_service.record(
-        "AI Fix Approved",
-        actor_user_id=str(user.id),
-        project_id=proposal.project_id,
-        target_type="ai_fix_proposal",
-        target_id=proposal_id,
-        metadata={"finding_id": proposal.finding_id},
-    )
+    await _enqueue_apply([proposal], user, payload.branch_name, background)
     finding = await Finding.get(proposal.finding_id)
     return _to_out(proposal, {proposal.finding_id: finding} if finding else {})
+
+
+@router.post("/scans/{scan_id}/auto-fix/approve-batch", response_model=BatchApproveResponse)
+async def approve_fix_batch(
+    scan_id: str,
+    payload: BatchApproveRequest,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+):
+    """Approve several of this scan's proposals as ONE apply job -> one branch, one commit, one PR.
+
+    The flaw this fixes: proposal granularity was also PR granularity, so a 40-finding scan
+    produced 40 PRs (and 40 clones, and 80 scanner runs). Proposals stay per-finding -- only the
+    write is batched. A proposal that can't be applied or fails the re-scan gate is dropped from
+    the batch by the apply service, never fatal to the rest. See docs/AUTOFIX_BATCH_PR.md.
+
+    Ineligible selections are reported in `skipped` rather than failing the request: a reviewer who
+    ticked 12 boxes should not lose 11 good fixes to one stale one."""
+    scan = await _get_scan_or_404_and_authorize(scan_id, user)
+    await project_service.require_owner_or_admin(str(scan.project_id), user)
+
+    ordered: list[AIFixProposal] = []
+    skipped: list[BatchSkipped] = []
+    seen: set[str] = set()
+    for pid in payload.proposal_ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        proposal = await AIFixProposal.get(pid)
+        if proposal is None or proposal.scan_id != scan_id:
+            skipped.append(BatchSkipped(proposal_id=pid, reason="Not a fix proposal for this scan."))
+        elif proposal.review_state == "pr_open":
+            skipped.append(BatchSkipped(proposal_id=pid, reason="A PR is already open for this fix."))
+        elif not (proposal.can_fix and proposal.original_code and proposal.patched_code and proposal.file_path):
+            skipped.append(BatchSkipped(proposal_id=pid, reason="This proposal has no applicable patch."))
+        elif proposal.review_state not in _APPROVABLE_STATES or await _apply_in_flight(pid):
+            skipped.append(BatchSkipped(proposal_id=pid, reason="A write is already in flight for this fix."))
+        else:
+            ordered.append(proposal)
+
+    if not ordered:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            skipped[0].reason if skipped else "No approvable fixes in the selection.",
+        )
+
+    job = await _enqueue_apply(ordered, user, payload.branch_name, background)
+    fmap: dict[str, Finding] = {}
+    for proposal in ordered:
+        finding = await Finding.get(proposal.finding_id)
+        if finding:
+            fmap[proposal.finding_id] = finding
+    return BatchApproveResponse(
+        job_id=str(job.id),
+        approved=[_to_out(p, fmap) for p in ordered],
+        skipped=skipped,
+    )
 
 
 @router.get("/fix-proposals/{proposal_id}/patch")

@@ -262,6 +262,29 @@ export function approveFixProposal(proposalId: string, body: { branch_name?: str
   });
 }
 
+/**
+ * Approve several of the scan's proposals as ONE apply job — one branch, one commit, one PR.
+ *
+ * Proposals stay per-finding; only the write is batched. Ineligible selections come back in
+ * `skipped` rather than failing the call, so one stale pick can't cost the reviewer the rest.
+ * See docs/AUTOFIX_BATCH_PR.md.
+ */
+export function approveFixBatch(
+  scanId: string,
+  body: { proposal_ids: string[]; branch_name?: string }
+) {
+  return apiFetch<BatchApproveResult>(`/scans/${scanId}/auto-fix/approve-batch`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export type BatchApproveResult = {
+  job_id: string | null;
+  approved: AiFixProposal[];
+  skipped: { proposal_id: string; reason: string }[];
+};
+
 export function dismissFixProposal(proposalId: string, body: { reason?: string } = {}) {
   return apiFetch<AiFixProposal>(`/fix-proposals/${proposalId}/dismiss`, {
     method: "POST",

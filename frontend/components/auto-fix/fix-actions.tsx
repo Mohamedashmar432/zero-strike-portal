@@ -75,6 +75,23 @@ export function fixCapabilities(proposal: AiFixProposal, canApprove: boolean) {
   };
 }
 
+/**
+ * Which proposals a reviewer may put in a batch PR. Mirrors the backend's `_APPROVABLE_STATES`:
+ * everything with a patch that hasn't already shipped or started a write. Kept next to
+ * fixCapabilities so the row checkbox and the per-fix Create PR button can't disagree about
+ * what is approvable.
+ */
+const BATCHABLE_STATES = ["proposed", "validated", "failed", "manual_review"];
+
+export function canBatchApprove(proposal: AiFixProposal, canApprove: boolean): boolean {
+  return (
+    canApprove &&
+    proposal.can_fix &&
+    !!(proposal.original_code && proposal.patched_code) &&
+    BATCHABLE_STATES.includes(proposal.review_state)
+  );
+}
+
 /** SCA version picker: AI recommends the safe version (preselected); choosing another re-runs the
  * fix agent to regenerate the manifest bump. Scanner SCA data only — no registry calls. */
 export function DependencyUpdatePicker({

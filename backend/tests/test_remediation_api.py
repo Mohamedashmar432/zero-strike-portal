@@ -239,6 +239,82 @@ def test_approve_requires_owner_and_enqueues_apply(client, monkeypatch):
     assert asyncio.run(_apply_jobs()) == 1
 
 
+def test_approve_batch_enqueues_one_job_for_many_proposals(client, monkeypatch):
+    # The flaw: one PR per finding. One approve-batch call must produce exactly ONE apply job
+    # covering every selected proposal (docs/AUTOFIX_BATCH_PR.md).
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(ai_remediation_queue_service, "drain_queue", _noop)
+
+    owner = register_and_login(client, email="fix-owner-batch@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    pids = [
+        _insert_proposal(project["id"], scan_id, _insert_finding(project["id"], scan_id, f"fp-batch-{i}"))
+        for i in range(3)
+    ]
+
+    outsider = register_and_login(client, email="fix-outsider-batch@zs.dev")
+    r = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix/approve-batch",
+        json={"proposal_ids": pids},
+        headers=_headers(outsider),
+    )
+    assert r.status_code in (403, 404)
+
+    r = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix/approve-batch",
+        json={"proposal_ids": pids},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [p["review_state"] for p in body["approved"]] == ["approved"] * 3
+    assert body["skipped"] == []
+
+    async def _jobs():
+        return await RemediationJob.find(RemediationJob.kind == "apply").to_list()
+
+    jobs = asyncio.run(_jobs())
+    assert len(jobs) == 1
+    assert sorted(jobs[0].proposal_ids) == sorted(pids)
+
+    # Re-approving the same selection must not queue a second write for proposals already in flight.
+    r = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix/approve-batch",
+        json={"proposal_ids": pids},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 400
+    assert len(asyncio.run(_jobs())) == 1
+
+
+def test_approve_batch_reports_skipped_instead_of_failing(client, monkeypatch):
+    # One stale selection must not cost the reviewer the rest of the batch.
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(ai_remediation_queue_service, "drain_queue", _noop)
+
+    owner = register_and_login(client, email="fix-owner-batch-skip@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    good = _insert_proposal(project["id"], scan_id, _insert_finding(project["id"], scan_id, "fp-skip-ok"))
+    other_scan = _insert_scan(project["id"])
+    foreign = _insert_proposal(project["id"], other_scan, _insert_finding(project["id"], other_scan, "fp-skip-x"))
+
+    r = client.post(
+        f"/api/v1/scans/{scan_id}/auto-fix/approve-batch",
+        json={"proposal_ids": [good, foreign]},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [p["id"] for p in body["approved"]] == [good]
+    assert [s["proposal_id"] for s in body["skipped"]] == [foreign]
+
+
 def test_project_auto_fix_list_and_breakdown(client):
     owner = register_and_login(client, email="fix-owner-list@zs.dev")
     project = _create_project(client, _headers(owner))

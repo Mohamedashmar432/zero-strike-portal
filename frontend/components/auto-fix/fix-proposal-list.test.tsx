@@ -195,3 +195,44 @@ describe("compareProposals (shared with the workspace's default selection)", () 
     expect([...same].sort(compareProposals).map((x) => x.finding_id)).toEqual(["a10", "a30", "b20"]);
   });
 });
+
+
+// --- batch PR selection (docs/AUTOFIX_BATCH_PR.md) ---------------------------------------------
+
+describe("batch selection", () => {
+  test("offers no checkboxes to a member who cannot approve a write", () => {
+    list({ canApprove: false, batchSelection: new Set(), onBatchSelectionChange: vi.fn() });
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  test("select-all-shown respects the active filter, not the whole scan", () => {
+    const onChange = vi.fn();
+    list({ canApprove: true, batchSelection: new Set(), onBatchSelectionChange: onChange });
+    // Narrow to criticals, then select all shown: the low/high rows must NOT be picked up.
+    fireEvent.click(screen.getByRole("button", { name: /^critical$/i }));
+    fireEvent.click(screen.getByLabelText(/select all shown/i));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect([...onChange.mock.calls[0][0]].sort()).toEqual(["id-crit1", "id-crit2"]);
+  });
+
+  test("excludes a proposal that already has a PR open", () => {
+    const onChange = vi.fn();
+    render(
+      <FixProposalList
+        proposals={[
+          p({ finding_id: "open", review_state: "pr_open", pr_url: "https://x/pull/1" }),
+          p({ finding_id: "todo" }),
+        ]}
+        selectedId={null}
+        onSelect={vi.fn()}
+        commentCounts={new Map()}
+        threshold={THRESHOLD}
+        canApprove
+        batchSelection={new Set()}
+        onBatchSelectionChange={onChange}
+      />
+    );
+    // One checkbox per approvable row, plus the select-all control.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+  });
+});

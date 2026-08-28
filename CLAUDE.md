@@ -141,6 +141,20 @@ past the top `max_findings_per_job` findings of a large scan — a 137-finding s
 proposals forever. No button may promise "all", because no single run can deliver it;
 `test_repeated_runs_advance_through_a_scan_larger_than_one_batch` locks the advance in.
 
+**Auto-Fix: proposal granularity is not PR granularity** (`docs/AUTOFIX_BATCH_PR.md`). One approve
+job writes ONE branch and ONE PR for a batch of proposals — `RemediationJob.proposal_ids`, with the
+job itself acting as the batch entity (there is no `remediation_batch` collection, and adding one
+means the batch needs to outlive its job). A batch is scoped to a single `scan_id`; that is what
+makes it safe, because a scan has exactly one repo and one base branch by construction, so no
+grouping engine re-derives those. Patch conflict is the one thing metadata can't predict, so it
+isn't predicted: `ai_remediation_apply_service` applies, re-scans once over the combined diff,
+**drops** whatever failed (a drifted source, a target that didn't clear, a patch blamed for a new
+blocking finding), retries the survivors exactly once, and ships them. A new blocking finding in a
+file no patch touched is unattributable and aborts the whole batch rather than guessing. Both
+approve routes go through `routers/ai_remediation.py: _enqueue_apply` — the single-proposal route is
+a batch of one — so approval semantics cannot drift. Every drop is recorded in the PR body's summary
+table: a fix left out silently is the same auditability hole as a PR per finding, only quieter.
+
 An audit's shape is configuration, not a per-run question: every field on
 `POST /projects/{id}/compliance-audits` is optional, and an empty body (what the Run Audit button
 sends) resolves frameworks, evidence scope and depth from `effective_compliance_policy`. The

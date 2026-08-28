@@ -3,7 +3,12 @@
 /**
  * Master-detail review workspace: the proposal list on the left, the selected proposal on the right.
  *
- * Selection is URL-driven (?finding=…) rather than local state, so deep links from the scan page's
+ * Two independent selections live here. The *focused* proposal is URL-driven (?finding=…); the
+ * *batch* selection (which fixes go into one PR) is local component state, deliberately — it is a
+ * transient multi-pick, not something a deep link should restore, and putting it in the URL would
+ * make the back button undo ticks one at a time.
+ *
+ * Focus selection is URL-driven (?finding=…) rather than local state, so deep links from the scan page's
  * "Generate Fix" jump, from the comments drawer, and from a shared link all land on the same finding
  * — and the browser back button works. Below `lg` the grid collapses to one column and the list sits
  * above the detail.
@@ -12,11 +17,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Wand2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { EmptyState } from "@/components/common/empty-state";
 import type { AiFixProposal } from "@/lib/api/auto-fix";
 import { listFindings } from "@/lib/api/findings";
 import { queryKeys } from "@/lib/api/query-keys";
+import { BatchApproveBar } from "./batch-approve-bar";
 import { FixProposalDetail } from "./fix-proposal-detail";
 import { compareProposals, FixProposalList } from "./fix-proposal-list";
 
@@ -83,6 +89,15 @@ export function AutoFixWorkspace({
 
   const selected = proposals.find((p) => p.finding_id === selectedId) ?? null;
 
+  // Batch PR selection. Filtered against the live proposal list on every render so a fix that has
+  // since been dismissed or PR'd can't stay ticked in a stale set.
+  const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
+  const batchSelected = useMemo(
+    () => proposals.filter((p) => batchIds.has(p.id)),
+    [proposals, batchIds]
+  );
+  const clearBatch = useCallback(() => setBatchIds(new Set()), []);
+
   if (!proposals.length) {
     return (
       <EmptyState
@@ -94,13 +109,23 @@ export function AutoFixWorkspace({
   }
 
   return (
-    <div className="grid min-h-0 items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
+    <div className="space-y-3">
+      <BatchApproveBar
+        scanId={scanId}
+        selected={batchSelected}
+        onClear={clearBatch}
+        invalidateKey={invalidateKey}
+      />
+      <div className="grid min-h-0 items-start gap-4 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
       <FixProposalList
         proposals={proposals}
         selectedId={selectedId}
         onSelect={select}
         commentCounts={commentCounts}
         threshold={threshold}
+        canApprove={canApprove}
+        batchSelection={batchIds}
+        onBatchSelectionChange={setBatchIds}
       />
       {selected ? (
         <FixProposalDetail
@@ -122,6 +147,7 @@ export function AutoFixWorkspace({
           Select a finding to review its proposed fix.
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import type { AiFixProposal, FixReviewState } from "@/lib/api/auto-fix";
 import type { Severity } from "@/lib/api/findings";
 import { cn } from "@/lib/utils";
-import { confidenceTone, FALLBACK_THRESHOLD } from "./fix-actions";
+import { canBatchApprove, confidenceTone, FALLBACK_THRESHOLD } from "./fix-actions";
 
 /** The buckets the summary StatCards use, so clicking through from a stat means the same thing. */
 type Bucket = "all" | "ai_fixable" | "needs_review_on_fix" | "cannot_fix" | "pr_created";
@@ -56,6 +56,9 @@ export function FixProposalList({
   onSelect,
   commentCounts,
   threshold = FALLBACK_THRESHOLD,
+  canApprove = false,
+  batchSelection,
+  onBatchSelectionChange,
 }: {
   proposals: AiFixProposal[];
   selectedId: string | null;
@@ -63,6 +66,11 @@ export function FixProposalList({
   commentCounts: Map<string, number>;
   /** Effective bar from AutoFixSummary.confidence_threshold. */
   threshold?: number;
+  /** Owner/admin — only they may approve a write, so only they get the batch checkboxes. */
+  canApprove?: boolean;
+  /** Proposal ids ticked for a batch PR. Owned by the workspace so the action bar can read it. */
+  batchSelection?: Set<string>;
+  onBatchSelectionChange?: (next: Set<string>) => void;
 }) {
   const [query, setQuery] = useState("");
   const [bucket, setBucket] = useState<Bucket>("all");
@@ -121,6 +129,28 @@ export function FixProposalList({
     proposals.some((p) => p.finding_severity === s)
   );
 
+  // Batch selection operates on what the filters currently SHOW — "select all" that silently
+  // reached past the filter would be the same over-reach as a button promising "fix everything".
+  const batchable = onBatchSelectionChange ? visible.filter((p) => canBatchApprove(p, canApprove)) : [];
+  const picked = batchSelection ?? new Set<string>();
+  const allShownPicked = batchable.length > 0 && batchable.every((p) => picked.has(p.id));
+
+  const toggleOne = (id: string) => {
+    const next = new Set(picked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onBatchSelectionChange?.(next);
+  };
+
+  const toggleAllShown = () => {
+    const next = new Set(picked);
+    for (const p of batchable) {
+      if (allShownPicked) next.delete(p.id);
+      else next.add(p.id);
+    }
+    onBatchSelectionChange?.(next);
+  };
+
   return (
     <div className="flex min-h-0 flex-col rounded-lg border">
       <div className="space-y-2 border-b p-2">
@@ -153,6 +183,18 @@ export function FixProposalList({
             </button>
           ))}
         </div>
+
+        {batchable.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={allShownPicked}
+              onChange={toggleAllShown}
+              className="size-3.5 accent-[var(--color-brand)]"
+            />
+            Select all shown ({batchable.length}) for one PR
+          </label>
+        )}
 
         {availableSeverities.length > 1 && (
           <div className="flex flex-wrap gap-1">
@@ -193,16 +235,31 @@ export function FixProposalList({
           const selected = p.finding_id === selectedId;
           const comments = commentCounts.get(p.finding_id) ?? 0;
           return (
-            <li key={p.id} data-finding-id={p.finding_id}>
+            <li
+              key={p.id}
+              data-finding-id={p.finding_id}
+              className={cn(
+                "flex items-start border-b transition-colors last:border-b-0",
+                selected ? "bg-brand/10" : "hover:bg-muted/40",
+                p.review_state === "dismissed" && "opacity-60"
+              )}
+            >
+              {/* Sibling of the row button, never nested inside it — a checkbox inside a button is
+                  invalid markup and swallows its own click. */}
+              {onBatchSelectionChange && canBatchApprove(p, canApprove) && (
+                <input
+                  type="checkbox"
+                  checked={picked.has(p.id)}
+                  onChange={() => toggleOne(p.id)}
+                  aria-label={`Include ${p.finding_rule_name ?? "this fix"} in a batch pull request`}
+                  className="mt-3 ml-3 size-3.5 shrink-0 accent-[var(--color-brand)]"
+                />
+              )}
               <button
                 type="button"
                 onClick={() => onSelect(p.finding_id)}
                 aria-current={selected}
-                className={cn(
-                  "w-full space-y-1 border-b px-3 py-2 text-left transition-colors last:border-b-0",
-                  selected ? "bg-brand/10" : "hover:bg-muted/40",
-                  p.review_state === "dismissed" && "opacity-60"
-                )}
+                className="min-w-0 flex-1 space-y-1 px-3 py-2 text-left"
               >
                 <div className="flex items-center gap-2">
                   {p.finding_severity && <SeverityBadge severity={p.finding_severity} />}
