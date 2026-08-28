@@ -28,7 +28,7 @@ logger = structlog.get_logger(__name__)
 # "openai" against a custom api_base). Without this, litellm raises "LLM Provider NOT
 # provided" for a bare model name like "kimi-k2.6" -- it has no way to guess which backend
 # that string belongs to.
-_NATIVE_PREFIX_PROVIDERS = {"nvidia_nim", "openrouter", "groq", "gemini"}
+_NATIVE_PREFIX_PROVIDERS = {"nvidia_nim", "openrouter", "groq", "gemini", "deepseek"}
 _OPENAI_COMPATIBLE_PROVIDERS = {"lmstudio", "kimi", "custom", "commandcode"}
 # Kimi/Moonshot's and Command Code's endpoints are fixed and well-known, so admins don't need
 # to type them themselves (mirrors why they aren't in the frontend's SELF_HOSTED_PROVIDERS

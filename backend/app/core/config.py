@@ -87,6 +87,7 @@ class Settings(BaseSettings):
         "kimi",
         "nvidia_nim",
         "gemini",
+        "deepseek",
     }
     # Post-draft critique pass (remediation_critic.py): one extra JSON completion per *fixable*
     # finding that reviews the drafted patch before a human sees it. Deterministic triage already

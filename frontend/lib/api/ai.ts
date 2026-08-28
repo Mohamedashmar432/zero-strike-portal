@@ -16,7 +16,8 @@ export type AiProvider =
   | "custom"
   | "commandcode"
   | "groq"
-  | "gemini";
+  | "gemini"
+  | "deepseek";
 
 export type AiStatus = { enabled: boolean };
 

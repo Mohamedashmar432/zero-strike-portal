@@ -28,6 +28,7 @@ AIProvider = Literal[
     "commandcode",
     "groq",
     "gemini",
+    "deepseek",
 ]
 
 # Self-hosted OpenAI-compatible servers -- the admin points these at their own instance

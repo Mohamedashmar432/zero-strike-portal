@@ -42,6 +42,7 @@ const PROVIDERS: { value: AiProvider; label: string; keyless?: boolean }[] = [
   { value: "nvidia_nim", label: "NVIDIA NIM" },
   { value: "kimi", label: "Kimi (Moonshot)" },
   { value: "commandcode", label: "CommandCode" },
+  { value: "deepseek", label: "DeepSeek" },
   { value: "lmstudio", label: "LM Studio (self-hosted)", keyless: true },
   { value: "custom", label: "Custom OpenAI-compatible", keyless: true },
 ];

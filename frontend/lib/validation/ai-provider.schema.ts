@@ -12,6 +12,7 @@ export const AI_PROVIDERS = [
   "commandcode",
   "groq",
   "gemini",
+  "deepseek",
 ] as const;
 
 // Self-hosted providers have no fixed default endpoint, so a base_url is mandatory for

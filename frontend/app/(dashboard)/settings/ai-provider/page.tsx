@@ -56,6 +56,7 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "commandcode", label: "Command Code AI" },
   { value: "groq", label: "Groq" },
   { value: "gemini", label: "Google Gemini" },
+  { value: "deepseek", label: "DeepSeek" },
 ];
 
 const PROVIDER_LABELS = Object.fromEntries(PROVIDERS.map((p) => [p.value, p.label])) as Record<

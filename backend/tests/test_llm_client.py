@@ -342,6 +342,10 @@ def test_connection_fails_with_transient_error_after_retries(client, monkeypatch
         # gemini: litellm's native provider prefix (Google AI Studio), key required, no base_url.
         ("gemini", "gemini-2.5-flash", None, "gemini/gemini-2.5-flash", None),
         ("gemini", "gemini/gemini-2.5-flash", None, "gemini/gemini-2.5-flash", None),
+        # deepseek: litellm's native provider prefix -- it supplies api.deepseek.com itself,
+        # so no default base_url entry is needed here (unlike kimi/commandcode).
+        ("deepseek", "deepseek-chat", None, "deepseek/deepseek-chat", None),
+        ("deepseek", "deepseek/deepseek-reasoner", None, "deepseek/deepseek-reasoner", None),
         # already-prefixed by the admin themselves -- must not be double-prefixed.
         ("nvidia_nim", "nvidia_nim/meta/llama-3.1-70b-instruct", None,
          "nvidia_nim/meta/llama-3.1-70b-instruct", None),
@@ -383,6 +387,7 @@ def test_resolve_model_and_base(provider, model_in, base_in, model_out, base_out
         ("anthropic", None, None),
         ("nvidia_nim", None, None),
         ("gemini", None, None),
+        ("deepseek", None, None),
         # an explicitly supplied key is always passed through untouched.
         ("lmstudio", "sk-real", "sk-real"),
         ("openai", "sk-real", "sk-real"),
