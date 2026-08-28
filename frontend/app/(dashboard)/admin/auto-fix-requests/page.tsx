@@ -100,9 +100,9 @@ export default function AutoFixRequestsPage() {
     <div className="space-y-7">
       <div className="signal-in">
         <PageHeader
-          eyebrow="Administration / Auto-Fix"
-          title="Allowance Requests"
-          description="Teams asking for more AI Auto-Fix headroom on a specific scan. Approving one authorises additional LLM spend, so each request carries a stated purpose."
+          eyebrow="Administration / Requests"
+          title="Project Requests"
+          description="Requests raised from a project that need an admin decision. Today these are all AI Auto-Fix headroom asks on one scan — approving one authorises additional LLM spend, so each request carries a stated purpose."
         />
       </div>
 
@@ -155,7 +155,7 @@ export default function AutoFixRequestsPage() {
         <DataTableCard
           isLoading={isLoading}
           isError={isError}
-          errorMessage="Failed to load allowance requests."
+          errorMessage="Failed to load project requests."
           isEmpty={items.length === 0}
           emptyState={
             <EmptyState
@@ -258,7 +258,7 @@ export default function AutoFixRequestsPage() {
       <Dialog open={target !== null} onOpenChange={(o) => !o && setTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Review allowance request</DialogTitle>
+            <DialogTitle>Review project request</DialogTitle>
             <DialogDescription>
               {target?.requested_by_email ?? "A member"} asked for{" "}
               <span className="font-mono text-foreground">+{target?.requested_additional}</span>{" "}

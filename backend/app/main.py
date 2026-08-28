@@ -27,6 +27,7 @@ from app.routers import (
     connections,
     dashboard,
     downloads,
+    notifications,
     projects,
     public_repos,
     remediation_settings,
@@ -35,11 +36,13 @@ from app.routers import (
     scanner_scans,
     scans,
     users,
+    workspace_settings,
 )
 from app.services import (
     ai_job_queue_service,
     ai_remediation_queue_service,
     cloud_scan_service,
+    notification_service,
     compliance_queue_service,
     project_stats_service,
     scan_queue_service,
@@ -61,6 +64,19 @@ async def lifespan(app: FastAPI):
             "Scanner binary %r not found (SCANNER_BINARY_PATH) — cloud scans will fail until this "
             "is fixed and the backend is restarted.",
             settings.scanner_binary_path,
+        )
+        # Notified at boot rather than from a health poller: SCANNER_BINARY_PATH is only read at
+        # startup, so this condition cannot appear or clear while the process is running. A
+        # poller would re-report the same unchanging fact forever.
+        await notification_service.notify(
+            "scanner.unhealthy",
+            title="Scanner binary not found",
+            body=(
+                f"SCANNER_BINARY_PATH={settings.scanner_binary_path!r} does not resolve to an "
+                "executable. Cloud scans will fail until it is fixed and the backend restarted."
+            ),
+            link="/admin/scanner-status",
+            severity="error",
         )
     # Backfill/reconcile the denormalized per-project findings counters (no-op after first boot).
     # Non-fatal: stats degrade to stale counters if it fails, the app still boots.
@@ -128,6 +144,9 @@ def create_app() -> FastAPI:
     app.include_router(remediation_settings.router, prefix="/api/v1")
     app.include_router(compliance.router, prefix="/api/v1")
     app.include_router(compliance.project_router, prefix="/api/v1")
+    app.include_router(workspace_settings.router, prefix="/api/v1")
+    app.include_router(workspace_settings.project_router, prefix="/api/v1")
+    app.include_router(notifications.router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

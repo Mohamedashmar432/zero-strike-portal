@@ -116,6 +116,49 @@ frameworks stay in the catalog so historical audits render, but are not offered 
 trigger time. Widening that set means reviewing a framework's evidence mapping control-by-control
 first, and a test asserts the current set.
 
+**Config precedence — workspace defaults vs project overrides**
+(`services/workspace_settings_service.py`; see `docs/CONFIG_SURFACE_WIRING.md`): `WorkspaceSettings`
+is a singleton of portal-wide defaults; `Project` carries a nullable twin for every field a project
+may override, where `None` means *inherit* (never "off"). `workspace_settings_service` is the sole
+owner of the singleton and holds every `effective_*` resolver — no call site re-derives precedence.
+The rule that must not be softened: **a project override may only tighten, never loosen.** A project
+can disable auto-fix but cannot enable it against a workspace-wide disable, and can raise the
+confidence threshold but never lower it below the workspace floor — enforced in
+`effective_remediation_policy`, not at write time, so a later workspace change cannot silently
+un-tighten a project. Spend-bearing policy (`auto_fix_findings_per_scan`, `blocking_severities`,
+`max_findings_per_job`, `compliance_audit_ai_narrative`, quota grants) has no project twin at all
+and stays under `require_admin`. Use `workspace_settings_service.load_project(id)` rather than
+`Project.get(id)` — the latter raises on a malformed id instead of returning `None`.
+
+An audit's shape is configuration, not a per-run question: every field on
+`POST /projects/{id}/compliance-audits` is optional, and an empty body (what the Run Audit button
+sends) resolves frameworks, evidence scope and depth from `effective_compliance_policy`. The
+three-step wizard that used to ask them is gone. A *configured* narrative preference downgrades to
+deterministic when no AI provider is active — the verdicts are identical either way — while an
+explicit `depth: "with_ai_narrative"` still 409s.
+
+**Audit log** (`services/audit_service.py`, `routers/audit_logs.py`): `record()` is the only
+writer and rows are immutable, so all read-side shaping happens on the way out.
+`classify(action, project_id)` buckets a row as `privilege` (sign-ins, roles, members, API keys,
+credentials), `project` (scoped to a project) or `admin` (portal-wide) — privilege wins over the
+other two so an access change inside a project isn't buried in scan traffic. It matches the action
+*name* rather than reading a stored field, deliberately: a stored category would only classify rows
+written after it shipped. `GET /audit-logs` takes `days` (default 1) and `category`, and returns
+per-category counts over the whole window next to the page — counts describe the window, never the
+filtered slice. There is no pager yet; the page states how many events it dropped rather than
+letting a truncated list read as the whole day.
+
+**Notifications** (`core/notification_events.py`, `services/notification_service.py`): every
+subscribable event is declared once in `EVENTS`, and `notify()` refuses a key that is not in it, so
+the preferences UI and the emission sites cannot drift. `audience` gates delivery before per-user
+preference: `"project"` reaches project members, `"admin"` reaches portal admins only. Preference is
+per *user* (`User.notify_in_app` / `notify_email`), where `None` means "never chose" and resolves to
+catalog defaults while `[]` means a deliberate opt-out — do not collapse the two. `notify()` never
+raises: the scan, audit or fix that triggered it must complete whether or not anyone could be told.
+Emission sites sit alongside existing `audit_service.record` calls. Email routes through
+`email_service`, which no-ops while `smtp_host` is unset (the default everywhere today) — the
+notifications page says so rather than implying mail is going out.
+
 **Scanner binary distribution** (self-hosted, so bootstrapping a CI runner needs no
 portal credentials): `download_service.py` + `models/scanner_binary.py` store built
 `zerostrike` binaries in MongoDB GridFS (bucket `scanner_binaries`); `routers/downloads.py`
@@ -152,3 +195,41 @@ shadcn/ui (Tailwind v4) for components.
 **Read `frontend/AGENTS.md` before writing Next.js-specific code** — it flags that this
 Next.js version (16.2.10) has breaking API/convention changes vs. what's in most training
 data; check `node_modules/next/dist/docs/` rather than assuming.
+
+## Definition of done — browser QA is not optional
+
+Unit tests, `tsc` and `ruff` are the *entry* gate, not the finish line. **Every change to a
+user-facing surface gets a browser pass before it is called done.** The two defects that
+shipped past a green suite on 2026-08-28 were both invisible to unit tests: the audit trail
+recorded background-worker rows as `actor_type="user"` (so the log claimed a person did what
+no person did), and the log linked project names that resolve to deleted projects, giving a
+link that can only 404.
+
+Order matters — the first two steps are where most "it doesn't work" reports actually come
+from:
+
+1. **Restart the backend and confirm the new code is live.** `uvicorn app.main:app --port
+   8001` here is started *without* `--reload`, so it serves whatever it loaded at boot.
+   Confirm by grepping `/openapi.json` for a field you just added — never by assuming.
+   Windows also leaves orphaned `--reload` workers holding the port; see the memory note.
+2. **Check the port.** Frontend `.env.local` points at **:8001**. A backend on :8000 makes
+   every call fail in a way that looks like a code bug.
+3. **Do not `npm run build` while `npm run dev` is running** — it corrupts `.next` and the
+   dev server then serves stale CSS/JS silently. Type-check and lint instead.
+4. **Drive the real UI** with the `chrome-devtools` MCP (setup gotchas are in the memory
+   note — Chrome refuses remote debugging on the default profile). Prefer
+   `take_snapshot`/`evaluate_script` over screenshots; a full snapshot of a long table is
+   enormous, so read what you need with `evaluate_script`.
+5. **Test both roles.** Most admin surfaces are `require_admin` and most project surfaces
+   gate on membership; a member-only session silently hides half the product. Register a
+   throwaway QA account and promote it the way `tests/test_users.py::_promote_to_admin`
+   does. Keep its credentials in the scratchpad, never in the repo.
+6. **Assert on the wire, not just the pixels.** Confirm the request body and status
+   (`get_network_request`), not only that the page looks right — that is how "Run Audit
+   posts `{}`" got verified.
+7. **Exercise the refusal paths too.** A 409 that renders as a readable toast is a feature;
+   an unhandled one is a dead button.
+8. **Finish with `list_console_messages` and `list_network_requests`.** Zero errors and no
+   unexpected non-2xx.
+9. **Re-run the suite after fixing anything the browser found**, then record what the pass
+   caught — a QA pass that found nothing and one that was never run look identical later.

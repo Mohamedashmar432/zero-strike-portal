@@ -23,6 +23,13 @@ class User(Document):
     role: Literal["admin", "user"] = "user"
     is_active: bool = True
     refresh_tokens: list[RefreshTokenRecord] = []
+    # Event keys (app.core.notification_events) this user wants delivered each way.
+    # `None` means "never set a preference" and resolves to the catalog defaults at read
+    # time — distinct from `[]`, which is someone who deliberately unsubscribed from
+    # everything. Collapsing the two would silently re-subscribe them on the next default
+    # change.
+    notify_in_app: list[str] | None = None
+    notify_email: list[str] | None = None
     password_reset_token_hash: str | None = None
     password_reset_expires_at: datetime | None = None
     created_at: datetime

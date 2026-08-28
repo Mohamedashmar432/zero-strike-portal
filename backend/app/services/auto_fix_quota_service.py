@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 
 from app.models.ai_fix_proposal import AIFixProposal
 from app.models.auto_fix_quota import AutoFixQuotaRequest, ScanAutoFixQuota
+from app.models.scan import Scan
 from app.services import remediation_settings_service
 
 # Hard ceiling on a single request so a typo ("1000000") cannot be approved into an
@@ -79,6 +80,37 @@ _EXHAUSTED = (
 )
 
 
+async def _notify_exhausted(scan_id: str, limit: int) -> None:
+    """Tell the project its allowance ran out — but only while no request is already open.
+
+    Without that check this fires on every retry of a blocked action, which is exactly the
+    behaviour that teaches people to mute a notification channel. Once someone has asked for
+    more headroom, they know; the admin decision is the next signal, not this one.
+    """
+    from app.services import notification_service
+
+    quota = await ScanAutoFixQuota.find_one(ScanAutoFixQuota.scan_id == scan_id)
+    project_id = quota.project_id if quota else None
+    if project_id is None:
+        scan = await Scan.get(scan_id)
+        project_id = scan.project_id if scan else None
+    if project_id is None:
+        return
+    pending = await AutoFixQuotaRequest.find(
+        AutoFixQuotaRequest.scan_id == scan_id, AutoFixQuotaRequest.status == "pending"
+    ).count()
+    if pending:
+        return
+    await notification_service.notify(
+        "autofix.quota_exhausted",
+        project_id=project_id,
+        title=f"Auto-fix allowance exhausted ({limit} findings)",
+        body="Request additional headroom from an administrator to continue.",
+        link=f"/projects/{project_id}/auto-fix/{scan_id}",
+        severity="warning",
+    )
+
+
 async def allocate(scan_id: str, candidate_finding_ids: list[str]) -> list[str]:
     """Trim a set of findings to what the scan's remaining allowance permits.
 
@@ -94,6 +126,7 @@ async def allocate(scan_id: str, candidate_finding_ids: list[str]) -> list[str]:
     if room <= 0 and fresh:
         cfg = await remediation_settings_service.get_settings()
         limit = cfg.auto_fix_findings_per_scan + await _extra_granted(scan_id)
+        await _notify_exhausted(scan_id, limit)
         raise HTTPException(status.HTTP_409_CONFLICT, _EXHAUSTED.format(limit=limit))
 
     # Preserve the caller's ordering (priority-sorted upstream) rather than putting
@@ -112,6 +145,7 @@ async def assert_can_fix_one(scan_id: str, finding_id: str) -> None:
     if await remaining(scan_id) <= 0:
         cfg = await remediation_settings_service.get_settings()
         limit = cfg.auto_fix_findings_per_scan + await _extra_granted(scan_id)
+        await _notify_exhausted(scan_id, limit)
         raise HTTPException(status.HTTP_409_CONFLICT, _EXHAUSTED.format(limit=limit))
 
 

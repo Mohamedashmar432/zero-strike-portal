@@ -246,6 +246,15 @@ async def _apply_finding_delta(
     await Project.get_pymongo_collection().update_one({"_id": oid}, {"$inc": inc})
 
 
+def _completion_summary(findings: list[Finding]) -> str:
+    """One line of severity counts for the completion notification, worst-first."""
+    counts: dict[str, int] = {}
+    for f in findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    parts = [f"{counts[s]} {s}" for s in ("critical", "high", "medium", "low", "info") if counts.get(s)]
+    return ", ".join(parts) if parts else "No findings."
+
+
 async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     """Write findings + report for `scan` from a parsed Go report, mark the scan completed.
 
@@ -303,8 +312,20 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     await scan.save()
 
     # Completion frees a cloud-scan concurrency slot — harmless no-op for local/CI scans.
-    from app.services import scan_queue_service
+    from app.services import compliance_queue_service, notification_service, scan_queue_service
 
     await scan_queue_service.drain_queue()
+
+    # Both of these are opt-in and both swallow their own failures: a scan that produced a
+    # valid report must be recorded as completed even if the follow-on audit or the
+    # notification cannot be delivered.
+    await compliance_queue_service.enqueue_auto_audit(scan)
+    await notification_service.notify(
+        "scan.completed",
+        project_id=project_id,
+        title=f"Scan completed — {len(findings)} finding(s)",
+        body=_completion_summary(findings),
+        link=f"/projects/{project_id}/scans/{scan_id}",
+    )
 
     return len(findings)

@@ -30,7 +30,7 @@ from app.core.config import settings
 from app.core.retry import retry_transient
 from app.models.scan import Scan
 from app.schemas.report import GoReportIn
-from app.services import report_ingestion_service
+from app.services import report_ingestion_service, workspace_settings_service
 
 logger = structlog.get_logger(__name__)
 
@@ -180,18 +180,26 @@ _DEFAULT_EXCLUDE_DIRS = ("node_modules", "vendor", "dist", "build", ".git", "bin
 
 
 async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
+    # Which analysers run is workspace policy with a per-project override; the defaults are
+    # all-on, so this produces the same argv as the previously hardcoded flags until an
+    # admin turns something off.
+    project = await workspace_settings_service.load_project(scan.project_id)
+    options = await workspace_settings_service.effective_scan_options(project)
     cmd = [
         settings.scanner_binary_path,
         "scan",
         workdir,
         "--format",
         "json",
-        "--enable-secrets",
-        "--enable-sca",
-        "--enable-framework-checks",
         "--workers",
         str(settings.scanner_max_workers),
     ]
+    if options.enable_secrets:
+        cmd.append("--enable-secrets")
+    if options.enable_sca:
+        cmd.append("--enable-sca")
+    if options.enable_framework_checks:
+        cmd.append("--enable-framework-checks")
     for d in _DEFAULT_EXCLUDE_DIRS:
         cmd += ["--exclude-dir", d]
     rc, out, err = await _run(cmd, settings.scan_timeout_seconds)
@@ -221,9 +229,17 @@ async def _fail(scan: Scan, message: str) -> None:
     await scan.save()
 
     # A failure frees a concurrency slot — nudge the queue rather than waiting for the next poll tick.
-    from app.services import scan_queue_service
+    from app.services import notification_service, scan_queue_service
 
     await scan_queue_service.drain_queue()
+    await notification_service.notify(
+        "scan.failed",
+        project_id=scan.project_id,
+        title="Scan failed",
+        body=message,
+        link=f"/projects/{scan.project_id}/scans/{scan.id}",
+        severity="error",
+    )
 
 
 async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token_auth_scheme: str = "bearer") -> None:

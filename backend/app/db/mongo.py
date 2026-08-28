@@ -15,6 +15,7 @@ from app.models.auto_fix_quota import AutoFixQuotaRequest, ScanAutoFixQuota
 from app.models.compliance_audit import ComplianceAudit
 from app.models.finding import Finding
 from app.models.finding_comment import FindingComment
+from app.models.notification import Notification
 from app.models.fix_conversation import FixConversation
 from app.models.fix_pattern import FixPattern
 from app.models.oauth_connection import OAuthConnection
@@ -58,6 +59,7 @@ async def connect_to_mongo() -> None:
             RepoCredential,
             ProjectRepo,
             WorkspaceSettings,
+            Notification,
             AIFindingInsight,
             AIScanInsight,
             AIFixProposal,

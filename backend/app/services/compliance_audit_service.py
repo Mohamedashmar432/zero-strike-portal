@@ -452,6 +452,9 @@ async def run_job(audit: ComplianceAudit) -> None:
         await audit.save()
         await audit_service.record(
             "Compliance Audit Failed",
+            # Written by the queue worker, not by a person -- the default actor_type is "user",
+            # which would have the trail claim a user did something no user did.
+            actor_type="system",
             project_id=audit.project_id,
             target_type="compliance_audit",
             target_id=str(audit.id),
@@ -467,6 +470,7 @@ async def run_job(audit: ComplianceAudit) -> None:
     await audit.save()
     await audit_service.record(
         "Compliance Audit Completed",
+        actor_type="system",
         project_id=audit.project_id,
         target_type="compliance_audit",
         target_id=str(audit.id),
@@ -477,3 +481,27 @@ async def run_job(audit: ComplianceAudit) -> None:
             "failed_controls": sum(s.failed for s in audit.summaries),
         },
     )
+
+    # Two distinct events, because they are two distinct things to care about: "the audit
+    # ran" and "the audit found failing controls". Subscribing to the second without the
+    # first is the common case.
+    from app.services import notification_service
+
+    failed = sum(s.failed for s in audit.summaries)
+    frameworks = ", ".join(audit.frameworks)
+    await notification_service.notify(
+        "compliance.audit_completed",
+        project_id=audit.project_id,
+        title=f"Compliance audit completed — {frameworks}",
+        body=f"{failed} failing control(s) across {len(audit.controls)} assessed.",
+        link=f"/projects/{audit.project_id}/compliance/{audit.id}",
+    )
+    if failed:
+        await notification_service.notify(
+            "compliance.controls_failing",
+            project_id=audit.project_id,
+            title=f"{failed} compliance control(s) failing — {frameworks}",
+            body="Scanner evidence maps to failing controls in this audit.",
+            link=f"/projects/{audit.project_id}/compliance/{audit.id}",
+            severity="warning",
+        )

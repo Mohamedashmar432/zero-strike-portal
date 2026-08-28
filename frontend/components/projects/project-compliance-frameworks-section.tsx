@@ -1,22 +1,27 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Shield, ShieldCheck } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Settings2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiError } from "@/lib/api/client";
 import {
   listFrameworks,
   listProjectAudits,
+  runAudit,
   type ComplianceAuditSummary,
   type Framework,
   type FrameworkSummary,
 } from "@/lib/api/compliance";
 import { refetchWhileAnyItemActive } from "@/lib/api/polling";
 import { queryKeys } from "@/lib/api/query-keys";
+import { getProjectPolicy } from "@/lib/api/workspace-settings";
 import { cn } from "@/lib/utils";
 
 function formatDate(iso: string) {
@@ -56,6 +61,9 @@ export function latestSummaryFor(
 }
 
 export function ProjectComplianceFrameworksSection({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+
   const { data: catalog } = useQuery({
     queryKey: queryKeys.compliance.frameworks(),
     queryFn: listFrameworks,
@@ -69,29 +77,113 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
     queryFn: () => listProjectAudits(projectId),
     refetchInterval: refetchWhileAnyItemActive<ComplianceAuditSummary>(),
   });
+  // Read-only here: this is what Run Audit will do, so it is worth stating before the click.
+  // The backend resolves the same policy itself — nothing below re-derives the precedence.
+  const { data: policy } = useQuery({
+    queryKey: queryKeys.projects.policy(projectId),
+    queryFn: () => getProjectPolicy(projectId),
+  });
 
   const audits = auditPage?.items ?? [];
   const frameworks = catalog?.items ?? [];
 
+  // An audit already in flight — the backend returns that one rather than queueing a second,
+  // so the button says so instead of pretending a new run started.
+  const active = audits.find((a) => a.status === "queued" || a.status === "in_progress");
+
+  const run = useMutation({
+    // Empty body on purpose: the run's shape comes from the project's saved Compliance Config.
+    mutationFn: () => runAudit(projectId),
+    onSuccess: (audit) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.compliance.projectAudits(projectId) });
+      if (audit.reused) {
+        // The evaluator is deterministic, so an identical scope over the same scans returns the
+        // audit that already exists rather than paying to reproduce it. Say so — landing on a
+        // result dated last week without explanation looks like a bug.
+        toast.info(
+          "No scans have changed since the last identical audit, so this is that result — " +
+            "re-running it would produce the same verdicts."
+        );
+      }
+      router.push(`/projects/${projectId}/compliance/${audit.id}`);
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Failed to start the audit"),
+  });
+
+  const titles = new Map(frameworks.map((f) => [f.key, f.title]));
+  const configured = policy?.effective_compliance_frameworks ?? [];
+  // An empty configured list means "no default chosen", which the backend resolves to every
+  // supported framework — name them rather than showing a blank. The catalog endpoint returns
+  // only the supported set, so that fallback is exactly this list.
+  const willAssess = (
+    configured.length > 0
+      ? configured.map((k) => titles.get(k) ?? k)
+      : frameworks.map((f) => f.title)
+  ).join(", ");
+
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-2">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h3 className="text-sm font-medium">Compliance Frameworks</h3>
           <p className="text-sm text-muted-foreground">
             Map this project&rsquo;s scan findings to framework controls. Automated technical
             assessment only — not a compliance certification.
           </p>
+          {/* No pre-run questions any more: state what the configured run will do and where to
+              change it, rather than asking the same three things on every click. */}
+          {policy && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Will assess <span className="font-medium text-foreground">{willAssess}</span> over{" "}
+              {policy.effective_compliance_audit_scope === "latest"
+                ? "each repository's latest scan"
+                : "all historical findings"}
+              {policy.effective_compliance_audit_ai_narrative
+                ? ", with AI explanations."
+                : ", verdicts and evidence only."}
+            </p>
+          )}
         </div>
-        <Button
-          size="sm"
-          nativeButton={false}
-          render={<Link href={`/projects/${projectId}/compliance/new`} />}
-        >
-          <ShieldCheck />
-          Run Audit
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            nativeButton={false}
+            render={<Link href={`/projects/${projectId}?tab=compliance-config`} />}
+          >
+            <Settings2 />
+            Configure
+          </Button>
+          <Button
+            size="sm"
+            disabled={run.isPending || active !== undefined}
+            onClick={() => run.mutate()}
+          >
+            <ShieldCheck />
+            {active ? "Audit running…" : run.isPending ? "Starting…" : "Run Audit"}
+          </Button>
+        </div>
       </div>
+
+      {active && (
+        <Link
+          href={`/projects/${projectId}/compliance/${active.id}`}
+          className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-3 transition-colors hover:bg-accent/50"
+        >
+          <p className="text-xs text-muted-foreground">
+            An audit is in progress. Progress updates here and on the audit page as each
+            framework is evaluated.
+          </p>
+          <AiStatusBadge
+            kind="audit"
+            status={active.status}
+            startedAt={active.started_at}
+            progressCompleted={active.progress_completed}
+            progressTotal={active.progress_total}
+          />
+        </Link>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {frameworks.map((framework) => {

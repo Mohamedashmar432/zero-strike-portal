@@ -998,7 +998,7 @@ export default function ComplianceAuditPage() {
               size="sm"
               className="text-xs"
               nativeButton={false}
-              render={<Link href={`/projects/${projectId}/compliance/new`} />}
+              render={<Link href={backHref} />}
             >
               <RotateCcw className="mr-1.5 size-3.5" />
               New Audit

@@ -140,7 +140,7 @@ function AutoFixPolicyCard() {
             &ldquo;max findings per job&rdquo;, which caps a single run — a scan can be run
             through several. Each new scan of a repository starts a fresh allowance. Teams that
             need more on a specific scan request it, and you approve it under{" "}
-            <span className="font-mono">Administration → Auto-Fix Requests</span>. Changing this
+            <span className="font-mono">Administration → Project Requests</span>. Changing this
             number lifts every scan at once.
           </p>
         </div>

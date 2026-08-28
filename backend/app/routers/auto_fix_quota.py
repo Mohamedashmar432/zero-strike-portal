@@ -20,7 +20,13 @@ from app.schemas.auto_fix_quota import (
     AutoFixQuotaRequestOut,
     ScanAutoFixQuotaResponse,
 )
-from app.services import audit_service, auto_fix_quota_service, project_service, scan_service
+from app.services import (
+    audit_service,
+    auto_fix_quota_service,
+    notification_service,
+    project_service,
+    scan_service,
+)
 
 router = APIRouter(tags=["auto-fix-quota"])
 
@@ -122,6 +128,15 @@ async def create_scan_quota_request(
         target_type="scan",
         target_id=scan_id,
         metadata={"requested_additional": payload.requested_additional},
+    )
+    # Admin audience: a request nobody sees is a request nobody decides.
+    await notification_service.notify(
+        "autofix.quota_requested",
+        project_id=scan.project_id,
+        title=f"Auto-fix allowance requested (+{payload.requested_additional})",
+        body=payload.reason,
+        link="/admin/auto-fix-requests",
+        severity="warning",
     )
     return (await _resolve_labels([req]))[0]
 
