@@ -97,6 +97,10 @@ AutoFixRiskRating = Literal["none", "low", "medium", "high", "critical"]
 
 class AutoFixSummary(BaseModel):
     total_findings: int = 0
+    #: Findings in this scan with no proposal yet. The listing is the whole scan; only
+    #: execution is batched, so this is the honest "how much work is left" number and the
+    #: UI labels the trigger button with it. 0 means the scan is fully covered.
+    uncovered_findings: int = 0
     auto_fixable: int = 0  # can_fix (any confidence) — kept for back-compat
     manual_review: int = 0
     proposed: int = 0

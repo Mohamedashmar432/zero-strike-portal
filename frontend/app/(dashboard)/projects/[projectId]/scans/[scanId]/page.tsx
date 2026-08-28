@@ -626,7 +626,10 @@ export default function ScanDetailPage() {
                 onClick={() => autoFix.mutate()}
               >
                 <Wand2 />
-                {autoFix.isPending ? "Starting…" : "Auto-Fix All"}
+                {/* Not "Auto-Fix All": one run covers a batch, and the allowance may trim it
+                    further. The Auto-Fix workspace this navigates to shows how many findings
+                    are still uncovered and lets the user run again. */}
+                {autoFix.isPending ? "Starting…" : "Auto-Fix"}
               </Button>
             </>
           )}

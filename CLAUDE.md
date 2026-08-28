@@ -130,6 +130,17 @@ un-tighten a project. Spend-bearing policy (`auto_fix_findings_per_scan`, `block
 and stays under `require_admin`. Use `workspace_settings_service.load_project(id)` rather than
 `Project.get(id)` — the latter raises on a malformed id instead of returning `None`.
 
+**Auto-Fix: listing is the scan, execution is a batch** (`routers/ai_remediation.py:
+trigger_scan_auto_fix`). Three separate limits, and conflating any two of them is the bug that
+shipped once already: `max_findings_per_job` bounds **one run**, `auto_fix_findings_per_scan` (+
+grants) bounds **the scan's total spend**, and **neither bounds what the UI lists** — the workspace
+always shows every finding, with `AutoFixSummary.uncovered_findings` naming what is left. The
+trigger therefore selects only findings that have *no proposal yet* (unless `force`): selecting
+already-proposed ones refills every batch with finished work, so repeated clicks could never reach
+past the top `max_findings_per_job` findings of a large scan — a 137-finding scan sat at 10
+proposals forever. No button may promise "all", because no single run can deliver it;
+`test_repeated_runs_advance_through_a_scan_larger_than_one_batch` locks the advance in.
+
 An audit's shape is configuration, not a per-run question: every field on
 `POST /projects/{id}/compliance-audits` is optional, and an empty body (what the Run Audit button
 sends) resolves frameworks, evidence scope and depth from `effective_compliance_policy`. The

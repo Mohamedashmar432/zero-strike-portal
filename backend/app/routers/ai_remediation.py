@@ -176,7 +176,13 @@ def _risk_rating(outs: list[FixProposalOut]) -> str:
 
 
 def _summary(outs: list[FixProposalOut], total_findings: int, threshold: float) -> AutoFixSummary:
-    s = AutoFixSummary(total_findings=total_findings, confidence_threshold=threshold)
+    s = AutoFixSummary(
+        total_findings=total_findings,
+        # `outs` is one proposal per finding, so the difference is exactly the findings no
+        # run has looked at yet -- never negative even if a proposal outlives its finding.
+        uncovered_findings=max(0, total_findings - len(outs)),
+        confidence_threshold=threshold,
+    )
     for o in outs:
         if o.can_fix:
             s.auto_fixable += 1
@@ -281,20 +287,41 @@ async def trigger_scan_auto_fix(
         return await _scan_response(scan_id, active)
 
     # max_findings_per_job is spend policy, so it stays workspace-wide (admin-only) and has
-    # no project override -- unlike `enabled` and the confidence threshold above.
+    # no project override -- unlike `enabled` and the confidence threshold above. It bounds
+    # ONE batch, not the scan: what is not covered this run is picked up by the next click.
     cfg = await remediation_settings_service.get_settings()
+    # Findings that already have a proposal are excluded from selection here, not merely
+    # skipped by the worker later. Selecting them would refill every batch with work that is
+    # already done, so "Fix remaining findings" could never reach past the top
+    # max_findings_per_job findings of a large scan. force=true redrafts them instead.
+    done_ids: set[str] = set()
+    if not payload.force:
+        done_ids = {
+            p.finding_id
+            for p in await AIFixProposal.find(AIFixProposal.scan_id == scan_id).to_list()
+        }
     if payload.finding_ids:
-        finding_ids = payload.finding_ids[: cfg.max_findings_per_job]
+        candidates = [fid for fid in payload.finding_ids if fid not in done_ids]
     else:
+        # Over-fetch by the number already done: the top (batch + done) by priority is
+        # guaranteed to contain a full batch of un-proposed findings if that many exist,
+        # so this stays bounded on a scan with thousands of findings.
         findings = (
             await Finding.find(Finding.scan_id == scan_id)
             .sort("-priority_score")
-            .limit(cfg.max_findings_per_job)
+            .limit(cfg.max_findings_per_job + len(done_ids))
             .to_list()
         )
-        finding_ids = [str(f.id) for f in findings]
+        candidates = [str(f.id) for f in findings if str(f.id) not in done_ids]
+    finding_ids = candidates[: cfg.max_findings_per_job]
     if not finding_ids:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Scan has no findings to fix")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Every finding in this scan already has a fix proposal. Use Regenerate on an "
+            "individual proposal to redraft it."
+            if done_ids
+            else "Scan has no findings to fix",
+        )
 
     # Per-scan allowance. Clamps rather than rejecting: submitting 10 findings with 3
     # left fixes the 3 highest-priority ones and reports the shortfall, which beats

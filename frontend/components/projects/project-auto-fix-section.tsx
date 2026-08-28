@@ -102,6 +102,7 @@ export function ProjectAutoFixSection({
 
   const proposals = data?.insight?.proposals ?? [];
   const summary = data?.insight?.summary;
+  const uncovered = summary?.uncovered_findings ?? 0;
   const status = data?.status;
   const active = status === "queued" || status === "in_progress";
 
@@ -172,15 +173,25 @@ export function ProjectAutoFixSection({
           {/* "Fix remaining", not "Regenerate": a finding that already has a proposal is skipped
               rather than redrafted, because a redraft costs a full agent run and no quota. Use
               Regenerate on an individual proposal to redraft that one. */}
-          <Button onClick={() => trigger.mutate()} disabled={active || trigger.isPending}>
-            <Wand2 /> {proposals.length ? "Fix remaining findings" : "Generate fixes"}
+          {/* The label carries the real number rather than an unbounded "all": one run covers
+              at most a batch, so "Fix 40 remaining findings" would promise what it can't keep.
+              Progress is visible in the "Not yet covered" card after each run. */}
+          <Button
+            onClick={() => trigger.mutate()}
+            disabled={active || trigger.isPending || (!!summary && uncovered === 0)}
+          >
+            <Wand2 />{" "}
+            {proposals.length ? `Fix remaining findings (${uncovered})` : "Generate fixes"}
           </Button>
         </div>
       </div>
 
       {summary && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatCard size="sm" label="Findings" value={summary.total_findings} />
+          {/* The gap between "Findings" and everything right of it. Without it, a scan whose
+              findings outnumber one batch reads as if the rest simply don't exist. */}
+          <StatCard size="sm" label="Not yet covered" value={summary.uncovered_findings} />
           <StatCard size="sm" label="AI can fix" value={summary.ai_fixable} />
           <StatCard size="sm" label="Needs review on fix" value={summary.needs_review_on_fix} />
           <StatCard size="sm" label="Can't fix — manual" value={summary.cannot_fix} />

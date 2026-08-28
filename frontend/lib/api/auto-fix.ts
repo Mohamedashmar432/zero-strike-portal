@@ -104,6 +104,8 @@ export type AutoFixRiskRating = "none" | "low" | "medium" | "high" | "critical";
 
 export type AutoFixSummary = {
   total_findings: number;
+  /** Findings with no proposal yet. Execution is batched; the listing is the whole scan. */
+  uncovered_findings: number;
   auto_fixable: number;
   manual_review: number;
   proposed: number;

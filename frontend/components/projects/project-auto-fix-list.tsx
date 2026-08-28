@@ -76,7 +76,7 @@ export function ProjectAutoFixList({ projectId }: { projectId: string }) {
           <EmptyState
             icon={Wand2}
             title="No Auto-Fix runs yet"
-            description="Open a completed scan and click “Auto-Fix All” (or Generate Fix on a finding) to send it here."
+            description="Open a completed scan and click “Auto-Fix” (or Generate Fix on a finding) to send it here."
           />
         }
       >

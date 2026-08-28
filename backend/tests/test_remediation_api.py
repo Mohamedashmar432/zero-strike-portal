@@ -435,3 +435,57 @@ def test_owner_can_approve_below_confidence_threshold(client, monkeypatch):
         return await RemediationJob.find(RemediationJob.kind == "apply").count()
 
     assert asyncio.run(_apply_jobs()) == 1  # human approval enqueues the write job
+
+
+def test_repeated_runs_advance_through_a_scan_larger_than_one_batch(client, monkeypatch):
+    """The batch cap bounds ONE run, not the scan.
+
+    Regression: the trigger used to auto-select the top `max_findings_per_job` findings
+    regardless of whether they already had a proposal, so every click after the first
+    re-selected the same findings, the worker skipped them all as already-proposed, and
+    findings below the cap were unreachable forever (verified: run 2 produced 0 new
+    proposals). `uncovered_findings` is what the UI reads to say how much work is left,
+    so it is asserted at every step.
+    """
+
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+        return SubmitFixProposalArgs(
+            finding_id=issue_bundle["finding_id"], can_fix=True, confidence_score=90,
+            file_path="app.py", original_code="a = 1", patched_code="a = 2",
+            explanation="fix", patch_scope="single-line",
+        )
+
+    monkeypatch.setattr(ai_remediation_agent, "run_agent", fake_run_agent)
+    admin = _admin_headers(client, email="fix-batch-admin@zs.dev")
+    _enable_ai(client, admin)
+    # Two findings per run, against a 5-finding scan: three runs to cover it.
+    assert client.put(
+        "/api/v1/remediation-settings/settings",
+        json={"max_findings_per_job": 2}, headers=admin,
+    ).status_code == 200
+
+    owner = register_and_login(client, email="fix-batch-owner@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers, name="Batching")
+    scan_id = _insert_scan(project["id"])
+    for i in range(5):
+        _insert_finding(project["id"], scan_id, f"fp-batch-{i}")
+
+    for expected_covered in (2, 4, 5):
+        assert client.post(
+            f"/api/v1/scans/{scan_id}/auto-fix", json={}, headers=headers
+        ).status_code == 200
+        body = _poll_scan(client, headers, scan_id)
+        assert body["status"] == "completed", body
+        summary = body["insight"]["summary"]
+        # The listing is the whole scan at every step -- only execution is batched.
+        assert summary["total_findings"] == 5
+        assert len(body["insight"]["proposals"]) == expected_covered
+        assert summary["uncovered_findings"] == 5 - expected_covered
+        # Nothing was re-drafted: each run spent its calls on findings it had not seen.
+        assert body["skipped_existing"] == 0
+
+    # Fully covered: the trigger refuses rather than burning a run on nothing.
+    r = client.post(f"/api/v1/scans/{scan_id}/auto-fix", json={}, headers=headers)
+    assert r.status_code == 400
+    assert "already has a fix proposal" in r.json()["detail"]
