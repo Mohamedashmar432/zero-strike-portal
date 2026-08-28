@@ -80,6 +80,8 @@ const SKIP_REASON: Record<string, string> = {
   disabled: "The review pass is turned off in Auto-Fix settings.",
   no_patch: "There was no patch to review — the AI did not produce one for this finding.",
   unavailable: "The reviewer was unavailable. The patch below is unreviewed — read it carefully.",
+  dependency_bump:
+    "Not needed for a dependency bump — the patch is one version string, and the target version comes from the advisory, not the AI. It is still validated by a re-scan before any merge.",
 };
 
 function CritiqueStep({ critique }: { critique: FixCritique }) {

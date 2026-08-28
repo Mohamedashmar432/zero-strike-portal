@@ -215,8 +215,15 @@ export function getScanAutoFixActivity(scanId: string) {
   return apiFetch<{ items: ActivityEvent[] }>(`/scans/${scanId}/auto-fix/activity`);
 }
 
-// Scan-level generation job: the AI async envelope, insight = summary + proposals.
-export type ScanAutoFixJob = AiAnalysisResult<AutoFixInsight>;
+// Scan-level generation job: the AI async envelope, insight = summary + proposals, plus the two
+// reasons a run may have covered fewer findings than were asked for. Both must be surfaced --
+// a silently short run reads as "the AI couldn't fix these" instead of "it never looked".
+export type ScanAutoFixJob = AiAnalysisResult<AutoFixInsight> & {
+  // Trimmed off by the per-scan allowance at trigger time.
+  quota_skipped: number;
+  // Already had a proposal, so no LLM call was spent. Re-trigger with force to redraft.
+  skipped_existing: number;
+};
 export type FindingAutoFixJob = AiAnalysisResult<AiFixProposal>;
 
 export function getScanAutoFix(scanId: string) {

@@ -16,6 +16,9 @@ FixReviewState = Literal[
 
 
 class AIFixTriggerRequest(BaseModel):
+    #: Redraft findings that already have a proposal. Off by default: a re-run over the same
+    #: selection costs no quota (already charged) but does cost a full agent run per finding,
+    #: so the default is to skip them and report the count.
     force: bool = False
     # Optional subset; when omitted a scan-level trigger proposes for all of the scan's findings.
     finding_ids: list[str] | None = None
@@ -199,6 +202,12 @@ class ScanAutoFixResponse(BaseModel):
     started_at: datetime | None = None
     progress_completed: int = 0
     progress_total: int = 0
+    #: Findings the per-scan allowance trimmed off this run. >0 means the user asked for more
+    #: than the quota permitted and the UI must say so rather than let it pass unremarked.
+    quota_skipped: int = 0
+    #: Findings skipped because they already had a proposal (no LLM call spent). Re-trigger
+    #: with force=true to redraft them.
+    skipped_existing: int = 0
     insight: AutoFixInsight | None = None
 
 

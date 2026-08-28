@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     # wall clock (remediation_agent_wall_clock_seconds) still applies to each run separately.
     remediation_critic_max_redrafts: int = 1
     remediation_critic_max_output_tokens: int = 2000  # a verdict + a few bullets, not code
+    # Skip the critique for a dependency-bump patch: the whole change is one version string in a
+    # manifest, and the target version comes from the scanner's advisory data rather than the
+    # model's imagination — so there is no drafted *logic* for a reviewer to be skeptical about.
+    # SCA findings are typically the most numerous class, so this is where the pass costs most and
+    # buys least. The deterministic apply gate (baseline scan -> patch -> re-scan) still runs, as
+    # does human approval. Set False to critique every fixable draft.
+    remediation_critic_skip_dependency_bumps: bool = True
 
     # Compliance audits (compliance_queue_service / compliance_audit_service). A fourth
     # Mongo-backed queue peer. Cheap by default — the control evaluation is a pure in-memory

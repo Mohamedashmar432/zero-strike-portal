@@ -13,6 +13,7 @@ import {
   Sliders,
   Sparkles,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -20,90 +21,37 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { listFrameworks } from "@/lib/api/compliance";
+import { queryKeys } from "@/lib/api/query-keys";
 
 interface ProjectComplianceConfigTabProps {
   projectId: string;
 }
 
-interface FrameworkConfig {
-  id: string;
-  name: string;
-  category: string;
-  version: string;
-  description: string;
-  enabled: boolean;
-  autoAudit: boolean;
-}
-
 export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfigTabProps) {
-  const [frameworks, setFrameworks] = useState<FrameworkConfig[]>([
-    {
-      id: "soc2",
-      name: "SOC 2 Type II",
-      category: "Trust Services Criteria",
-      version: "2023 Revision",
-      description: "Security, Confidentiality, and Processing Integrity controls for cloud software systems.",
-      enabled: true,
-      autoAudit: true,
-    },
-    {
-      id: "iso27001",
-      name: "ISO/IEC 27001",
-      category: "ISMS Global Standard",
-      version: "2022 Revision",
-      description: "Information Security Management System Annex A technical & organizational controls.",
-      enabled: true,
-      autoAudit: true,
-    },
-    {
-      id: "hipaa",
-      name: "HIPAA Security Rule",
-      category: "Healthcare Compliance",
-      version: "45 CFR Part 164",
-      description: "Safeguards for electronic protected health information (ePHI) encryption and access audit.",
-      enabled: false,
-      autoAudit: false,
-    },
-    {
-      id: "nist80053",
-      name: "NIST SP 800-53",
-      category: "Federal Security Standard",
-      version: "Rev. 5",
-      description: "Security and Privacy Controls for Information Systems and Organizations.",
-      enabled: false,
-      autoAudit: false,
-    },
-    {
-      id: "pci_dss",
-      name: "PCI-DSS",
-      category: "Payment Card Security",
-      version: "v4.0",
-      description: "Protection of cardholder data and secure coding standards for transaction processing.",
-      enabled: true,
-      autoAudit: false,
-    },
-  ]);
+  // Driven by the real catalog endpoint rather than a hardcoded list. That endpoint returns only
+  // the frameworks the evaluator will actually run (SOC 2 and ISO 27001 today), so this tab can
+  // never advertise a framework an audit would refuse.
+  const { data: catalog, isLoading } = useQuery({
+    queryKey: queryKeys.compliance.frameworks(),
+    queryFn: listFrameworks,
+  });
+  const frameworks = catalog?.items ?? [];
 
   const [slackAlerts, setSlackAlerts] = useState(true);
   const [emailDigest, setEmailDigest] = useState(true);
   const [autoRemediate, setAutoRemediate] = useState(false);
   const [retentionDays, setRetentionDays] = useState("365");
 
-  function toggleFramework(id: string) {
-    setFrameworks((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, enabled: !f.enabled } : f))
-    );
-  }
-
-  function toggleAutoAudit(id: string) {
-    setFrameworks((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, autoAudit: !f.autoAudit } : f))
-    );
-  }
-
   function handleSave() {
-    toast.success("Compliance configuration saved successfully");
+    // Was a success toast for a save that never happened. Nothing on this tab is persisted yet,
+    // and a UI that reports success for a no-op is worse than one that admits the gap.
+    toast.info(
+      "These policy settings aren't stored yet. Framework selection, scope and AI depth are " +
+        "chosen per audit in Compliance → Run audit."
+    );
   }
 
   return (
@@ -121,11 +69,18 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
             </Badge>
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Configure target audit frameworks, automated evaluation schedules, and continuous compliance alert thresholds.
+            The frameworks this project can be assessed against, plus the automation policies
+            planned for them. The policy switches below are not stored yet — audits are configured
+            per run in Compliance → Run audit.
           </p>
         </div>
 
-        <Button onClick={handleSave} size="sm" className="gap-1.5 font-medium shrink-0">
+        <Button
+          onClick={handleSave}
+          size="sm"
+          variant="outline"
+          className="gap-1.5 font-medium shrink-0"
+        >
           <Save className="size-3.5" />
           <span>Save Changes</span>
         </Button>
@@ -134,58 +89,45 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
       {/* Target Frameworks Grid */}
       <div className="space-y-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono">
-          Target Compliance Frameworks ({frameworks.filter((f) => f.enabled).length} Active)
+          Supported Compliance Frameworks ({frameworks.length})
         </h3>
+        <p className="text-xs text-muted-foreground">
+          These are the frameworks whose control-to-evidence mapping has been reviewed control by
+          control. Others are not offered rather than offered with mappings nobody has checked. Pick
+          which to assess when you run an audit.
+        </p>
 
         <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
-          {frameworks.map((framework) => (
-            <Card
-              key={framework.id}
-              className={`border-border/80 bg-card/60 transition-all ${
-                framework.enabled ? "border-primary/40 bg-card/90" : "opacity-70"
-              }`}
-            >
-              <CardHeader className="p-4 pb-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <CardTitle className="text-sm font-semibold text-foreground truncate">
-                        {framework.name}
+          {isLoading && <Skeleton className="h-32 w-full" />}
+          {frameworks.map((framework) => {
+            const manualOnly = framework.controls_total - framework.assessed_total;
+            return (
+              <Card key={framework.key} className="border-primary/40 bg-card/90 transition-all">
+                <CardHeader className="p-4 pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1 min-w-0">
+                      <CardTitle className="text-sm font-semibold text-foreground">
+                        {framework.title}
                       </CardTitle>
-                      <Badge variant="secondary" className="font-mono text-[10px]">
-                        {framework.version}
-                      </Badge>
+                      <p className="text-[11px] font-mono text-muted-foreground">
+                        {framework.controls_total} controls · {framework.assessed_total} assessable
+                        from code · {manualOnly} manual review
+                      </p>
                     </div>
-                    <p className="text-[11px] font-mono text-muted-foreground">{framework.category}</p>
+                    <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
+                      Supported
+                    </Badge>
                   </div>
-                  <Switch
-                    checked={framework.enabled}
-                    onCheckedChange={() => toggleFramework(framework.id)}
-                    aria-label={`Toggle ${framework.name}`}
-                  />
-                </div>
-              </CardHeader>
+                </CardHeader>
 
-              <CardContent className="p-4 pt-2 space-y-3">
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {framework.description}
-                </p>
-
-                {framework.enabled && (
-                  <div className="flex items-center justify-between pt-2 border-t border-border/40 text-xs">
-                    <span className="text-[11px] text-muted-foreground font-mono">
-                      Auto-audit on merge
-                    </span>
-                    <Switch
-                      checked={framework.autoAudit}
-                      onCheckedChange={() => toggleAutoAudit(framework.id)}
-                      aria-label="Toggle automated audit"
-                    />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                <CardContent className="p-4 pt-2">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {framework.scope_note}
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
 
@@ -195,8 +137,11 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
         <Card className="border-border/80 bg-card/60">
           <CardHeader className="p-4 pb-3 border-b border-border/60">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-2">
-              <ShieldCheck className="size-4 text-status-success" />
+              <ShieldCheck className="size-4 text-muted-foreground" />
               Automated Audit Policies
+              <Badge variant="outline" className="font-mono text-[10px] normal-case">
+                Not stored yet
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-4 text-xs">
@@ -204,10 +149,11 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
               <div className="space-y-0.5">
                 <Label className="font-medium text-foreground">Continuous Posture Evaluation</Label>
                 <p className="text-[11px] text-muted-foreground">
-                  Trigger compliance control assessment on every completed SAST scan.
+                  Trigger compliance control assessment on every completed SAST scan. Not
+                  implemented — audits are started by hand from the Compliance tab.
                 </p>
               </div>
-              <Switch checked={true} disabled />
+              <Switch checked={false} disabled />
             </div>
 
             <div className="flex items-center justify-between">
@@ -238,6 +184,9 @@ export function ProjectComplianceConfigTab({ projectId }: ProjectComplianceConfi
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-mono flex items-center gap-2">
               <Bell className="size-4 text-muted-foreground" />
               Drift & Violation Alerts
+              <Badge variant="outline" className="font-mono text-[10px] normal-case">
+                Not stored yet
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-4 text-xs">

@@ -240,3 +240,45 @@ def test_event_log_never_carries_prompt_or_response_content(client):
         "items"
     ][0]
     assert not {"prompt", "messages", "response", "content", "completion"} & set(item)
+
+
+# --- spend attribution: which workflow moved the number ---
+
+
+def test_feature_rows_carry_the_change_against_the_previous_window(client):
+    """Descriptive totals don't explain a bill. Each feature reports its own previous-window
+    spend and delta so "spend doubled" resolves to "remediation doubled"."""
+    owner = register_and_login(client, email="an-delta@zerostrike.dev")
+    project = _create_project(client, _headers(owner), name="Delta")
+    _seed(
+        [
+            # This window (last 30 days): autofix up sharply, compliance flat.
+            {"project_id": project["id"], "feature": "autofix", "cost_usd": 1.00, "days_ago": 2},
+            {"project_id": project["id"], "feature": "autofix", "cost_usd": 1.00, "days_ago": 3},
+            {"project_id": project["id"], "feature": "compliance", "cost_usd": 0.10, "days_ago": 4},
+            # Previous window (31-60 days ago).
+            {"project_id": project["id"], "feature": "autofix", "cost_usd": 0.20, "days_ago": 40},
+            {"project_id": project["id"], "feature": "compliance", "cost_usd": 0.10, "days_ago": 41},
+            {"project_id": project["id"], "feature": "repo_doc", "cost_usd": 0.50, "days_ago": 42},
+            # Outside both windows entirely — must not colour either number.
+            {"project_id": project["id"], "feature": "autofix", "cost_usd": 5.00, "days_ago": 200},
+        ]
+    )
+
+    r = client.get(
+        f"/api/v1/projects/{project['id']}/ai-analytics?days=30", headers=_headers(owner)
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert round(body["totals"]["cost_usd"], 2) == 2.10
+    assert round(body["previous_totals"]["cost_usd"], 2) == 0.80
+
+    rows = {row["feature"]: row for row in body["by_feature"]}
+    assert round(rows["autofix"]["cost_delta_usd"], 2) == 1.80
+    assert rows["autofix"]["requests_delta"] == 1
+    assert round(rows["compliance"]["cost_delta_usd"], 2) == 0.00
+    # A feature that stopped spending still appears, as a negative delta — otherwise a drop is
+    # invisible and the totals look unexplained.
+    assert rows["repo_doc"]["cost_usd"] == 0.0
+    assert round(rows["repo_doc"]["cost_delta_usd"], 2) == -0.50
+    assert rows["repo_doc"]["requests_delta"] == -1

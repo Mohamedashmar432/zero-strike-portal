@@ -16,6 +16,9 @@ than no report:
   that. It is not a statement that the control is implemented.
 - An audit with an empty evidence set never runs — routers/compliance.py rejects it at trigger
   time, because "no scans" would otherwise render as an all-pass report.
+- `compliance_score` is scored over code-assessable controls only, so it is never a compliance
+  percentage. `coverage_percent` and the repo counts on the audit travel with it so a reader
+  can see how much of the framework — and how much of the project — the number rests on.
 """
 
 import json
@@ -200,6 +203,7 @@ def evaluate(
     assessed_total = sum(1 for c in framework.controls if c.selector is not None)
     passed_count = sum(1 for r in results if r.status == "pass")
     score = round((passed_count / assessed_total) * 100) if assessed_total > 0 else 0
+    coverage = round((assessed_total / len(results)) * 100) if results else 0
 
     summary = FrameworkSummary(
         framework=framework.key,
@@ -213,6 +217,7 @@ def evaluate(
         not_applicable=sum(1 for r in results if r.status == "not_applicable"),
         needs_manual_review=sum(1 for r in results if r.status == "needs_manual_review"),
         compliance_score=score,
+        coverage_percent=coverage,
     )
     return summary, results
 
@@ -220,13 +225,16 @@ def evaluate(
 # --- evidence gathering -------------------------------------------------------------
 
 
-async def gather_evidence(audit: ComplianceAudit) -> tuple[list[EvidenceItem], list[str], bool]:
-    """Load the project's findings for the audit's scope. Returns (items, scan_ids, truncated)."""
-    scan_ids = await project_stats_service.resolve_scope_scan_ids(
+async def gather_evidence(
+    audit: ComplianceAudit,
+) -> tuple[list[EvidenceItem], project_stats_service.ScopeCoverage, bool]:
+    """Load the project's findings for the audit's scope. Returns (items, coverage, truncated)."""
+    coverage = await project_stats_service.resolve_scope_coverage(
         audit.project_id, audit.scope, audit.project_repo_ids
     )
+    scan_ids = coverage.scan_ids
     if not scan_ids:
-        return [], [], False
+        return [], coverage, False
 
     cap = settings.compliance_max_findings
     findings = (
@@ -252,7 +260,7 @@ async def gather_evidence(audit: ComplianceAudit) -> tuple[list[EvidenceItem], l
         )
         for f in findings[:cap]
     ]
-    return items, scan_ids, truncated
+    return items, coverage, truncated
 
 
 # --- optional LLM narrative ---------------------------------------------------------
@@ -382,7 +390,8 @@ async def run_job(audit: ComplianceAudit) -> None:
     await audit.save()
 
     try:
-        items, scan_ids, truncated = await gather_evidence(audit)
+        items, coverage, truncated = await gather_evidence(audit)
+        scan_ids = coverage.scan_ids
         if not scan_ids:
             # routers/compliance.py rejects this at trigger time, but the scans can still be
             # deleted (or the repo disconnected) between queueing and running. Evaluating an
@@ -393,6 +402,9 @@ async def run_job(audit: ComplianceAudit) -> None:
                 "nothing to assess. Run a scan and start a new audit."
             )
         audit.scan_ids = scan_ids
+        audit.repos_in_scope = coverage.repos_in_scope
+        audit.repos_with_scans = coverage.repos_with_scans
+        audit.newest_scan_at = coverage.newest_scan_at
         audit.findings_total = len(items)
         audit.findings_truncated = truncated
         # Persist the evidence set before the loop below: audit.set() re-reads the document

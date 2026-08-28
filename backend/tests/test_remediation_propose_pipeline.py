@@ -12,7 +12,13 @@ from app.core.config import settings
 from app.models.ai_fix_proposal import AIFixProposal
 from app.models.ai_remediation_job import RemediationJob
 from app.models.finding import DependencyEmbedded, EvidenceEmbedded, Finding, LocationEmbedded
-from app.services import ai_remediation_agent, ai_remediation_service, llm_client
+from app.models.ai_provider_config import AIProviderConfig
+from app.services import (
+    ai_provider_config_service,
+    ai_remediation_agent,
+    ai_remediation_service,
+    llm_client,
+)
 
 SNIPPET = "q = 'SELECT * FROM u WHERE id=' + uid"
 
@@ -65,6 +71,21 @@ def _mock_critic(monkeypatch, verdicts):
 
     monkeypatch.setattr(llm_client, "get_completion", fake)
     return calls
+
+
+def _mock_provider(monkeypatch):
+    """run_job resolves a live provider config before it does anything; stub it so the loop
+    itself is what the test exercises."""
+    cfg = AIProviderConfig(name="P", provider="anthropic", model_name="m", api_key_encrypted="x")
+
+    async def resolve(project_id=None):
+        return cfg
+
+    async def ready(config):
+        return True
+
+    monkeypatch.setattr(ai_provider_config_service, "resolve_active_config", resolve)
+    monkeypatch.setattr(ai_provider_config_service, "is_ready", ready)
 
 
 def _propose(finding, job):
@@ -326,5 +347,84 @@ def test_absolute_manifest_with_no_relative_fallback_degrades_to_a_basename(clie
         f, _ = await _seed(file="/tmp/zs-clones/abc/sub/pom.xml", kind="sca", dependency=dep)
         du = ai_remediation_service._issue_bundle(f, None)["dependency_update"]
         assert du["manifest"] == "pom.xml"
+
+    asyncio.run(run())
+
+
+# --- conditional critic + re-run dedupe ------------------------------------------------------
+
+
+def test_dependency_bump_skips_the_critic_but_records_why(client, monkeypatch):
+    """A manifest version bump is one string, and the target version comes from the advisory --
+    there is no drafted logic for the critic to be skeptical about, so it must not cost a call."""
+    agent = _mock_agent(monkeypatch, [(True, 95.0, '"left-pad": "1.3.0"')])
+    critic = _mock_critic(monkeypatch, [])
+
+    async def run():
+        dep = DependencyEmbedded(
+            package="left-pad", installed_version="1.0.0", fixed_version="1.3.0"
+        )
+        f, job = await _seed(file="package.json", kind="sca", dependency=dep)
+        proposal = await ai_remediation_service._propose_for_finding(f, job, "main", "anthropic", "m")
+        assert agent["n"] == 1
+        assert critic["n"] == 0, "the critic must not run for a dependency bump"
+        assert proposal.can_fix is True
+        assert proposal.critique == {"skipped": "dependency_bump"}
+        # The skip must be honest, not silent: confidence stays the drafter's own claim.
+        assert proposal.confidence_score == 95.0
+
+    asyncio.run(run())
+
+
+def test_dependency_bump_is_critiqued_when_the_skip_is_turned_off(client, monkeypatch):
+    _mock_agent(monkeypatch, [(True, 95.0, '"left-pad": "1.3.0"')])
+    critic = _mock_critic(monkeypatch, [{"verdict": "pass", "adjusted_confidence": 80}])
+    monkeypatch.setattr(settings, "remediation_critic_skip_dependency_bumps", False)
+
+    async def run():
+        dep = DependencyEmbedded(
+            package="left-pad", installed_version="1.0.0", fixed_version="1.3.0"
+        )
+        f, job = await _seed(file="package.json", kind="sca", dependency=dep)
+        proposal = await ai_remediation_service._propose_for_finding(f, job, "main", "anthropic", "m")
+        assert critic["n"] == 1
+        assert proposal.critique["verdict"] == "pass"
+
+    asyncio.run(run())
+
+
+def test_rerun_skips_findings_that_already_have_a_proposal(client, monkeypatch):
+    """The re-click saving: already-proposed findings cost no quota, so without this a second
+    'fix all' would re-spend a full agent run per finding to reproduce what is already on screen."""
+    agent = _mock_agent(monkeypatch, [(True, 90.0, "safe"), (True, 90.0, "safe")])
+    _mock_critic(monkeypatch, [{"verdict": "pass"}, {"verdict": "pass"}])
+    _mock_provider(monkeypatch)
+
+    async def run():
+        f, job = await _seed()
+        await ai_remediation_service.run_job(job)
+        assert agent["n"] == 1
+        assert await AIFixProposal.find(AIFixProposal.scan_id == "s1").count() == 1
+
+        rerun = RemediationJob(
+            kind="propose", project_id="p1", scan_id="s1", finding_ids=[str(f.id)],
+            scope_key="s1:propose", trace_id="t2",
+        )
+        await rerun.insert()
+        await ai_remediation_service.run_job(rerun)
+        assert agent["n"] == 1, "no second agent run for an already-proposed finding"
+        reloaded = await RemediationJob.get(rerun.id)
+        assert reloaded.status == "completed"
+        assert reloaded.skipped_existing == 1
+        assert reloaded.progress_total == 0
+
+        forced = RemediationJob(
+            kind="propose", project_id="p1", scan_id="s1", finding_ids=[str(f.id)],
+            scope_key="s1:propose", trace_id="t3", force=True,
+        )
+        await forced.insert()
+        await ai_remediation_service.run_job(forced)
+        assert agent["n"] == 2, "force=True must redraft"
+        assert (await RemediationJob.get(forced.id)).skipped_existing == 0
 
     asyncio.run(run())

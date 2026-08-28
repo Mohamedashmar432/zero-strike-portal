@@ -79,7 +79,12 @@ export type FrameworkSummary = {
   partial: number;
   not_applicable: number;
   needs_manual_review: number;
+  // Percentage of *code-assessable* controls that passed. NOT a compliance percentage -- the
+  // manual-only controls are not in the denominator. Always render it next to coverage_percent.
   compliance_score: number;
+  // assessed_total / controls_total, as a percentage: how much of the framework a code scanner
+  // can speak to at all, and so the ceiling on the number above.
+  coverage_percent: number;
 };
 
 /** The audit without its control bodies -- what the project's history list renders. */
@@ -102,8 +107,15 @@ export type ComplianceAuditSummary = {
 
 export type ComplianceAudit = ComplianceAuditSummary & {
   scan_ids: string[];
+  // Repo coverage of the selected scope. repos_with_scans < repos_in_scope means the audit only
+  // saw part of the project and the result under-represents it.
+  repos_in_scope: number;
+  repos_with_scans: number;
+  newest_scan_at: string | null;
   findings_truncated: boolean;
   ai_note: string | null;
+  // True when the backend returned an existing identical audit instead of re-running one.
+  reused: boolean;
   controls: ControlResult[];
 };
 
@@ -112,6 +124,8 @@ export type RunAuditInput = {
   scope: AuditScope;
   project_repo_ids: string[];
   depth: AuditDepth;
+  // Force a fresh run even when an identical completed audit over the same scans exists.
+  refresh?: boolean;
 };
 
 export function listFrameworks() {

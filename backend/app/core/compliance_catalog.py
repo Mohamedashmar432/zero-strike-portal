@@ -333,7 +333,7 @@ SOC2 = Framework(
 
 ISO27001 = Framework(
     key="iso27001",
-    title="ISO/IEC 27001:2022 (Annex A)",
+    title="ISO/IEC 27001:2022 ISMS (Annex A)",
     scope_note=(
         "A subset of Annex A -- the technological controls in A.8 that source code can evidence. "
         "The organisational (A.5), people (A.6) and physical (A.7) controls, and the ISMS clauses "
@@ -1028,9 +1028,21 @@ FRAMEWORKS: dict[str, Framework] = {
     f.key: f for f in (SOC2, ISO27001, GDPR, HIPAA, PCIDSS, NIST80053)
 }
 
-# Stable order for the wizard and the results view.
-FRAMEWORK_KEYS_ORDERED: list[str] = list(FRAMEWORKS)
+# The only frameworks a user can *run* today. The rest stay defined (and keep rendering on
+# audits that already ran against them) but are not offered: a control catalog is only
+# trustworthy if its evidence mapping has been reviewed control-by-control, and so far only
+# SOC 2 and ISO 27001 have been. Widening this is a deliberate act, not a side effect of
+# adding catalog data.
+SUPPORTED_FRAMEWORK_KEYS: frozenset[str] = frozenset({"soc2", "iso27001"})
+
+# Stable order for the wizard and the results view. Offered frameworks only -- get_framework
+# still resolves an unsupported key so a historical audit stays readable.
+FRAMEWORK_KEYS_ORDERED: list[str] = [k for k in FRAMEWORKS if k in SUPPORTED_FRAMEWORK_KEYS]
 
 
 def get_framework(key: str) -> Framework | None:
     return FRAMEWORKS.get(key)
+
+
+def is_supported(key: str) -> bool:
+    return key in SUPPORTED_FRAMEWORK_KEYS

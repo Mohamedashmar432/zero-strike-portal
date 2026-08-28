@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from beanie.operators import In
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
-from app.core.compliance_catalog import FRAMEWORK_KEYS_ORDERED, FRAMEWORKS
+from app.core.compliance_catalog import (
+    FRAMEWORK_KEYS_ORDERED,
+    FRAMEWORKS,
+    SUPPORTED_FRAMEWORK_KEYS,
+)
 from app.core.deps import get_current_user
 from app.core.timeutils import as_utc
 from app.models.compliance_audit import ComplianceAudit
@@ -95,14 +99,54 @@ def _to_list_item(audit: ComplianceAudit) -> ComplianceAuditListItem:
     )
 
 
-def _to_response(audit: ComplianceAudit) -> ComplianceAuditResponse:
+def _to_response(audit: ComplianceAudit, *, reused: bool = False) -> ComplianceAuditResponse:
     return ComplianceAuditResponse(
         **_to_list_item(audit).model_dump(),
         scan_ids=audit.scan_ids,
+        repos_in_scope=audit.repos_in_scope,
+        repos_with_scans=audit.repos_with_scans,
+        newest_scan_at=as_utc(audit.newest_scan_at),
         findings_truncated=audit.findings_truncated,
         ai_note=audit.ai_note,
+        reused=reused,
         controls=[c.model_dump() for c in audit.controls],
     )
+
+
+async def _identical_completed_audit(
+    project_id: str, payload: ComplianceAuditCreateRequest, scan_ids: list[str]
+) -> ComplianceAudit | None:
+    """The most recent completed audit that would produce byte-identical verdicts, if any.
+
+    The evaluator is a pure function of (frameworks, evidence set), and the evidence set is
+    fully determined by the resolved scan ids — so when those match, re-running spends an LLM
+    narrative pass to reproduce a result we already have. Depth is part of the key: a
+    deterministic audit is not a substitute for one with narrative, and vice versa.
+
+    Bounded scan: only the newest few audits are candidates, since a match older than that
+    means scans have moved on. Callers pass refresh=True to force a fresh run regardless.
+    """
+    wanted_frameworks = sorted(payload.frameworks)
+    wanted_scans = sorted(scan_ids)
+    recent = (
+        await ComplianceAudit.find(
+            ComplianceAudit.project_id == project_id,
+            ComplianceAudit.status == "completed",
+        )
+        .sort(-ComplianceAudit.created_at)
+        .limit(10)
+        .to_list()
+    )
+    for candidate in recent:
+        if (
+            sorted(candidate.frameworks) == wanted_frameworks
+            and candidate.scope == payload.scope
+            and candidate.depth == payload.depth
+            and sorted(candidate.project_repo_ids) == sorted(payload.project_repo_ids)
+            and sorted(candidate.scan_ids) == wanted_scans
+        ):
+            return candidate
+    return None
 
 
 async def _get_audit_or_404_and_authorize(audit_id: str, user: User) -> ComplianceAudit:
@@ -135,6 +179,15 @@ async def create_compliance_audit(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Unknown compliance framework(s): {', '.join(unknown)}"
         )
+    # A framework whose evidence mapping hasn't been reviewed control-by-control must not be
+    # runnable, even if its catalog entry exists (see SUPPORTED_FRAMEWORK_KEYS).
+    unsupported = [k for k in payload.frameworks if k not in SUPPORTED_FRAMEWORK_KEYS]
+    if unsupported:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Not available yet: {', '.join(unsupported)}. Supported frameworks: "
+            f"{', '.join(FRAMEWORK_KEYS_ORDERED)}.",
+        )
 
     if payload.depth == "with_ai_narrative" and not await ai_provider_config_service.ai_ready(project_id):
         where = (
@@ -150,9 +203,10 @@ async def create_compliance_audit(
 
     # No evidence means every code-assessable control would report "pass" off nothing at all,
     # which reads as a clean bill of health the scan data does not support. Refuse instead.
-    scan_ids = await project_stats_service.resolve_scope_scan_ids(
+    coverage = await project_stats_service.resolve_scope_coverage(
         project_id, payload.scope, payload.project_repo_ids
     )
+    scan_ids = coverage.scan_ids
     if not scan_ids:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -168,6 +222,11 @@ async def create_compliance_audit(
     ).first_or_none()
     if active is not None:
         return _to_response(active)
+
+    if not payload.refresh:
+        reusable = await _identical_completed_audit(project_id, payload, scan_ids)
+        if reusable is not None:
+            return _to_response(reusable, reused=True)
 
     now = datetime.now(timezone.utc)
     audit = ComplianceAudit(

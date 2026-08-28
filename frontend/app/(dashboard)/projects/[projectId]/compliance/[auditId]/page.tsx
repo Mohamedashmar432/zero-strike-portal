@@ -52,6 +52,10 @@ import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { cn } from "@/lib/utils";
 
+// Evidence older than this is called out. A month is the point where "the code has moved on"
+// stops being a quibble and starts being the reason a control reads Pass.
+const STALE_SCAN_DAYS = 30;
+
 // Ordered worst-first so the controls that need attention are at the top of each framework.
 const STATUS_ORDER = ["fail", "partial", "needs_manual_review", "not_applicable", "pass"];
 
@@ -112,24 +116,56 @@ function groupControlsByDomain(controls: ControlResult[]): {
   });
 }
 
-function ComplianceDisclaimer() {
+function ComplianceDisclaimer({ withAiNarrative }: { withAiNarrative: boolean }) {
   return (
     <Alert className="border-border/60 bg-muted/20">
       <Info className="size-4 text-muted-foreground" />
       <AlertTitle className="text-sm font-semibold">
         Automated Technical Assessment — Regulatory Alignment Preview
       </AlertTitle>
-      <AlertDescription className="text-xs text-muted-foreground">
-        Control status is evaluated from scanner evidence across project source code, dependencies,
-        and configurations. Governance, physical, and process controls cannot be evaluated from code
-        alone and are categorized under <em>Needs manual review</em>.
+      <AlertDescription className="space-y-1.5 text-xs text-muted-foreground">
+        <p>
+          Every status here is decided by fixed rules over scanner evidence — never by an AI. A{" "}
+          <em>Pass</em> means the scanner found nothing matching that control, which is not the same
+          as evidence the control is implemented.
+        </p>
+        <p>
+          Governance, physical, and process controls cannot be evaluated from code at all. They are
+          reported as <em>Needs manual review</em> — not as a failure, and not as a pass.
+        </p>
+        {withAiNarrative && (
+          <p>
+            AI explanations on failing controls are <strong>advisory prose only</strong>. They are
+            written after the status is decided and cannot change it.
+          </p>
+        )}
       </AlertDescription>
     </Alert>
   );
 }
 
 /**
- * Azure-style circular / radial compliance posture score card.
+ * How much of a framework a code scanner can speak to at all, as a percentage.
+ *
+ * Derived, never read from `summary.coverage_percent` — audits that ran before that field
+ * existed have no value stored, and Pydantic serialises the gap as `0`, not `null`. A `??`
+ * fallback therefore would NOT fire, and a historical audit would claim "only 0% of this
+ * framework can be assessed from code", which is exactly the kind of false line in a
+ * compliance report this whole area is meant to prevent. assessed_total/controls_total are on
+ * every summary ever written, so recomputing is both cheaper and always right.
+ */
+export function coveragePercentOf(summary: FrameworkSummary): number {
+  if (summary.controls_total <= 0) return 0;
+  return Math.round((summary.assessed_total / summary.controls_total) * 100);
+}
+
+/**
+ * Per-framework score card.
+ *
+ * The score is passed / code-assessable, so it is deliberately NOT called a compliance score:
+ * the manual-only controls are outside its denominator, and a framework where the scanner can
+ * speak to a third of the controls can read 100% while two thirds are unassessed. The coverage
+ * line under the number is what keeps that from being a lie by omission.
  */
 function PostureGaugeCard({ summary }: { summary: FrameworkSummary }) {
   const score =
@@ -137,10 +173,12 @@ function PostureGaugeCard({ summary }: { summary: FrameworkSummary }) {
     (summary.assessed_total > 0
       ? Math.round((summary.passed / summary.assessed_total) * 100)
       : 0);
+  const coverage = coveragePercentOf(summary);
 
   let scoreColor = "text-status-success";
   let scoreBg = "bg-status-success/10 border-status-success/30";
-  let ratingLabel = "High Alignment";
+  // Never "High Alignment": the number speaks only to the controls a scanner can see.
+  let ratingLabel = "No scan-evidenced gaps";
 
   if (score < 60) {
     scoreColor = "text-severity-critical";
@@ -173,11 +211,26 @@ function PostureGaugeCard({ summary }: { summary: FrameworkSummary }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row sm:items-start">
-          <div className="flex items-baseline gap-2">
-            <span className={cn("text-4xl font-extrabold tracking-tight tabular-nums", scoreColor)}>
-              {score}%
-            </span>
-            <span className="text-xs text-muted-foreground">Compliance Score</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-2">
+              <span
+                className={cn("text-4xl font-extrabold tracking-tight tabular-nums", scoreColor)}
+              >
+                {score}%
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Scan-evidence score
+                <span className="block text-[10px]">
+                  {summary.passed} of {summary.assessed_total} code-assessable controls
+                </span>
+              </span>
+            </div>
+            <p className="max-w-xs text-[11px] leading-relaxed text-muted-foreground">
+              Not a compliance percentage. Only {coverage}% of this framework&apos;s{" "}
+              {summary.controls_total} controls can be assessed from code at all — the other{" "}
+              {summary.needs_manual_review} need manual review and are excluded from the number
+              above.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -413,29 +466,44 @@ function ControlRow({
             </div>
           )}
 
-          {/* AI Explanation */}
-          {control.ai_explanation && (
-            <div className="rounded-lg border border-ai/20 bg-ai/5 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ai">
-                <Sparkles className="size-3.5" />
-                AI Auditor Analysis
-              </p>
-              <p className="mt-1.5 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-                {control.ai_explanation}
-              </p>
-            </div>
-          )}
-
-          {/* AI Remediation */}
-          {control.ai_remediation && (
-            <div className="rounded-lg border border-status-success/20 bg-status-success/5 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-status-success">
-                <Code2 className="size-3.5" />
-                AI Suggested Code Fix
-              </p>
-              <p className="mt-1.5 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-                {control.ai_remediation}
-              </p>
+          {/* AI narrative. Both blocks share the `ai` token and carry the advisory tag: the
+              status above is rule-based, and nothing here can move it. The remediation block
+              deliberately does NOT use the success colour, which reads as a verdict. */}
+          {(control.ai_explanation || control.ai_remediation) && (
+            <div className="space-y-2 rounded-lg border border-ai/20 bg-ai/5 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ai">
+                  <Sparkles className="size-3.5" />
+                  AI commentary
+                </p>
+                <span className="rounded-md bg-ai/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-ai">
+                  Advisory
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Written after the status was decided. It cannot change the verdict above.
+                </span>
+              </div>
+              {control.ai_explanation && (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Why these findings matter here
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+                    {control.ai_explanation}
+                  </p>
+                </div>
+              )}
+              {control.ai_remediation && (
+                <div>
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Code2 className="size-3" />
+                    Suggested engineering steps
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+                    {control.ai_remediation}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -743,6 +811,59 @@ function FrameworkDashboard({
 }
 
 /**
+ * "This result is only as complete as the scans in scope."
+ *
+ * A project with nine repos and scans on two produces an audit that looks exactly as confident
+ * as one with full coverage — the controls simply saw less evidence, and less evidence reads as
+ * `pass`. So an incomplete scope is called out as a warning, not left implicit in a scan count.
+ */
+export function scanCoverageGaps(audit: ComplianceAudit): {
+  missingRepos: number;
+  staleDays: number;
+  hasGap: boolean;
+} {
+  const missingRepos = Math.max(0, audit.repos_in_scope - audit.repos_with_scans);
+  // Evidence age is measured against when the audit RAN, not against now: both are server
+  // values, so the sentence stays true (and pure) however long after the fact it is read.
+  const ranAt = audit.completed_at ?? audit.created_at;
+  const staleDays =
+    audit.newest_scan_at && ranAt
+      ? Math.floor((Date.parse(ranAt) - Date.parse(audit.newest_scan_at)) / 86_400_000)
+      : 0;
+  return { missingRepos, staleDays, hasGap: missingRepos > 0 || staleDays >= STALE_SCAN_DAYS };
+}
+
+function ScanCoverageNotice({ audit }: { audit: ComplianceAudit }) {
+  const { missingRepos: missing, staleDays, hasGap } = scanCoverageGaps(audit);
+
+  if (!hasGap) return null;
+
+  return (
+    <Alert className="border-severity-medium/40 bg-severity-medium/5">
+      <AlertTriangle className="size-4 text-severity-medium" />
+      <AlertTitle className="text-sm font-semibold">This audit saw only part of the project</AlertTitle>
+      <AlertDescription className="space-y-1 text-xs text-muted-foreground">
+        {missing > 0 && (
+          <p>
+            <strong className="text-foreground">
+              {missing} of {audit.repos_in_scope} repositories in scope have no completed scan.
+            </strong>{" "}
+            Their code contributed no evidence, so controls may read <em>Pass</em> simply because
+            nothing was looked at. Scan them and re-run for a complete picture.
+          </p>
+        )}
+        {staleDays >= STALE_SCAN_DAYS && (
+          <p>
+            The newest scan behind this audit was already {staleDays} days old when the audit ran.
+            Anything committed after that scan is not represented.
+          </p>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/**
  * Main Audit Results View with Framework Switcher Tabs.
  */
 function AuditResult({ audit, projectId }: { audit: ComplianceAudit; projectId: string }) {
@@ -756,7 +877,8 @@ function AuditResult({ audit, projectId }: { audit: ComplianceAudit; projectId: 
 
   return (
     <div className="space-y-6">
-      {/* Evidence Scope Info Banner */}
+      {/* Evidence scope. An audit is only as complete as the scans behind it, so the repo
+          coverage is stated here rather than left for the reader to infer from a scan count. */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/20 px-3.5 py-2.5 text-xs text-muted-foreground">
         <span>
           Assessed <strong className="text-foreground">{audit.findings_total} finding(s)</strong>{" "}
@@ -769,6 +891,8 @@ function AuditResult({ audit, projectId }: { audit: ComplianceAudit; projectId: 
           </span>
         )}
       </div>
+
+      <ScanCoverageNotice audit={audit} />
 
       {audit.ai_note && (
         <Alert className="border-border/60 bg-muted/15">
@@ -854,7 +978,9 @@ export default function ComplianceAuditPage() {
     <div className="space-y-6">
       <PageHeader
         title="Regulatory Compliance Dashboard"
-        description="Azure-aligned continuous regulatory posture assessment evaluated against source code findings."
+        // Not "continuous": an audit is a point-in-time read of the scans that existed when it
+        // ran, started by hand. Nothing here re-evaluates itself.
+        description="A point-in-time control assessment, evaluated from the scan findings in scope when this audit ran."
         breadcrumb={
           <Breadcrumbs
             items={[
@@ -899,7 +1025,7 @@ export default function ComplianceAuditPage() {
         }
       />
 
-      <ComplianceDisclaimer />
+      <ComplianceDisclaimer withAiNarrative={audit?.depth === "with_ai_narrative"} />
 
       {failed && (
         <Alert variant="destructive">

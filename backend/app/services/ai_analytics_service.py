@@ -5,7 +5,9 @@ scopes to that one project. That single parameter is the only difference between
 dashboards, which is why one component can render both.
 
 Aggregation shape: one $facet per request, so a dashboard is a single round trip rather than
-five. The facets share the same $match, so the time window and scope are applied once.
+five. The outer $match applies the scope once and spans two windows (this period and the one
+before it); each facet's own leading $match picks the window it reports on, so the
+period-over-period comparison costs no extra query.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -51,13 +53,61 @@ _SUMS = {
 }
 
 
+_ZERO_ROW: dict = {"requests": 0, "cost_usd": 0.0}
+
+
+def _with_deltas(row: dict, previous: dict[str, dict]) -> dict:
+    """Attach the change vs the previous window of the same length to one by-feature row."""
+    prev = previous.get(row["feature"], _ZERO_ROW)
+    return {
+        **row,
+        "prev_cost_usd": round(prev.get("cost_usd", 0.0), 6),
+        "prev_requests": prev.get("requests", 0),
+        "cost_delta_usd": round(row["cost_usd"] - prev.get("cost_usd", 0.0), 6),
+        "requests_delta": row["requests"] - prev.get("requests", 0),
+    }
+
+
+def _vanished_features(current: list[dict], previous: dict[str, dict]) -> list[dict]:
+    """Rows for features that spent in the previous window and nothing in this one. A feature
+    that stopped is as much of an explanation for a spend change as one that started."""
+    seen = {r["feature"] for r in current}
+    return [
+        {
+            "feature": key,
+            **{k: (0 if isinstance(v, int) else 0.0) for k, v in row.items() if k != "success_rate"},
+            "success_rate": 100.0,
+            "prev_cost_usd": round(row.get("cost_usd", 0.0), 6),
+            "prev_requests": row.get("requests", 0),
+            "cost_delta_usd": round(-row.get("cost_usd", 0.0), 6),
+            "requests_delta": -row.get("requests", 0),
+        }
+        for key, row in previous.items()
+        if key not in seen and row.get("requests", 0) > 0
+    ]
+
+
 async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
-    """Totals, a daily time series, and breakdowns by feature / model / (portal only) project."""
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    """Totals, a daily time series, and breakdowns by feature / model / (portal only) project.
+
+    Every window is also compared against the one immediately before it, per feature. "Which
+    feature spent the money" is only half an answer; "spend rose $12 and remediation is $11 of
+    it" is the half someone can act on.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    since_prev = now - timedelta(days=days * 2)
+
+    # The outer $match spans BOTH windows; each facet narrows to the one it reports on. One
+    # round trip still, and the previous window costs no extra query.
+    current = {"$match": {"created_at": {"$gte": since}}}
+    previous = {"$match": {"created_at": {"$lt": since}}}
 
     facets: dict = {
-        "totals": [{"$group": {"_id": None, **_SUMS}}],
+        "totals": [current, {"$group": {"_id": None, **_SUMS}}],
+        "prev_totals": [previous, {"$group": {"_id": None, **_SUMS}}],
         "timeseries": [
+            current,
             {
                 "$group": {
                     "_id": {"$dateToString": {"format": _DAY_FORMAT, "date": "$created_at"}},
@@ -67,16 +117,20 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
             {"$sort": {"_id": 1}},
         ],
         "by_feature": [
+            current,
             {"$group": {"_id": "$feature", **_SUMS}},
             {"$sort": {"cost_usd": -1, "_id": 1}},
         ],
+        "prev_by_feature": [previous, {"$group": {"_id": "$feature", **_SUMS}}],
         "by_model": [
+            current,
             {"$group": {"_id": {"provider": "$provider", "model_name": "$model_name"}, **_SUMS}},
             {"$sort": {"cost_usd": -1}},
         ],
     }
     if project_id is None:
         facets["by_project"] = [
+            current,
             {"$group": {"_id": "$project_id", **_SUMS}},
             {"$sort": {"cost_usd": -1}},
             # ponytail: 50 projects is far past what the chart can render legibly; the log table
@@ -85,21 +139,28 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
         ]
 
     cursor = AIUsageEvent.get_pymongo_collection().aggregate(
-        [{"$match": _match(project_id, since)}, {"$facet": facets}]
+        [{"$match": _match(project_id, since_prev)}, {"$facet": facets}]
     )
     rows = await cursor.to_list(length=1)
     faceted = rows[0] if rows else {}
 
     totals_rows = faceted.get("totals") or []
+    prev_totals_rows = faceted.get("prev_totals") or []
+    prev_totals = _totals_projection(prev_totals_rows[0] if prev_totals_rows else {})
+    prev_by_feature = {
+        (r["_id"] or "unknown"): _totals_projection(r) for r in faceted.get("prev_by_feature", [])
+    }
     result = {
         "days": days,
         "totals": _totals_projection(totals_rows[0] if totals_rows else {}),
+        "previous_totals": prev_totals,
         "timeseries": [
             {"date": r["_id"], **{k: v for k, v in _totals_projection(r).items() if k != "avg_duration_ms"}}
             for r in faceted.get("timeseries", [])
         ],
         "by_feature": [
-            {"feature": r["_id"] or "unknown", **_totals_projection(r)} for r in faceted.get("by_feature", [])
+            _with_deltas({"feature": r["_id"] or "unknown", **_totals_projection(r)}, prev_by_feature)
+            for r in faceted.get("by_feature", [])
         ],
         "by_model": [
             {
@@ -111,6 +172,7 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
         ],
         "by_project": [],
     }
+    result["by_feature"].extend(_vanished_features(result["by_feature"], prev_by_feature))
 
     if project_id is None:
         rows = faceted.get("by_project", [])

@@ -72,6 +72,14 @@ export function ProjectAutoFixSection({
       // A run draws down the scan's allowance, so the readout in the control row
       // must not go stale.
       qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.quota(scanId) });
+      // A trim is announced at the moment of the click, not left to be inferred from a
+      // shorter-than-expected result list.
+      if (job.quota_skipped > 0) {
+        toast.warning(
+          `${job.quota_skipped} finding(s) were not queued — this scan's Auto-Fix allowance is ` +
+            "full. Request more headroom from the allowance chip to include them."
+        );
+      }
     },
     // Surfaces the 409 from an exhausted allowance verbatim, which already tells the
     // user to request more headroom.
@@ -161,8 +169,11 @@ export function ProjectAutoFixSection({
             progressCompleted={data?.progress_completed}
             progressTotal={data?.progress_total}
           />
+          {/* "Fix remaining", not "Regenerate": a finding that already has a proposal is skipped
+              rather than redrafted, because a redraft costs a full agent run and no quota. Use
+              Regenerate on an individual proposal to redraft that one. */}
           <Button onClick={() => trigger.mutate()} disabled={active || trigger.isPending}>
-            <Wand2 /> {proposals.length ? "Regenerate fixes" : "Generate fixes"}
+            <Wand2 /> {proposals.length ? "Fix remaining findings" : "Generate fixes"}
           </Button>
         </div>
       </div>
@@ -191,6 +202,29 @@ export function ProjectAutoFixSection({
           <AlertDescription>This runs in the background — the page updates automatically.</AlertDescription>
         </Alert>
       )}
+      {/* Why the last run covered fewer findings than were submitted. Without this the missing
+          proposals read as "the AI couldn't fix them" rather than "it never looked at them". */}
+      {status === "completed" && (data?.quota_skipped || data?.skipped_existing) ? (
+        <Alert>
+          <AlertTitle>This run did not cover every finding submitted</AlertTitle>
+          <AlertDescription className="space-y-1">
+            {data.quota_skipped > 0 && (
+              <p>
+                <strong>{data.quota_skipped} finding(s) were blocked by the allowance.</strong> This
+                scan&apos;s Auto-Fix budget is full — request more headroom from the allowance chip
+                above, then run again to include them.
+              </p>
+            )}
+            {data.skipped_existing > 0 && (
+              <p>
+                {data.skipped_existing} finding(s) already had a proposal and were left as they are —
+                no AI call was spent on them. Use <em>Regenerate</em> on an individual proposal to
+                redraft it.
+              </p>
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {isLoading || (active && !proposals.length) ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">

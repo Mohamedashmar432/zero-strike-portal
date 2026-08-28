@@ -348,14 +348,24 @@ async def _propose_for_finding(
     # draft stands exactly as it would have pre-critic.
     excerpt = _file_window(workdir, result.file_path or loc.file, loc.start_line)
     critique_artifact: dict | None = None
-    verdict_obj = await remediation_critic.critique(
-        bundle, result, project_id=job.project_id, scan_id=job.scan_id, file_excerpt=excerpt
+    skip_critic = (
+        verdict.strategy == "dependency-bump"
+        and settings.remediation_critic_skip_dependency_bumps
+    )
+    verdict_obj = (
+        None
+        if skip_critic
+        else await remediation_critic.critique(
+            bundle, result, project_id=job.project_id, scan_id=job.scan_id, file_excerpt=excerpt
+        )
     )
     if verdict_obj is None:
         # Distinguish the three reasons a critique didn't happen — an E2E run showed them collapsed
         # into one string, which made the UI tell a reviewer "the patch is unreviewed, read it
         # carefully" for findings where there was no patch to review in the first place.
-        if not settings.remediation_critic_enabled:
+        if skip_critic:
+            critique_artifact = remediation_critic.skipped("dependency_bump")
+        elif not settings.remediation_critic_enabled:
             critique_artifact = remediation_critic.skipped("disabled")
         elif not result.can_fix:
             critique_artifact = remediation_critic.skipped("no_patch")
@@ -518,22 +528,9 @@ async def run_job(job: RemediationJob) -> None:
             repo = await ProjectRepo.get(scan.project_repo_id)
         branch = job.target_ref or (repo.selected_branch if repo else None) or "main"
 
-        # Clone-on-propose (best-effort): lets the agent explore the real codebase, and generate the
-        # cached per-repo overview. Degrades to the stored-excerpt path when a clone isn't possible.
-        workdir = await _try_clone(scan, repo, branch, job)
-        overview_md = None
-        if workdir is not None:
-            overview_md = await remediation_project_doc_service.get_or_generate(
-                project_id=job.project_id,
-                project_repo_id=scan.project_repo_id if scan else None,
-                repo_url=scan.repo_url if scan else None,
-                base_commit_sha=scan.git_commit if scan else None,
-                workdir=workdir,
-                provider=provider,
-                model=model,
-                scan_id=job.scan_id,
-            )
-
+        # Resolve the work list BEFORE cloning: when everything on it already has a proposal there
+        # is nothing to clone for, and the clone would otherwise also pay for an overview-doc LLM
+        # call on a job that ends up drafting nothing.
         await _set_stage(job, "triage")
         cfg = await remediation_settings_service.get_settings()
         findings: list[Finding] = []
@@ -545,7 +542,43 @@ async def run_job(job: RemediationJob) -> None:
             if f is not None:
                 findings.append(f)
 
+        # A finding that already has a proposal costs nothing under the per-scan quota (it was
+        # charged when first drafted), so a second "fix all" click would re-spend a full
+        # tool-calling run per finding to reproduce what is already on screen. Skip them unless the
+        # caller explicitly asked for a redraft; the count is reported, never silent. A
+        # single-finding re-request goes through the other trigger, which always redrafts.
+        if not job.force:
+            already = {
+                p.finding_id
+                for p in await AIFixProposal.find(AIFixProposal.scan_id == job.scan_id).to_list()
+            }
+            fresh = [f for f in findings if str(f.id) not in already]
+            skipped = len(findings) - len(fresh)
+            if skipped:
+                logger.info("skipping findings that already have a proposal", count=skipped)
+                await job.set({RemediationJob.skipped_existing: skipped})
+            findings = fresh
+
         await job.set({RemediationJob.progress_total: len(findings), RemediationJob.updated_at: datetime.now(timezone.utc)})
+
+        # Clone-on-propose (best-effort): lets the agent explore the real codebase, and generate the
+        # cached per-repo overview. Degrades to the stored-excerpt path when a clone isn't possible.
+        overview_md = None
+        if findings:
+            await _set_stage(job, "cloning")
+            workdir = await _try_clone(scan, repo, branch, job)
+            if workdir is not None:
+                overview_md = await remediation_project_doc_service.get_or_generate(
+                    project_id=job.project_id,
+                    project_repo_id=scan.project_repo_id if scan else None,
+                    repo_url=scan.repo_url if scan else None,
+                    base_commit_sha=scan.git_commit if scan else None,
+                    workdir=workdir,
+                    provider=provider,
+                    model=model,
+                    scan_id=job.scan_id,
+                )
+
         await _set_stage(job, "proposing")
         fixable = 0
         for done, finding in enumerate(findings, start=1):
