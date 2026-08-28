@@ -562,7 +562,17 @@ def connection_error_message(exc: Exception) -> str:
     lowered = str(exc).lower()
     if "authentication" in lowered or "invalid x-api-key" in lowered or "401" in lowered:
         return "The provider rejected this API key. Check the key and try again."
-    if "not found" in lowered or "404" in lowered or "does not exist" in lowered:
+    # "not exist" also covers OpenAI's "does not exist"; DeepSeek instead answers with
+    # "The supported API model names are X, Y, and Z, but you passed <what you typed>".
+    # Without that last clause a mistyped model (e.g. a stray "openai/" prefix on a
+    # deepseek config) fell through to the generic "check the provider, model and key",
+    # which points at three fields when the provider already told us it was the model.
+    if (
+        "not found" in lowered
+        or "404" in lowered
+        or "not exist" in lowered
+        or "model names are" in lowered
+    ):
         return "The key works, but the provider doesn't recognise this model name. Check the model id."
     if "rate limit" in lowered or "429" in lowered or "quota" in lowered:
         return "The provider is rate-limiting or out of quota for this key. Try again later."

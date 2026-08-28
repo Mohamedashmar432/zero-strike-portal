@@ -51,6 +51,14 @@ def test_connection_error_messages_are_actionable_not_raw_exceptions():
         'litellm.AuthenticationError: AnthropicException - {"type":"authentication_error"}': "API key",
         "litellm.NotFoundError: model claude-nope does not exist": "model id",
         "litellm.RateLimitError: quota exceeded for this key": "rate-limiting",
+        # A stray provider prefix on the model name is a real thing people type. DeepSeek
+        # names the offending field for us; say so instead of pointing at all three.
+        (
+            "litellm.BadRequestError: DeepseekException - "
+            '{"error":{"message":"The supported API model names are deepseek-v4-pro, '
+            "deepseek-v4-flash, and deepseek-v4-flash-vision-exp, but you passed "
+            'openai/deepseek-v4-flash.\"}}'
+        ): "model id",
     }
     for raw, expected_fragment in cases.items():
         msg = llm_client.connection_error_message(llm_client.LLMPermanentError(raw))
