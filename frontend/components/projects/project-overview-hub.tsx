@@ -41,6 +41,16 @@ import type { ProjectAiUsage } from "@/lib/api/ai";
 import type { SeverityCounts } from "@/lib/api/dashboard";
 
 /**
+ * The DAST panel below is hardcoded mockup data — "api.payments.internal",
+ * "24 / 24 Routes", "0 Active Breaches" — and there is no DAST engine or endpoint
+ * behind it. The DAST tab it links to is already `hidden` in project-sidebar.tsx,
+ * so this panel was the last route into it. Kept behind a flag rather than deleted
+ * so the layout survives for whenever a real engine lands.
+ * ponytail: a const, not an env var — flip it here when there's something to show.
+ */
+const SHOW_DAST_PREVIEW = false;
+
+/**
  * Static class map. Tailwind scans source text, so `bg-${tone}-tint` produces no
  * CSS at all — the classes must appear literally somewhere for them to exist.
  */
@@ -231,6 +241,7 @@ export function ProjectOverviewHub({
       </Card>
 
       {/* 3. DAST Live Endpoints — Matching the Same Design as SAST */}
+      {SHOW_DAST_PREVIEW && (
       <Card className="border-border/80 bg-card/60">
         <CardHeader className="p-4 pb-3 border-b border-border/60">
           <div className="flex items-center justify-between">
@@ -343,6 +354,7 @@ export function ProjectOverviewHub({
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* 4. Compliance posture — REAL audit results only.
              This panel previously hardcoded "SOC 2 Type II 92% Aligned / 46 of 50

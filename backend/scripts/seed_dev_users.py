@@ -7,12 +7,19 @@ in-memory `mongomock_motor` client and never touches a real database).
 
 Passwords are documented in docs/TEST_USERS.md — keep both in sync if changed.
 
-Usage (from backend/): ./.venv/Scripts/python scripts/seed_dev_users.py
+Usage (from backend/):
+    ./.venv/Scripts/python scripts/seed_dev_users.py                # seed / resync only
+    ./.venv/Scripts/python scripts/seed_dev_users.py --reset        # wipe first, then seed
+    ./.venv/Scripts/python scripts/seed_dev_users.py --reset --yes  # ...without the prompt
 """
 
+import argparse
 import asyncio
 from datetime import datetime, timezone
 
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from app.core.config import settings
 from app.core.security import hash_password
 from app.db.mongo import connect_to_mongo
 from app.models.project import Project
@@ -75,7 +82,30 @@ async def _upsert_membership(project_id: str, user: User, role: str, invited_by:
     ).insert()
 
 
-async def seed() -> None:
+def _target() -> str:
+    """Host + db of the wipe target, with credentials stripped — this gets printed."""
+    return f"{settings.mongodb_uri.split('@')[-1].split('/')[0]}/{settings.mongodb_db_name}"
+
+
+async def _drop_database() -> None:
+    """Dropped (not emptied) *before* connect_to_mongo(), so Beanie's init recreates every
+    index — emptying after init would leave e.g. the unique index on users.email behind, and
+    dropping after it would leave the collections with no indexes at all until a restart.
+
+    This also clears the GridFS `scanner_binaries` bucket: republish binaries from the
+    release pipeline afterwards.
+    """
+    client = AsyncIOMotorClient(settings.mongodb_uri)
+    try:
+        await client.drop_database(settings.mongodb_db_name)
+    finally:
+        client.close()
+
+
+async def seed(reset: bool = False) -> None:
+    if reset:
+        await _drop_database()
+        print(f"Dropped database {_target()}")
     await connect_to_mongo()
 
     admin, owner, collaborator = [await _upsert_user(spec) for spec in USERS]
@@ -102,4 +132,18 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    parser = argparse.ArgumentParser(description="Seed local-dev users; optionally wipe first.")
+    parser.add_argument(
+        "--reset", action="store_true", help="Drop the entire target database before seeding."
+    )
+    parser.add_argument("--yes", action="store_true", help="Skip the --reset confirmation prompt.")
+    args = parser.parse_args()
+
+    # Irreversible and the db name is identical in every environment (`zerostrike`), so the
+    # only thing separating dev from prod here is which URI is in .env. Make the operator read it.
+    if args.reset and not args.yes:
+        print(f"About to DROP EVERYTHING in {_target()} (users, scans, findings, binaries).")
+        if input("Type the database name to confirm: ").strip() != settings.mongodb_db_name:
+            raise SystemExit("Aborted.")
+
+    asyncio.run(seed(reset=args.reset))
