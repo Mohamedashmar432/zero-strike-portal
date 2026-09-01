@@ -37,6 +37,16 @@ export function addProjectRepo(
         selected_branch: string;
         label?: string;
       }
+    | {
+        // A private GitHub repo reached by URL + a one-off PAT (see repo-lookup.ts) — no saved
+        // credential, and no organization: the backend derives it from the repo owner.
+        provider: "github";
+        pat: string;
+        repo_full_name: string;
+        clone_url: string;
+        selected_branch: string;
+        label?: string;
+      }
 ) {
   return apiFetch<ProjectRepo>(`/projects/${projectId}/repos`, {
     method: "POST",

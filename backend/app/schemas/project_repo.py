@@ -30,9 +30,14 @@ class ProjectRepoCreateRequest(BaseModel):
             return self
         if self.credential_id:
             return self
-        if self.provider and self.pat and self.organization:
-            return self
-        raise ValueError("Provide credential_id, provider+pat+organization, or public=true (GitHub only)")
+        if self.provider and self.pat:
+            # organization is only meaningful to Azure DevOps (it's the dev.azure.com/{org} segment).
+            # For GitHub it's a display label the API never reads, so it's derived from the repo
+            # owner rather than asked for — see project_repo_service.add_repo.
+            if self.provider == "github" or self.organization:
+                return self
+            raise ValueError("organization is required for Azure DevOps")
+        raise ValueError("Provide credential_id, provider+pat, or public=true (GitHub only)")
 
 
 class ProjectRepoUpdateRequest(BaseModel):

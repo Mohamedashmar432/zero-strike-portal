@@ -279,7 +279,7 @@ def test_clone_uses_basic_auth_for_azure_devops_scheme(client, monkeypatch, tmp_
     asyncio.run(run())
     import base64
 
-    expected = base64.b64encode(b":ado-pat").decode()
+    expected = base64.b64encode(b"x-access-token:ado-pat").decode()
     assert captured_env["GIT_CONFIG_VALUE_0"] == f"AUTHORIZATION: Basic {expected}"
 
 

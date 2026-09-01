@@ -432,3 +432,38 @@ def test_collaborator_cannot_add_repo(client):
         headers=_headers(collaborator),
     )
     assert r.status_code == 403
+
+
+def test_add_github_repo_by_url_and_pat_needs_no_organization(client):
+    """The "paste the URL + a token" flow sends no organization — GitHub's API never scopes by it
+    (only Azure DevOps does), so it's derived from the repo owner instead of asked for."""
+    owner = register_and_login(client, email="prepo-url@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "github",
+            "pat": "ghp_url_flow",
+            "repo_full_name": "PSG-Global-Solutions/psgcompass_adminaccounts_api",
+            "clone_url": "https://github.com/PSG-Global-Solutions/psgcompass_adminaccounts_api.git",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["organization"] == "PSG-Global-Solutions"
+
+    # Azure DevOps keeps the requirement: there the org is a real path segment, not a label.
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos",
+        json={
+            "provider": "azure_devops",
+            "pat": "ado_pat",
+            "repo_full_name": "team/repo",
+            "clone_url": "https://dev.azure.com/org/team/_git/repo",
+            "selected_branch": "main",
+        },
+        headers=_headers(owner),
+    )
+    assert r.status_code == 422

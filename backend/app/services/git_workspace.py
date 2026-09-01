@@ -55,7 +55,7 @@ def _token_env(token: str | None, auth_scheme: str) -> dict:
         env["GIT_CONFIG_COUNT"] = "1"
         env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
         if auth_scheme == "basic":
-            basic = base64.b64encode(f":{token}".encode()).decode()
+            basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
             env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Basic {basic}"
         else:
             env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Bearer {token}"

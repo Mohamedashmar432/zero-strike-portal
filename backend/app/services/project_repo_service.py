@@ -36,7 +36,9 @@ async def add_repo(project_id: str, payload: ProjectRepoCreateRequest, user: Use
         source_credential_id = str(credential.id)
     else:
         provider = payload.provider
-        organization = payload.organization
+        # GitHub never sends one (the API doesn't scope by org) — the owner segment is the honest
+        # value for the display column, instead of a field the user has to guess at.
+        organization = payload.organization or payload.repo_full_name.partition("/")[0]
         ado_project = payload.ado_project
         pat_encrypted = security.encrypt_secret(payload.pat)
         source_credential_id = None

@@ -11,7 +11,7 @@ from app.services.git_workspace import GitWorkspaceError, _token_env
 
 def test_token_env_basic_and_bearer():
     basic = _token_env("tok", "basic")
-    assert basic["GIT_CONFIG_VALUE_0"] == f"AUTHORIZATION: Basic {base64.b64encode(b':tok').decode()}"
+    assert basic["GIT_CONFIG_VALUE_0"] == f"AUTHORIZATION: Basic {base64.b64encode(b'x-access-token:tok').decode()}"
     assert basic["GIT_TERMINAL_PROMPT"] == "0"
     bearer = _token_env("tok", "bearer")
     assert bearer["GIT_CONFIG_VALUE_0"] == "AUTHORIZATION: Bearer tok"

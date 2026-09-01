@@ -38,3 +38,14 @@ class RepoResponse(BaseModel):
 
 class BranchResponse(BaseModel):
     name: str
+
+
+class RepoLookupRequest(BaseModel):
+    # "owner/repo" — the frontend strips a pasted https://github.com/... URL down to this.
+    repo_full_name: str
+    pat: str
+
+
+class RepoLookupResponse(BaseModel):
+    repo: RepoResponse
+    branches: list[BranchResponse]

@@ -79,6 +79,28 @@ async def list_branches(pat: str, owner: str, repo: str) -> list[dict]:
     return await _fetch_branches(owner, repo, _auth_headers(pat))
 
 
+async def fetch_repo(pat: str, owner: str, repo: str) -> dict:
+    """Look up one repo by name with a PAT — the "paste the URL + a token" connect flow, which
+    skips /user/repos entirely (that listing only returns a page at a time, so a repo outside the
+    50 most-recently-updated was unreachable through the picker)."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{API_BASE}/repos/{owner}/{repo}", headers=_auth_headers(pat), timeout=15)
+    if resp.status_code == 404:
+        # 404 is also what GitHub returns for a repo the token simply can't see, so say both.
+        raise RepoPatError(f"{owner}/{repo} not found, or this token can't access it")
+    if resp.status_code != 200:
+        raise RepoPatError("GitHub rejected this token — check it hasn't expired and has repo access")
+    body = resp.json()
+    return {
+        "id": str(body["id"]),
+        "name": body["name"],
+        "full_name": body["full_name"],
+        "clone_url": body["clone_url"],
+        "private": body["private"],
+        "default_branch": body.get("default_branch"),
+    }
+
+
 async def fetch_public_repo(owner: str, repo: str) -> dict:
     """Unauthenticated lookup, used to connect a public repo to a project with no PAT at all. Raises
     RepoPatError if the repo doesn't exist or (the actual safety check, since anyone could claim a

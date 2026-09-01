@@ -17,12 +17,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApiError } from "@/lib/api/client";
 import { addProjectRepo, type ProjectRepo } from "@/lib/api/project-repos";
 import { getPublicGithubRepo, listPublicGithubBranches, parseGithubOwnerRepo } from "@/lib/api/public-repos";
+import { lookupGithubRepo } from "@/lib/api/repo-lookup";
 import { queryKeys } from "@/lib/api/query-keys";
 import {
   listCredentialBranches,
   listCredentialRepos,
   listRepoCredentials,
   type Provider,
+  type Branch,
   type Repo,
 } from "@/lib/api/repo-credentials";
 
@@ -37,7 +39,42 @@ export function matchBranches<T extends { name: string }>(branches: T[] | undefi
   return (branches ?? []).filter((b) => b.name.toLowerCase().includes(needle));
 }
 
-type AccessMode = "credential" | "public";
+// "token" = paste the repo URL + a one-off PAT: no saved credential, no org, and no
+// /user/repos listing (which only ever returned a page at a time).
+type AccessMode = "credential" | "public" | "token";
+
+// Exported for the unit test: the stage list and the current stage are derived from the same
+// state and MUST agree — a stage name missing from its own list renders "Step 0 of 5", which is
+// exactly what shipped when "token" mode was added and only the list learned about it.
+export function wizardStep(s: {
+  provider: Provider | null;
+  effectiveMode: AccessMode | null;
+  credentialId: string | null;
+  selectedRepo: boolean;
+  selectedBranch: boolean;
+}): { step: number; total: number } {
+  const stages =
+    s.provider === "azure_devops"
+      ? ["provider", "credential", "repo", "branch", "label"]
+      : // Every non-credential mode (public, token) looks a repo up by name instead of browsing.
+        s.effectiveMode !== "credential"
+        ? ["provider", "mode", "lookup", "branch", "label"]
+        : ["provider", "mode", "credential", "repo", "branch", "label"];
+  const current = !s.provider
+    ? "provider"
+    : s.provider === "github" && !s.effectiveMode
+      ? "mode"
+      : s.effectiveMode === "credential" && !s.credentialId
+        ? "credential"
+        : !s.selectedRepo
+          ? s.effectiveMode === "credential"
+            ? "repo"
+            : "lookup"
+          : !s.selectedBranch
+            ? "branch"
+            : "label";
+  return { step: stages.indexOf(current) + 1, total: stages.length };
+}
 
 // Shared by /projects/[projectId]/repos/new (standalone) and /projects/new (embedded
 // right after project creation) — same provider -> repo -> branch -> label flow either way.
@@ -65,7 +102,10 @@ export function RepoConnectWizard({
   const [addingCredential, setAddingCredential] = useState(false);
   const [credentialId, setCredentialId] = useState<string | null>(null);
   const [repoQuery, setRepoQuery] = useState("");
-  const [publicRepoInput, setPublicRepoInput] = useState("");
+  const [repoInput, setRepoInput] = useState("");
+  const [tokenPat, setTokenPat] = useState("");
+  // Held from the lookup response — a second call would mean asking for the PAT twice.
+  const [tokenBranches, setTokenBranches] = useState<Branch[] | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [branchQuery, setBranchQuery] = useState("");
@@ -108,33 +148,53 @@ export function RepoConnectWizard({
     enabled: effectiveMode === "public" && !!selectedRepo,
   });
 
-  const branches = effectiveMode === "public" ? publicBranches : credentialBranches;
-  const branchesLoading = effectiveMode === "public" ? publicBranchesLoading : credentialBranchesLoading;
+  const branches =
+    effectiveMode === "token" ? (tokenBranches ?? undefined) : effectiveMode === "public" ? publicBranches : credentialBranches;
+  // Token mode's branches arrived with the lookup, so there is nothing left to load or fail here.
+  const branchesLoading =
+    effectiveMode === "token" ? false : effectiveMode === "public" ? publicBranchesLoading : credentialBranchesLoading;
   // Without this the failure renders as "No branches found." — a rate-limited or unauthorized
   // listing would read as a repo that simply has no branches.
-  const branchesError = effectiveMode === "public" ? publicBranchesError : credentialBranchesError;
+  const branchesError =
+    effectiveMode === "token" ? null : effectiveMode === "public" ? publicBranchesError : credentialBranchesError;
   // Search costs no round trip — only the render is capped.
   const matchedBranches = matchBranches(branches, branchQuery);
   const visibleBranches = matchedBranches.slice(0, BRANCH_RENDER_LIMIT);
 
-  const publicLookup = useMutation({
-    mutationFn: () => {
-      const parsed = parseGithubOwnerRepo(publicRepoInput);
+  const lookup = useMutation({
+    mutationFn: async () => {
+      const parsed = parseGithubOwnerRepo(repoInput);
       if (!parsed) {
         throw new Error('Enter as "owner/repo" or a full GitHub URL');
       }
-      return getPublicGithubRepo(parsed.owner, parsed.repo);
+      if (effectiveMode === "token") {
+        return lookupGithubRepo(`${parsed.owner}/${parsed.repo}`, tokenPat);
+      }
+      return { repo: await getPublicGithubRepo(parsed.owner, parsed.repo), branches: null };
     },
-    onSuccess: (repo) => setSelectedRepo(repo),
+    onSuccess: ({ repo, branches }) => {
+      setSelectedRepo(repo);
+      setTokenBranches(branches);
+    },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Repo lookup failed"),
   });
+  const lookupReady = repoInput.trim() !== "" && (effectiveMode !== "token" || tokenPat.trim() !== "");
 
   const add = useMutation({
     mutationFn: () =>
       addProjectRepo(
         projectId,
-        effectiveMode === "public"
+        effectiveMode === "token"
+          ? {
+              provider: "github",
+              pat: tokenPat,
+              repo_full_name: selectedRepo!.full_name,
+              clone_url: selectedRepo!.clone_url,
+              selected_branch: selectedBranch!,
+              label: label || undefined,
+            }
+          : effectiveMode === "public"
           ? {
               public: true,
               provider: "github",
@@ -159,26 +219,13 @@ export function RepoConnectWizard({
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to connect repository"),
   });
 
-  const stages =
-    provider === "azure_devops"
-      ? ["provider", "credential", "repo", "branch", "label"]
-      : effectiveMode === "public"
-        ? ["provider", "mode", "lookup", "branch", "label"]
-        : ["provider", "mode", "credential", "repo", "branch", "label"];
-  const currentStage = !provider
-    ? "provider"
-    : provider === "github" && !mode
-      ? "mode"
-      : effectiveMode === "credential" && !credentialId
-        ? "credential"
-        : !selectedRepo
-          ? effectiveMode === "public"
-            ? "lookup"
-            : "repo"
-          : !selectedBranch
-            ? "branch"
-            : "label";
-  const step = stages.indexOf(currentStage) + 1;
+  const { step, total } = wizardStep({
+    provider,
+    effectiveMode,
+    credentialId,
+    selectedRepo: !!selectedRepo,
+    selectedBranch: !!selectedBranch,
+  });
 
   function backToProvider() {
     setProvider(null);
@@ -190,13 +237,15 @@ export function RepoConnectWizard({
     setMode(null);
     setSelectedRepo(null);
     setSelectedBranch(null);
+    setTokenBranches(null);
+    setTokenPat("");
   }
 
   return (
     <Card className="mx-auto max-w-xl">
       <CardHeader>
         <CardTitle className="text-sm font-medium text-muted-foreground">
-          Step {step} of {stages.length}
+          Step {step} of {total}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -223,12 +272,22 @@ export function RepoConnectWizard({
             </button>
             <button
               type="button"
+              onClick={() => setMode("token")}
+              className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-accent"
+            >
+              <p className="text-sm font-medium text-foreground">Private repo — paste the URL and a token</p>
+              <p className="text-xs text-muted-foreground">
+                For one repo you already have a PAT for. Nothing saved to Settings.
+              </p>
+            </button>
+            <button
+              type="button"
               onClick={() => setMode("credential")}
               className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-accent"
             >
-              <p className="text-sm font-medium text-foreground">Private repo — use a credential</p>
+              <p className="text-sm font-medium text-foreground">Private repo — browse with a saved credential</p>
               <p className="text-xs text-muted-foreground">
-                Requires a saved or one-off Personal Access Token.
+                Pick from the repos a stored Personal Access Token can see.
               </p>
             </button>
           </div>
@@ -274,7 +333,7 @@ export function RepoConnectWizard({
             </div>
           )
         ) : !selectedRepo ? (
-          effectiveMode === "public" ? (
+          effectiveMode !== "credential" ? (
             <div className="space-y-2">
               <button
                 type="button"
@@ -289,22 +348,45 @@ export function RepoConnectWizard({
                 id="public-repo"
                 placeholder="owner/repo or https://github.com/owner/repo"
                 autoComplete="off"
-                value={publicRepoInput}
-                onChange={(e) => setPublicRepoInput(e.target.value)}
+                value={repoInput}
+                onChange={(e) => setRepoInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    publicLookup.mutate();
+                    lookup.mutate();
                   }
                 }}
               />
+              {effectiveMode === "token" && (
+                <>
+                  <Label htmlFor="repo-pat">Personal access token</Label>
+                  <Input
+                    id="repo-pat"
+                    type="password"
+                    autoComplete="off"
+                    placeholder="ghp_… or github_pat_…"
+                    value={tokenPat}
+                    onChange={(e) => setTokenPat(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        lookup.mutate();
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Needs read access to this repo — classic token with <span className="font-mono">repo</span>, or a
+                    fine-grained token with Contents: Read. Stored encrypted against this repo only.
+                  </p>
+                </>
+              )}
               <Button
                 type="button"
                 size="sm"
-                onClick={() => publicLookup.mutate()}
-                disabled={!publicRepoInput.trim() || publicLookup.isPending}
+                onClick={() => lookup.mutate()}
+                disabled={!lookupReady || lookup.isPending}
               >
-                {publicLookup.isPending ? "Looking up…" : "Look up repo"}
+                {lookup.isPending ? "Looking up…" : "Look up repo"}
               </Button>
             </div>
           ) : (

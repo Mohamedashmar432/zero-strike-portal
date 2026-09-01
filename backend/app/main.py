@@ -30,6 +30,7 @@ from app.routers import (
     notifications,
     projects,
     public_repos,
+    repo_lookup,
     remediation_settings,
     repo_credentials,
     report_templates,
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(connections.router, prefix="/api/v1")
     app.include_router(repo_credentials.router, prefix="/api/v1")
     app.include_router(public_repos.router, prefix="/api/v1")
+    app.include_router(repo_lookup.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
