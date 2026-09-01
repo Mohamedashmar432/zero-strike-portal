@@ -27,6 +27,15 @@ import {
 } from "@/lib/api/repo-credentials";
 
 const PROVIDER_LABEL: Record<Provider, string> = { github: "GitHub", azure_devops: "Azure DevOps" };
+// A repo can have thousands of branches; render a slice and let the search box do the work.
+export const BRANCH_RENDER_LIMIT = 100;
+
+// Exported for the unit test — the branch list is fetched whole (the backend pages GitHub to the
+// end), so search is a local filter and every branch is reachable, not just the rendered slice.
+export function matchBranches<T extends { name: string }>(branches: T[] | undefined, query: string): T[] {
+  const needle = query.trim().toLowerCase();
+  return (branches ?? []).filter((b) => b.name.toLowerCase().includes(needle));
+}
 
 type AccessMode = "credential" | "public";
 
@@ -59,6 +68,7 @@ export function RepoConnectWizard({
   const [publicRepoInput, setPublicRepoInput] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [branchQuery, setBranchQuery] = useState("");
   const [label, setLabel] = useState("");
 
   const { data: credentials } = useQuery({
@@ -79,13 +89,17 @@ export function RepoConnectWizard({
 
   const repoIdForBranches = selectedRepo ? (provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
 
-  const { data: credentialBranches, isLoading: credentialBranchesLoading } = useQuery({
+  const {
+    data: credentialBranches,
+    isLoading: credentialBranchesLoading,
+    error: credentialBranchesError,
+  } = useQuery({
     queryKey: queryKeys.repoCredentials.branches(credentialId ?? "", repoIdForBranches ?? ""),
     queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
     enabled: effectiveMode === "credential" && !!credentialId && !!repoIdForBranches,
   });
 
-  const { data: publicBranches, isLoading: publicBranchesLoading } = useQuery({
+  const { data: publicBranches, isLoading: publicBranchesLoading, error: publicBranchesError } = useQuery({
     queryKey: queryKeys.repoCredentials.branches("public", selectedRepo?.full_name ?? ""),
     queryFn: () => {
       const parsed = parseGithubOwnerRepo(selectedRepo!.full_name);
@@ -96,6 +110,12 @@ export function RepoConnectWizard({
 
   const branches = effectiveMode === "public" ? publicBranches : credentialBranches;
   const branchesLoading = effectiveMode === "public" ? publicBranchesLoading : credentialBranchesLoading;
+  // Without this the failure renders as "No branches found." — a rate-limited or unauthorized
+  // listing would read as a repo that simply has no branches.
+  const branchesError = effectiveMode === "public" ? publicBranchesError : credentialBranchesError;
+  // Search costs no round trip — only the render is capped.
+  const matchedBranches = matchBranches(branches, branchQuery);
+  const visibleBranches = matchedBranches.slice(0, BRANCH_RENDER_LIMIT);
 
   const publicLookup = useMutation({
     mutationFn: () => {
@@ -305,13 +325,34 @@ export function RepoConnectWizard({
           )
         ) : !selectedBranch ? (
           <div className="space-y-2">
-            <SelectedRepoSummary repo={selectedRepo} onChange={() => setSelectedRepo(null)} />
-            <Label>Branch</Label>
+            <SelectedRepoSummary
+              repo={selectedRepo}
+              onChange={() => {
+                setSelectedRepo(null);
+                setBranchQuery("");
+              }}
+            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="branch-search">Branch</Label>
+              {!branchesLoading && !branchesError && branches?.length ? (
+                <span className="text-xs text-muted-foreground">
+                  {matchedBranches.length} of {branches.length}
+                </span>
+              ) : null}
+            </div>
+            <Input
+              id="branch-search"
+              placeholder="Search branches…"
+              autoComplete="off"
+              value={branchQuery}
+              onChange={(e) => setBranchQuery(e.target.value)}
+              disabled={branchesLoading}
+            />
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-1">
               {branchesLoading ? (
                 <p className="p-2 text-sm text-muted-foreground">Loading…</p>
-              ) : branches?.length ? (
-                branches.map((b) => (
+              ) : visibleBranches.length ? (
+                visibleBranches.map((b) => (
                   <button
                     key={b.name}
                     type="button"
@@ -322,7 +363,18 @@ export function RepoConnectWizard({
                   </button>
                 ))
               ) : (
-                <p className="p-2 text-sm text-muted-foreground">No branches found.</p>
+                <p className="p-2 text-sm text-muted-foreground">
+                  {branchesError
+                    ? `Couldn't load branches — ${branchesError instanceof ApiError ? branchesError.message : "try again in a moment."}`
+                    : branches?.length
+                      ? "No branch matches that search."
+                      : "No branches found."}
+                </p>
+              )}
+              {matchedBranches.length > visibleBranches.length && (
+                <p className="p-2 text-xs text-muted-foreground">
+                  Showing the first {BRANCH_RENDER_LIMIT} — keep typing to narrow it down.
+                </p>
               )}
             </div>
           </div>

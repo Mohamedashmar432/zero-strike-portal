@@ -48,12 +48,35 @@ async def list_repos(pat: str, query: str | None = None, page: int = 1) -> list[
     ]
 
 
-async def list_branches(pat: str, owner: str, repo: str) -> list[dict]:
+BRANCH_PAGE_SIZE = 100  # GitHub's maximum
+# ponytail: 100 x 20 = 2000 branches, then we stop. Raise it (or switch the picker to a
+# server-side prefix search via /git/matching-refs/heads/) only if a real repo overflows.
+MAX_BRANCH_PAGES = 20
+
+
+async def _fetch_branches(owner: str, repo: str, headers: dict) -> list[dict]:
+    """Walks every page — GitHub defaults to 30 branches per page, which silently truncated
+    the picker on any repo with more than that."""
+    names: list[str] = []
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{API_BASE}/repos/{owner}/{repo}/branches", headers=_auth_headers(pat), timeout=15)
-    if resp.status_code != 200:
-        raise RepoPatError("GitHub branch listing failed")
-    return [{"name": b["name"]} for b in resp.json()]
+        for page in range(1, MAX_BRANCH_PAGES + 1):
+            resp = await client.get(
+                f"{API_BASE}/repos/{owner}/{repo}/branches",
+                headers=headers,
+                params={"per_page": str(BRANCH_PAGE_SIZE), "page": str(page)},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                raise RepoPatError("GitHub branch listing failed")
+            batch = resp.json()
+            names.extend(b["name"] for b in batch)
+            if len(batch) < BRANCH_PAGE_SIZE:
+                break
+    return [{"name": n} for n in names]
+
+
+async def list_branches(pat: str, owner: str, repo: str) -> list[dict]:
+    return await _fetch_branches(owner, repo, _auth_headers(pat))
 
 
 async def fetch_public_repo(owner: str, repo: str) -> dict:
@@ -76,8 +99,4 @@ async def fetch_public_repo(owner: str, repo: str) -> dict:
 
 
 async def list_public_branches(owner: str, repo: str) -> list[dict]:
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{API_BASE}/repos/{owner}/{repo}/branches", timeout=15)
-    if resp.status_code != 200:
-        raise RepoPatError("GitHub branch listing failed")
-    return [{"name": b["name"]} for b in resp.json()]
+    return await _fetch_branches(owner, repo, {})
