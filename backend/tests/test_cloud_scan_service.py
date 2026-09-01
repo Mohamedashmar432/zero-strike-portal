@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,12 +13,45 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
 
 
 class _FakeCompleted:
-    """Stand-in for subprocess.CompletedProcess."""
+    """Stand-in for a finished process: the canned rc/stdout/stderr a test wants back."""
 
     def __init__(self, returncode, stdout=b"", stderr=b""):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class _FakeProc:
+    """Stand-in for the Popen handle _run_sync waits on."""
+
+    pid = 4242
+
+    def __init__(self, returncode):
+        self.returncode = returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def _as_popen(fake_run):
+    """Adapt a CompletedProcess-style fake to the Popen seam _run_sync now uses.
+
+    _run_sync gives the child real temp files for stdout/stderr rather than pipes (a
+    pipe drain after a timeout kill can hang forever), so a fake has to write its
+    canned output into those files the way a real child would. Patching Popen and not
+    subprocess.run also matters for its own sake: a fake that no longer intercepts the
+    call lets the test shell out to real git and sit on a credential prompt.
+    """
+
+    def factory(cmd, stdout=None, stderr=None, env=None, **kwargs):
+        completed = fake_run(cmd, env=env)
+        if stdout is not None:
+            stdout.write(completed.stdout or b"")
+        if stderr is not None:
+            stderr.write(completed.stderr or b"")
+        return _FakeProc(completed.returncode)
+
+    return factory
 
 
 def _make_cloud_scan(repo_url="https://github.com/example/repo"):
@@ -34,7 +69,7 @@ def _make_cloud_scan(repo_url="https://github.com/example/repo"):
 
 
 def _patch_subprocess(monkeypatch, tmp_path, clone_rc=0, scan_rc=1, scan_stdout=None):
-    """Route both git-clone and scanner invocations through a fake subprocess.run; keep workdir in tmp."""
+    """Route both git-clone and scanner invocations through a fake Popen; keep workdir in tmp."""
     monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
     monkeypatch.setattr(css, "validate_repo_url", lambda url: None)  # DNS-independent in tests
     scan_stdout = scan_stdout if scan_stdout is not None else _FIXTURE.read_bytes()
@@ -44,7 +79,7 @@ def _patch_subprocess(monkeypatch, tmp_path, clone_rc=0, scan_rc=1, scan_stdout=
             return _FakeCompleted(clone_rc, b"", b"clone stderr")
         return _FakeCompleted(scan_rc, scan_stdout, b"")
 
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
 
 def test_cloud_scan_completes_and_ingests(client, monkeypatch, tmp_path):
@@ -98,7 +133,7 @@ def test_cloud_scan_transient_clone_error_retries_then_succeeds(client, monkeypa
             return _FakeCompleted(0, b"", b"")
         return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
 
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
     async def run():
         scan = _make_cloud_scan()
@@ -122,7 +157,7 @@ def test_cloud_scan_non_transient_clone_error_does_not_retry(client, monkeypatch
 
     monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
     monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
     async def run():
         scan = _make_cloud_scan()
@@ -182,7 +217,7 @@ def test_scanner_binary_missing_gives_actionable_message(client, monkeypatch, tm
             return _FakeCompleted(0, b"", b"")
         raise FileNotFoundError(cmd[0])
 
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
     async def run():
         scan = _make_cloud_scan()
@@ -201,7 +236,9 @@ def test_git_missing_gives_generic_message(client, monkeypatch, tmp_path):
     scanner binary is a portal-wide misconfiguration; git missing is a different kind of problem."""
     monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
     monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
-    monkeypatch.setattr(css.subprocess, "run", lambda cmd, **kwargs: (_ for _ in ()).throw(FileNotFoundError(cmd[0])))
+    monkeypatch.setattr(
+        css.subprocess, "Popen", _as_popen(lambda cmd, **kwargs: (_ for _ in ()).throw(FileNotFoundError(cmd[0])))
+    )
 
     async def run():
         scan = _make_cloud_scan()
@@ -246,7 +283,7 @@ def test_clone_uses_bearer_by_default(client, monkeypatch, tmp_path):
             return _FakeCompleted(0, b"", b"")
         return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
 
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
     async def run():
         scan = _make_cloud_scan()
@@ -269,7 +306,7 @@ def test_clone_uses_basic_auth_for_azure_devops_scheme(client, monkeypatch, tmp_
             return _FakeCompleted(0, b"", b"")
         return _FakeCompleted(1, _FIXTURE.read_bytes(), b"")
 
-    monkeypatch.setattr(css.subprocess, "run", fake_run)
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
 
     async def run():
         scan = _make_cloud_scan()
@@ -295,3 +332,29 @@ def test_workdir_cleaned_up_after_scan(client, monkeypatch, tmp_path):
     # The ephemeral clone dir must not survive the run.
     leftovers = [p for p in tmp_path.iterdir() if p.name.startswith("zs-clone-")]
     assert leftovers == []
+
+
+def test_run_sync_timeout_returns_even_when_a_grandchild_holds_the_output(tmp_path, monkeypatch):
+    """A timed-out scan must fail the scan, not hang the worker forever.
+
+    subprocess.run(capture_output=True, timeout=...) reads through pipes and its timeout
+    path is kill() then an *untimed* communicate() to drain them. On Windows kill() ends
+    only the direct child, so a grandchild still holding the pipe (the scanner shells out
+    to git) kept that drain waiting — the 900s budget never expired, the scan stayed
+    "running" with no report and no error, which is exactly what a large repo produced.
+    """
+    monkeypatch.setattr(css.settings, "scanner_binary_path", "not-the-scanner")
+    script = tmp_path / "spawn_child.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+        "time.sleep(20)\n"
+    )
+
+    started = time.monotonic()
+    with pytest.raises(css.CloudScanError) as exc:
+        css._run_sync([sys.executable, str(script)], timeout=2)
+    elapsed = time.monotonic() - started
+
+    assert "timed out" in str(exc.value)
+    assert elapsed < 15, f"_run_sync took {elapsed:.1f}s to give up on a 2s timeout — it is waiting on the child tree"

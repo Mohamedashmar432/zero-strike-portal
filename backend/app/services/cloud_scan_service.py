@@ -8,12 +8,13 @@ this module no longer manages concurrency itself, see scan_queue_service.
 
 Static analysis only — the target code is never executed — but git clone and the
 SCA scanner hit the network, so: SSRF guard on repo_url, per-step timeouts, and
-guaranteed workdir cleanup. Subprocesses run via subprocess.run in a worker thread
+guaranteed workdir cleanup. Subprocesses run in a worker thread (see _run_sync)
 so the same code path works on Windows (local dev) and Linux (container).
 """
 
 import asyncio
 import base64
+import contextlib
 import ipaddress
 import os
 import shutil
@@ -102,14 +103,54 @@ def _sanitize(message: str, repo_token: str | None) -> str:
     return message[:1000]
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill the timed-out process and anything it spawned.
+
+    `Popen.kill()` alone ends one process: on Windows that is literally just the
+    direct child, and the scanner shells out to `git` for commit/branch metadata.
+    A surviving grandchild keeps a handle on the clone workdir, which then fails
+    to delete, so the leak is disk as well as CPU.
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    else:
+        proc.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=30)
+
+
 def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, bytes, bytes]:
-    # subprocess.run is used (in a worker thread) rather than asyncio.create_subprocess_exec:
-    # it works identically on Windows and Linux and handles the timeout kill itself, avoiding
-    # the POSIX-only process-group machinery and the Windows event-loop subprocess pitfall.
+    # Popen with output to temp FILES rather than subprocess.run with pipes, on purpose.
+    # subprocess.run(capture_output=True, timeout=...) reads through pipes, and its timeout
+    # path is kill() followed by an *untimed* communicate() to drain them — so if anything
+    # still holds the write end (a grandchild the Windows kill did not reach), that drain
+    # never returns and the timeout that was supposed to bound this scan hangs forever
+    # instead: the scan sits "running" with no report and no error, exactly the symptom a
+    # large repo produced. Files also keep a multi-hundred-MB report off the Python heap.
+    # A worker thread still runs this (see _run) so the same code path works on Windows dev
+    # and Linux prod, unlike asyncio.create_subprocess_exec.
     try:
-        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env, check=False)
-    except subprocess.TimeoutExpired:
-        raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
+        with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+            proc = subprocess.Popen(cmd, stdout=out_f, stderr=err_f, env=env)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
+                if cmd[0] == settings.scanner_binary_path:
+                    raise CloudScanError(
+                        f"scan timed out after {timeout}s — the repository is too large to finish "
+                        "in the current budget. Exclude large generated or vendored directories, "
+                        "or ask an administrator to raise SCAN_TIMEOUT_SECONDS."
+                    )
+                raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
+            out_f.seek(0)
+            err_f.seek(0)
+            return proc.returncode, out_f.read(), err_f.read()
     except FileNotFoundError:
         if cmd[0] == settings.scanner_binary_path:
             # Distinct from every other failure here: this is a portal misconfiguration (or a
@@ -128,7 +169,6 @@ def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[in
             )
         logger.error("Required executable not found: %r", cmd[0])
         raise CloudScanError(f"executable not found: {cmd[0]}")
-    return proc.returncode, proc.stdout or b"", proc.stderr or b""
 
 
 async def _run(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, bytes, bytes]:

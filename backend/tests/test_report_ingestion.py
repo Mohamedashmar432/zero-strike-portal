@@ -343,3 +343,32 @@ def test_scrub_leaves_text_alone_when_there_is_no_root(client):
     assert ingest_svc.scrub_root_from_text(None, "/tmp/x") is None
     # A relative root (CLI uploads) must not mangle ordinary words.
     assert ingest_svc.scrub_root_from_text("app/db.py is fine", ".") == "app/db.py is fine"
+
+
+def test_oversized_raw_json_is_dropped_with_a_diagnostic_not_a_failed_ingest(client, monkeypatch):
+    """A big repo's raw report can exceed Mongo's 16 MB document ceiling.
+
+    That used to blow up the Report insert *after* every Finding was already written, so
+    the scan came out "failed" while its findings sat in the database with no report to
+    show for them. The findings are the artefact worth keeping; the raw blob (which no
+    route reads) gives way, and says so.
+    """
+    monkeypatch.setattr(ingest_svc, "_MAX_RAW_JSON_BYTES", 1_000)
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        scan = Scan(project_id="proj-big", scan_type="cloud", created_at=now, updated_at=now)
+        await scan.insert()
+
+        count = await ingest_svc.ingest(scan, _load(), raw_json="x" * 5_000)
+
+        from app.models.report import Report
+
+        assert count == 4
+        assert await Finding.find(Finding.scan_id == str(scan.id)).count() == 4
+        assert (await Scan.get(scan.id)).status == "completed"
+        report = await Report.find_one(Report.scan_id == str(scan.id))
+        assert report.raw_json is None
+        assert any("inline storage limit" in d.message for d in report.diagnostics)
+
+    asyncio.run(run())

@@ -19,13 +19,13 @@ def _capture_scanner_argv(monkeypatch, tmp_path) -> list[list[str]]:
     """Same fake subprocess as the cloud-scan tests, but recording every argv it sees."""
     calls: list[list[str]] = []
     _patch_subprocess(monkeypatch, tmp_path)
-    real_run = css.subprocess.run
+    real_popen = css.subprocess.Popen
 
-    def recording_run(cmd, **kwargs):
+    def recording_popen(cmd, **kwargs):
         calls.append(list(cmd))
-        return real_run(cmd, **kwargs)
+        return real_popen(cmd, **kwargs)
 
-    monkeypatch.setattr(css.subprocess, "run", recording_run)
+    monkeypatch.setattr(css.subprocess, "Popen", recording_popen)
     return calls
 
 

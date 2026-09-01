@@ -231,3 +231,35 @@ def test_reap_stuck_scan_with_retry_budget_requeues_then_dead_letters(client, mo
         assert "retries exhausted" in final.error_message
 
     asyncio.run(run())
+
+
+def test_capacity_ignores_running_non_cloud_scans(client, monkeypatch):
+    """A local/CI scan left "running" must not hold a cloud-scan slot.
+
+    Those run on someone else's machine and cost this backend nothing, but they used
+    to count against max_concurrent_cloud_scans — so an abandoned CLI run (Ctrl-C, a
+    dead CI job) stalled every queued cloud scan behind work nothing was doing.
+    """
+    monkeypatch.setattr(cloud_scan_service, "run_cloud_scan", _noop)
+    monkeypatch.setattr(scan_queue_service.settings, "max_concurrent_cloud_scans", 1)
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        stale_local = Scan(
+            project_id="qproj",
+            scan_type="local",
+            triggered_by="cli",
+            status="running",
+            created_at=now - timedelta(hours=5),
+            updated_at=now - timedelta(hours=5),
+        )
+        await stale_local.insert()
+        queued = _make_queued_scan(now)
+        await queued.insert()
+
+        await scan_queue_service.drain_queue()
+        await asyncio.sleep(0)
+
+        assert (await Scan.get(queued.id)).status == "running"
+
+    asyncio.run(run())

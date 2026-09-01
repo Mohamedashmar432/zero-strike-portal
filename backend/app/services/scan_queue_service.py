@@ -39,7 +39,13 @@ def _track(task: asyncio.Task) -> None:
 
 
 async def _capacity() -> int:
-    running = await Scan.find(Scan.status == "running").count()
+    # Cloud scans only: the cap exists because a cloud scan runs a clone + scanner
+    # subprocess *in this process*. A local/CI scan is executed on someone else's
+    # machine and costs this backend nothing, so counting one against the cap let a
+    # CLI run that was abandoned mid-scan (Ctrl-C, dead CI job) hold a slot until the
+    # reaper got to it — with max_concurrent_cloud_scans=2, two of those stall every
+    # queued cloud scan in the workspace behind a job nothing is working on.
+    running = await Scan.find(Scan.status == "running", Scan.scan_type == "cloud").count()
     return max(0, settings.max_concurrent_cloud_scans - running)
 
 
