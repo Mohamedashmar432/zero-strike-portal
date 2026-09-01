@@ -24,6 +24,22 @@ import {
 import { type AiFixProposal, approveFixBatch } from "@/lib/api/auto-fix";
 import { ApiError } from "@/lib/api/client";
 
+/**
+ * The toast's "what got left out" line. Exported so it can be tested: the only way to see it in a
+ * browser is to approve a real batch, which opens a real pull request.
+ *
+ * Every reason with its count, not just the first — a reviewer who ticked 12 boxes and got 9 queued
+ * needs all three reasons, and skips are a race (a PR opened meanwhile, another write in flight) so
+ * they arrive mixed. Returns null when nothing was skipped, which is the common case.
+ */
+export function summarizeSkipped(skipped: readonly { reason: string }[]): string | null {
+  if (!skipped.length) return null;
+  const byReason = new Map<string, number>();
+  for (const s of skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
+  const reasons = Array.from(byReason, ([reason, count]) => `${count} × ${reason}`).join(" ");
+  return `${skipped.length} left out — ${reasons}`;
+}
+
 export function BatchApproveBar({
   scanId,
   selected,
@@ -45,11 +61,10 @@ export function BatchApproveBar({
     mutationFn: () => approveFixBatch(scanId, { proposal_ids: selected.map((p) => p.id) }),
     onSuccess: (res) => {
       const n = res.approved.length;
+      const description = summarizeSkipped(res.skipped);
       toast.success(
         `Approved ${n} fix${n === 1 ? "" : "es"} — creating one pull request…`,
-        res.skipped.length
-          ? { description: `${res.skipped.length} skipped: ${res.skipped[0].reason}` }
-          : undefined
+        description ? { description } : undefined
       );
       setConfirm(false);
       onClear();

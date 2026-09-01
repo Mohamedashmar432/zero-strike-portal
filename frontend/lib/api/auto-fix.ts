@@ -87,6 +87,8 @@ export type AiFixProposal = {
   risk_notes: string | null;
   dependency_update: DependencyUpdate | null;
   manual_review_reason: string | null;
+  /** Why an apply dropped this fix (review_state "failed") — the readable half of a partial batch. */
+  failure_reason?: string | null;
 
   branch_name: string | null;
   pr_url: string | null;

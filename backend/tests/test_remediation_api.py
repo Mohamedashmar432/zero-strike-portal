@@ -239,6 +239,29 @@ def test_approve_requires_owner_and_enqueues_apply(client, monkeypatch):
     assert asyncio.run(_apply_jobs()) == 1
 
 
+def test_listing_reports_why_a_failed_proposal_failed(client):
+    """A batch that dies mid-apply marks every in-flight proposal `failed` + `failure_reason`.
+    If the API drops that reason the UI can only say "failed", and a partial batch outcome becomes
+    unreadable — so the field has to survive the trip out."""
+    owner = register_and_login(client, email="fix-owner-failreason@zs.dev")
+    project = _create_project(client, _headers(owner))
+    scan_id = _insert_scan(project["id"])
+    pid = _insert_proposal(project["id"], scan_id, _insert_finding(project["id"], scan_id, "fp-failreason"))
+
+    async def _fail():
+        p = await AIFixProposal.get(pid)
+        p.review_state = "failed"
+        p.failure_reason = "git clone failed: repository not found"
+        await p.save()
+
+    asyncio.run(_fail())
+
+    body = client.get(f"/api/v1/scans/{scan_id}/auto-fix", headers=_headers(owner)).json()
+    proposal = next(p for p in body["insight"]["proposals"] if p["id"] == pid)
+    assert proposal["review_state"] == "failed"
+    assert proposal["failure_reason"] == "git clone failed: repository not found"
+
+
 def test_approve_batch_enqueues_one_job_for_many_proposals(client, monkeypatch):
     # The flaw: one PR per finding. One approve-batch call must produce exactly ONE apply job
     # covering every selected proposal (docs/AUTOFIX_BATCH_PR.md).

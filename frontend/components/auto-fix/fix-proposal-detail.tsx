@@ -136,6 +136,14 @@ export function FixProposalDetail({
             {caps.manualReason}
           </p>
         )}
+        {/* review_state="failed" is set when the whole apply job errored (clone, git, PR call) —
+            without the reason the card just says "failed" and a batch outcome is unreadable. */}
+        {caps.failedReason && (
+          <p className="rounded-md border border-severity-high/30 bg-severity-high/5 px-3 py-2 text-sm">
+            <span className="font-medium">Apply failed: </span>
+            {caps.failedReason}
+          </p>
+        )}
         {proposal.risk_notes && <p className="text-xs text-severity-medium">Risk: {proposal.risk_notes}</p>}
       </div>
 

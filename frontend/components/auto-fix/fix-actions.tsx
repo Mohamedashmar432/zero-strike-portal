@@ -1,10 +1,13 @@
 "use client";
 
 /**
- * The approve / dismiss / dependency-bump actions for one proposal, extracted so the (scan-page)
- * FixProposalCard and the (workspace) FixProposalDetail share ONE implementation of the write path.
- * Duplicating the approve mutation would mean two places to get the confirm-before-PR wording,
- * the confidence warning, and the disabled states right.
+ * The approve / dismiss / dependency-bump actions for one proposal, kept out of the view that
+ * renders them (today only the workspace's FixProposalDetail) so the write path stays one
+ * implementation: duplicating the approve mutation would mean two places to get the
+ * confirm-before-PR wording, the confidence warning, and the disabled states right.
+ *
+ * It also had a second caller, a scan-page FixProposalCard, which stopped being rendered when the
+ * workspace took over review and was deleted rather than left to rot unseen.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -56,9 +59,13 @@ export function fixCapabilities(proposal: AiFixProposal, canApprove: boolean) {
   const hasPatch = !!(proposal.original_code && proposal.patched_code);
   const manualReason =
     rs === "manual_review" && proposal.manual_review_reason ? proposal.manual_review_reason : null;
+  // A batch drops a fix by setting review_state="failed" + failure_reason. Surfaced next to
+  // manualReason so "left out of the PR" always comes with the why.
+  const failedReason = rs === "failed" && proposal.failure_reason ? proposal.failure_reason : null;
   return {
     hasPatch,
     manualReason,
+    failedReason,
     inFlight: rs === "approved" || rs === "applying",
     canDismiss: rs !== "dismissed" && rs !== "pr_open",
     canRevise: rs === "proposed" || rs === "manual_review" || rs === "validated" || rs === "failed",

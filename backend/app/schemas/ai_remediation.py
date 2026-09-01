@@ -79,6 +79,9 @@ class FixProposalOut(BaseModel):
     risk_notes: str | None
     dependency_update: dict | None = None
     manual_review_reason: str | None
+    # Why an apply DROPPED this fix (review_state="failed"). Without it a batch's partial result is
+    # unreadable in the UI: the fix left out of the PR shows "failed" and no reason.
+    failure_reason: str | None = None
 
     branch_name: str | None = None
     pr_url: str | None = None

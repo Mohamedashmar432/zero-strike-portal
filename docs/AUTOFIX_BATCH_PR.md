@@ -125,6 +125,12 @@ The confirm dialog lists the files and warns that any fix failing validation is 
 from the PR rather than blocking it. The per-finding detail pane and its single
 `Create PR` button are untouched — the drill-down stays the drill-down.
 
+A batch is partial by design, so both halves of the trim are named on screen rather than
+only in the PR body. The approve toast reports **every** skip reason with a count, not the
+first one (a reviewer who ticked twelve boxes and got nine queued needs all three reasons),
+and `failure_reason` is on `FixProposalOut` so a proposal the apply job left `failed` says
+why on its card — without it the card reads "failed" and the batch outcome is unreadable.
+
 ## Deliberately not built
 
 - **A `remediation_batch` collection.** The job already is one. Add it when a batch needs

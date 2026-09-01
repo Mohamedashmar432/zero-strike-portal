@@ -141,6 +141,7 @@ def _to_out(p: AIFixProposal, fmap: dict[str, Finding]) -> FixProposalOut:
         risk_notes=p.risk_notes,
         dependency_update=p.dependency_update,
         manual_review_reason=p.manual_review_reason,
+        failure_reason=p.failure_reason,
         branch_name=p.branch_name,
         pr_url=p.pr_url,
         pr_number=p.pr_number,
