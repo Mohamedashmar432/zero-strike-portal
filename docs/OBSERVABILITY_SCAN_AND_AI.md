@@ -115,6 +115,33 @@ Recorded because a QA pass that found nothing and one that was never run look id
   exception class name. Zero console errors, all requests 2xx, both roles exercised (the admin
   surfaces correctly refuse a member session).
 
+## Large-repo validation (2026-09-02)
+
+Run against `microsoft/vscode` — 872 MB, 12,999 TS/JS files, 17,299 files scanned — through the
+whole portal pipeline, with the scanner rebuilt from `zero-strike-SAST-engine` v0.34.0:
+
+```
+running/- -> running/cloning -> running/scanning -> running/ingesting -> completed/-
+572 s end to end (clone 40 s, scan 524 s, ingest 4 s), 4,822 findings, no hang
+```
+
+Two things this proved that no unit test could:
+
+- **The stage sequence is real.** Every phase was observable live while the scan ran, which is
+  the entire point of the layer, and `stage` cleared to `None` on success.
+- **The 16 MB ceiling is not hypothetical.** The report came to 12.4 MB. The scan completed and
+  the run's diagnostics say exactly what happened: *"Raw report JSON (12.4 MB) exceeded the 8 MB
+  inline storage limit and was not kept. All 4822 findings were ingested normally."* Before this
+  fix that insert blew up **after** every `Finding` had been written — a scan marked failed that
+  actually had 4,822 findings and no report to show for them.
+
+`django/django` (3,036 files) also completes clean at 110 s / 1,039 findings, matching a direct
+scanner run exactly, which is the cheaper regression case to re-run.
+
+Not covered: an OOM kill (`rc == -9`) still needs a memory-capped container to reproduce, and
+this host is not one. `--workers` now actually bounds the SAST stage (engine v0.34.0), which is
+the setting that path depends on.
+
 ## Deliberately not done
 
 - No OpenTelemetry / distributed tracing. There is one process and one Mongo; a `trace_id` in
