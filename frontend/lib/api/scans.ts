@@ -6,6 +6,16 @@ import type { Page } from "./users";
 export type ScanType = "local" | "cloud" | "cicd";
 export type ScanStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type CiProvider = "github_actions" | "gitlab_ci" | "azure_pipelines";
+// Which phase of the cloud-scan pipeline a scan is in (running) or stopped in (failed).
+// Diagnostics only -- key behaviour off `status`, never off this.
+export type ScanStage = "validating" | "cloning" | "scanning" | "ingesting";
+
+export const SCAN_STAGE_LABELS: Record<ScanStage, string> = {
+  validating: "Checking the repository URL",
+  cloning: "Cloning the repository",
+  scanning: "Running the scanner",
+  ingesting: "Saving results",
+};
 
 export type Scan = {
   id: string;
@@ -26,6 +36,8 @@ export type Scan = {
   started_at: string | null;
   completed_at: string | null;
   error_message: string | null;
+  stage: ScanStage | null;
+  stage_started_at: string | null;
   created_at: string;
   updated_at: string;
   // Latest scan-level AI analysis status (null = never requested); when active, when it started

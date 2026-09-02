@@ -13,7 +13,10 @@ import {
 } from "@/lib/api/ai";
 import { AiAnalyticsDashboard } from "./ai-analytics-dashboard";
 
-vi.mock("@/lib/api/ai", () => ({
+// Partial mock: only the fetchers are stubbed. LLM_ERROR_LABELS is a real constant the component
+// renders from, and mocking it would test the fixture's copy rather than the shipped labels.
+vi.mock("@/lib/api/ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/ai")>()),
   getProjectAiAnalytics: vi.fn(),
   getPortalAiAnalytics: vi.fn(),
   listProjectAiEvents: vi.fn(),
@@ -54,6 +57,7 @@ function analytics(overrides: Partial<AiAnalytics> = {}): AiAnalytics {
     by_feature: [],
     by_model: [],
     by_project: [],
+    failure_reasons: [],
     ...overrides,
   };
 }
@@ -139,6 +143,9 @@ describe("AiAnalyticsDashboard", () => {
             model_name: "claude-sonnet-4-5",
             status: "failed",
             error_type: "LLMTransientError",
+            error_code: "rate_limited",
+            attempt: 1,
+            failover_from: null,
             duration_ms: 900,
             prompt_tokens: 10,
             completion_tokens: 2,
@@ -152,8 +159,10 @@ describe("AiAnalyticsDashboard", () => {
 
     expect(await screen.findByText("Spend by project")).toBeDefined();
     expect(screen.getByText("Project")).toBeDefined();
-    // A failure names its error type, and carries an icon as well as colour.
-    expect(screen.getByText("LLMTransientError")).toBeDefined();
+    // A failure names the classified reason -- "Provider rate limit" is actionable where the
+    // exception class name it replaces ("LLMTransientError") was not -- with an icon as well as
+    // colour carrying the identity.
+    expect(screen.getByText("Provider rate limit")).toBeDefined();
     // Sub-cent spend must not read as free.
     expect(screen.getByText("<$0.01")).toBeDefined();
   });
@@ -176,6 +185,9 @@ describe("AiAnalyticsDashboard", () => {
             model_name: "gpt-4o",
             status: "success",
             error_type: null,
+            error_code: null,
+            attempt: 1,
+            failover_from: null,
             duration_ms: 1200,
             prompt_tokens: 100,
             completion_tokens: 20,
@@ -189,5 +201,36 @@ describe("AiAnalyticsDashboard", () => {
 
     expect(await screen.findByText("Finding analysis")).toBeDefined();
     expect(screen.queryByText("Project")).toBeNull();
+  });
+
+  test("failure reasons name the cause, and stay hidden when nothing failed", async () => {
+    vi.mocked(getProjectAiAnalytics).mockResolvedValue(
+      analytics({
+        totals: { ...EMPTY_TOTALS, requests: 10, failed: 3, success_rate: 70 },
+        failure_reasons: [
+          { error_code: "context_length_exceeded", count: 2 },
+          { error_code: "auth_failed", count: 1 },
+        ],
+      }),
+    );
+    vi.mocked(listProjectAiEvents).mockResolvedValue(events({ total: 0, items: [] }));
+
+    const { unmount } = renderWithClient(<AiAnalyticsDashboard scope="project" projectId="p1" />);
+
+    expect(await screen.findByText("Why calls failed")).toBeDefined();
+    // The label, not the code: the whole reason error_code exists is that a user can act on
+    // "prompt too long for the model" and cannot act on "LLMPermanentError".
+    expect(screen.getByText("Prompt too long for the model")).toBeDefined();
+    expect(screen.getByText("Invalid API key")).toBeDefined();
+    unmount();
+
+    // A healthy workspace gets no card of zeroes. Needs traffic, or the dashboard renders its
+    // own "nothing recorded yet" empty state instead of the breakdown cards.
+    vi.mocked(getProjectAiAnalytics).mockResolvedValue(
+      analytics({ totals: { ...EMPTY_TOTALS, requests: 10 }, failure_reasons: [] }),
+    );
+    renderWithClient(<AiAnalyticsDashboard scope="project" projectId="p1" />);
+    await screen.findByText("Usage over time");
+    expect(screen.queryByText("Why calls failed")).toBeNull();
   });
 });

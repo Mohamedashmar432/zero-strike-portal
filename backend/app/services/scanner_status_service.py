@@ -76,6 +76,8 @@ async def queue_status() -> QueueStatus:
             project_id=scan.project_id,
             started_at=scan.started_at,
             stuck=str(scan.id) in stuck_ids,
+            stage=scan.stage,
+            stage_started_at=scan.stage_started_at,
         )
         for scan in running_docs
     ]

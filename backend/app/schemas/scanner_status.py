@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.models.scan import ScanStage
+
 
 class BinaryChecklistItem(BaseModel):
     os: str
@@ -17,6 +19,10 @@ class RunningScanItem(BaseModel):
     project_id: str
     started_at: datetime | None
     stuck: bool
+    # Which phase of the pipeline the scan is in. The reason the queue view can now say what a
+    # stuck job was actually doing instead of only that it stopped moving.
+    stage: ScanStage | None = None
+    stage_started_at: datetime | None = None
 
 
 class QueueStatus(BaseModel):

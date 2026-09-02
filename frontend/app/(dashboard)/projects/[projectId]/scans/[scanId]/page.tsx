@@ -52,7 +52,7 @@ import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
-import { createCloudScan, getScan, type Scan } from "@/lib/api/scans";
+import { createCloudScan, getScan, SCAN_STAGE_LABELS, type Scan } from "@/lib/api/scans";
 
 // Client-side verdict derivation -- the backend has no separate `verdict` enum, only
 // is_false_positive/false_positive_confidence (see docs/ARCHITECTURE_REVIEW_AND_AI_ROADMAP.md).
@@ -85,6 +85,16 @@ function timeAgo(dateStr: string) {
   if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+// How long the scan has been in its current phase. Coarse on purpose: the useful signal is
+// "cloning for 40 minutes" vs "cloning for 20 seconds", not the exact second.
+function stageElapsed(since: string) {
+  const mins = Math.floor((Date.now() - new Date(since).getTime()) / 60000);
+  if (mins < 1) return "just started";
+  if (mins < 60) return `for ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.floor(mins / 60);
+  return `for ${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 // Re-scanning a manual (non-connected) repo needs the token re-entered — the original
@@ -647,7 +657,9 @@ export default function ScanDetailPage() {
 
       {scan.status === "failed" && (
         <Alert variant="destructive">
-          <AlertTitle>Scan failed</AlertTitle>
+          <AlertTitle>
+            Scan failed{scan.stage ? ` while ${SCAN_STAGE_LABELS[scan.stage].toLowerCase()}` : ""}
+          </AlertTitle>
           <AlertDescription>{scan.error_message || "Scan failed."}</AlertDescription>
         </Alert>
       )}
@@ -659,6 +671,15 @@ export default function ScanDetailPage() {
             {scan.status === "running"
               ? "The scan is running on the server. This page updates automatically — no need to refresh."
               : "Waiting for the scanner to report…"}
+            {/* Which phase it is in, and how long it has been there. Without this a scan that
+                sits here for an hour looks identical to one that is about to finish, which is
+                what made a stuck large-repo scan impossible to tell from a slow one. */}
+            {scan.stage && (
+              <span className="mt-1 block text-xs">
+                {SCAN_STAGE_LABELS[scan.stage]}
+                {scan.stage_started_at ? ` · ${stageElapsed(scan.stage_started_at)}` : ""}
+              </span>
+            )}
           </AlertDescription>
         </Alert>
       )}

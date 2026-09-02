@@ -10,6 +10,7 @@ import {
   getProjectAiAnalytics,
   listPortalAiEvents,
   listProjectAiEvents,
+  LLM_ERROR_LABELS,
   type AiAnalytics,
   type AiEventFilters,
   type AiUsageTotals,
@@ -209,6 +210,7 @@ export function AiAnalyticsDashboard({
                 .map((r) => ({ label: featureLabel(r.feature), ...r }))}
             />
             <SpendMovementCard data={data!} />
+            <FailureReasonsCard data={data!} />
             <BreakdownCard
               title="Spend by model"
               description="Cost per model. Hover for the provider."
@@ -443,6 +445,45 @@ function SpendMovementCard({ data }: { data: AiAnalytics }) {
   );
 }
 
+function FailureReasonsCard({ data }: { data: AiAnalytics }) {
+  const rows = data.failure_reasons;
+  // Nothing failed: a card of zeroes is noise on a healthy workspace.
+  if (rows.length === 0) return null;
+
+  const worst = rows[0].count;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Why calls failed</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {data.totals.failed} failed {data.totals.failed === 1 ? "call" : "calls"} in this window,
+          by cause.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {/* A ranked list, not a bar chart: at most a dozen categories with a one-line label each,
+            where the label is the actionable part and a chart would only shrink it. */}
+        <ul className="space-y-2.5">
+          {rows.map((r) => (
+            <li key={r.error_code}>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="truncate">{LLM_ERROR_LABELS[r.error_code] ?? r.error_code}</span>
+                <span className="tabular-nums text-muted-foreground">{compact(r.count)}</span>
+              </div>
+              <div
+                className="mt-1 h-1.5 rounded-full bg-destructive/70"
+                style={{ width: `${Math.max(4, (r.count / worst) * 100)}%` }}
+                aria-hidden
+              />
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+
 function BreakdownCard({
   title,
   description,
@@ -617,7 +658,11 @@ function EventLogCard({
                         // Identity is never colour alone — icon + label carry it too.
                         <Badge variant="destructive" className="gap-1">
                           <TriangleAlert className="size-3" />
-                          {e.error_type ?? "Failed"}
+                          {/* The classified reason where there is one -- "Invalid API key" is
+                              something an admin can act on, "LLMPermanentError" is not. */}
+                          {e.error_code
+                            ? (LLM_ERROR_LABELS[e.error_code] ?? e.error_code)
+                            : (e.error_type ?? "Failed")}
                         </Badge>
                       )}
                     </TableCell>

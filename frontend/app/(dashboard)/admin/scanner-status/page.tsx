@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getScannerStatus } from "@/lib/api/scanner-status";
+import { SCAN_STAGE_LABELS } from "@/lib/api/scans";
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -70,6 +71,7 @@ export default function ScannerStatusPage() {
                 <TableHead className="py-2.5">Scan ID</TableHead>
                 <TableHead className="py-2.5">Project ID</TableHead>
                 <TableHead className="py-2.5">Started At</TableHead>
+                <TableHead className="py-2.5">Phase</TableHead>
                 <TableHead className="py-2.5" />
               </TableRow>
             </TableHeader>
@@ -79,6 +81,12 @@ export default function ScannerStatusPage() {
                   <TableCell className="font-mono text-xs font-semibold text-foreground">{s.scan_id}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{s.project_id}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(s.started_at)}</TableCell>
+                  {/* What the scan is actually doing. A stuck row that only says "stuck" leaves
+                      the admin to guess between clone, scan and ingest — which is the guessing
+                      this column exists to end. */}
+                  <TableCell className="text-xs text-muted-foreground">
+                    {s.stage ? SCAN_STAGE_LABELS[s.stage] : "—"}
+                  </TableCell>
                   <TableCell>
                     {s.stuck && <Badge variant="destructive">Stuck — pending reap</Badge>}
                   </TableCell>
