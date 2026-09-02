@@ -298,9 +298,12 @@ async def _stage(scan: Scan, stage: ScanStage) -> None:
 
     Advisory by construction: the queue claims and reaps on `status` alone, so nothing branches
     on `stage` and a failed write here must not fail the scan — a scan that finishes without
-    having said it was cloning is a worse log, not a worse scan. The write also refreshes
-    updated_at, which is what makes the reaper's staleness window a real progress heartbeat
-    rather than "claimed a long time ago" (see docs/OBSERVABILITY_SCAN_AND_AI.md).
+    having said it was cloning is a worse log, not a worse scan.
+
+    The write also refreshes updated_at, but phase boundaries alone are NOT a heartbeat: the
+    phase that takes the time has no boundary in the middle of it, so a long scan still went
+    stale and was reaped as crashed. `_heartbeat` is what actually keeps the clock moving; this
+    just happens to also touch it (see docs/OBSERVABILITY_SCAN_AND_AI.md).
     """
     now = datetime.now(timezone.utc)
     scan.stage = stage
@@ -310,6 +313,52 @@ async def _stage(scan: Scan, stage: ScanStage) -> None:
         await scan.save()
     except Exception:
         logger.warning("could not record stage %s for scan %s", stage, scan.id, exc_info=True)
+
+
+# How often a running scan touches updated_at while a subprocess is working. Only has to be
+# comfortably inside the reap window (scan_timeout_seconds * queue_stuck_multiplier, 45 min on
+# the defaults), so this is one tiny $set per scan per 30s -- nothing next to a clone or a scan.
+_HEARTBEAT_SECONDS = 30
+
+# Bound at import on purpose. Several tests patch asyncio.sleep globally to skip retry backoff,
+# and a heartbeat whose only yield point is a patched-to-instant sleep becomes a busy loop that
+# starves the event loop -- i.e. an unrelated patch silently disables the liveness mechanism.
+# Holding the real one keeps this loop's timing independent of anything else's.
+_real_sleep = asyncio.sleep
+
+
+async def _heartbeat(scan: Scan) -> None:
+    """Keep `updated_at` moving for as long as this worker is actually working on the scan.
+
+    `_stage` only writes at phase boundaries, and the phase that takes the time -- `scanning` --
+    has no boundary in the middle of it. So a scan that legitimately spent longer in the scanner
+    than the reap window looked, to the reaper, exactly like one whose worker had died: it was
+    failed with "worker likely crashed mid-scan" while the subprocess was still running fine.
+
+    With this, the two cases finally separate. A worker that dies takes this task with it, so a
+    reap once again means what it says; a scan that is merely slow is bounded by the subprocess's
+    own timeout instead, which fails it with a message naming the timeout and how to raise it.
+    """
+    while True:
+        await _real_sleep(_HEARTBEAT_SECONDS)
+        try:
+            await scan.set({Scan.updated_at: datetime.now(timezone.utc)})
+        except Exception:
+            # Same contract as _stage: bookkeeping must never take down the scan it describes.
+            # A missed beat costs nothing; only a run of them past the reap window matters.
+            logger.warning("heartbeat write failed for scan %s", scan.id, exc_info=True)
+
+
+@contextlib.asynccontextmanager
+async def _beating(scan: Scan):
+    """Run the body with a heartbeat, and always stop it before the caller reacts to failure."""
+    task = asyncio.create_task(_heartbeat(scan))
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def _fail(scan: Scan, message: str) -> None:
@@ -344,12 +393,16 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
 
     workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
     try:
-        await _stage(scan, "validating")
-        validate_repo_url(scan.repo_url)
-        await _stage(scan, "cloning")
-        await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme)
-        await _stage(scan, "scanning")
-        await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
+        # The heartbeat covers the whole pipeline, not just the scanner: an 872MB clone is long
+        # enough to be reaped mid-clone on its own. It stops before the except block below, so a
+        # real failure is never racing a beat.
+        async with _beating(scan):
+            await _stage(scan, "validating")
+            validate_repo_url(scan.repo_url)
+            await _stage(scan, "cloning")
+            await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme)
+            await _stage(scan, "scanning")
+            await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
     except Exception as e:
         message = _sanitize(str(e), repo_token)
         # CloudScanError covers every expected failure mode (bad repo_url, clone/scanner failure,

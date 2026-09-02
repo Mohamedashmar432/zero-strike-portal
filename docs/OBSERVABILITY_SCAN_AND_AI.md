@@ -142,6 +142,45 @@ Not covered: an OOM kill (`rc == -9`) still needs a memory-capped container to r
 this host is not one. `--workers` now actually bounds the SAST stage (engine v0.34.0), which is
 the setting that path depends on.
 
+## Large repos: what actually has to be true {#large-repos}
+
+The first production run after this shipped failed at ~38 minutes with *"Scan failed while
+running the scanner — Reclaimed: worker likely crashed mid-scan Last known phase: scanning."*
+The stage layer did its job (it named the phase), and the message was still wrong in the way
+that mattered: nothing had crashed on purpose, and two separate things were broken.
+
+**1. The deployed scanner was ten releases old.** `backend/Dockerfile` bakes the engine in at
+image-build time from `ARG SCANNER_REF`, which was pinned at `v0.24.0` — before every
+large-repo fix in engine v0.34.0, and in particular before `--workers` had any effect on the
+SAST stage. That stage holds a tree-sitter parser and a whole file's AST per goroutine, so the
+old build ignored the portal's `--workers 2` and fanned out to `runtime.NumCPU()` regardless.
+On a memory-capped container that is an OOM kill of *the container*, not of the child — which is
+why `rc == -9` was never seen: the backend process died with it, so nothing was left to run
+`_fail()`. Pinning `SCANNER_REF` and redeploying is not optional here; it is the fix.
+
+**2. Phase stamps are not a heartbeat.** `_stage` writes `updated_at` at phase boundaries, and
+`scanning` — the phase that takes the time — has no boundary in the middle of it. So
+`updated_at` froze when scanning began and the reaper reclaimed the scan
+`scan_timeout_seconds * queue_stuck_multiplier` later, whether or not the worker was alive.
+`_heartbeat` now touches `updated_at` every 30s for as long as the worker is working, which
+finally separates the two failures the message used to conflate:
+
+| What happened | What bounds it | What the user is told |
+| --- | --- | --- |
+| Scan is legitimately slower than the budget | the scanner subprocess's own timeout | "scan timed out after Ns … raise SCAN_TIMEOUT_SECONDS", plus the scanner's last output |
+| Worker died (container restart, OOM) | the reaper, once the heartbeat stops | "the worker … stopped reporting, so it was restarted or killed mid-scan" |
+
+The heartbeat binds `asyncio.sleep` at import (`_real_sleep`). Several tests patch that global to
+skip retry backoff, and a liveness loop whose only yield point is a patched-to-instant sleep
+becomes a busy loop that starves the event loop — an unrelated patch silently disabling the
+mechanism is worse than the sleep being slightly awkward to read.
+
+**Three settings a large repo actually depends on** (`deploy/.env.example` carries the same note):
+`SCAN_TIMEOUT_SECONDS` bounds clone and scan *separately* and is the real ceiling on repo size;
+`SCANNER_MAX_WORKERS` is a **memory** bound, not a speed one, and is a no-op before engine
+v0.34.0; `MAX_CONCURRENT_CLOUD_SCANS` multiplies the per-scan memory, because each concurrent
+scan is another clone plus another scanner subprocess in the same container.
+
 ## Deliberately not done
 
 - No OpenTelemetry / distributed tracing. There is one process and one Mongo; a `trace_id` in

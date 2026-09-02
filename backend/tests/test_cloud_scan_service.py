@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -466,5 +466,49 @@ def test_scan_timeout_message_carries_the_scanner_stderr_tail(client, monkeypatc
         assert reloaded.status == "failed"
         assert "generated_pb2.py" in reloaded.error_message
         assert reloaded.stage == "scanning"
+
+    asyncio.run(run())
+
+
+def test_heartbeat_keeps_a_long_scan_out_of_the_reaper(client, monkeypatch):
+    """The prod failure this exists for: a scan that spent longer in the scanner than the reap
+    window was failed with "worker likely crashed mid-scan" while the subprocess was still
+    running fine, because _stage only writes updated_at at phase boundaries and the phase that
+    takes the time has no boundary in the middle of it."""
+    monkeypatch.setattr(css, "_HEARTBEAT_SECONDS", 0.01)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        stale = datetime.now(timezone.utc) - timedelta(hours=2)
+        await scan.set({Scan.updated_at: stale})
+
+        async with css._beating(scan):
+            await asyncio.sleep(0.1)  # stand-in for a scanner that runs a long time
+
+        reloaded = await Scan.get(scan.id)
+        moved = reloaded.updated_at.replace(tzinfo=timezone.utc) if reloaded.updated_at.tzinfo is None else reloaded.updated_at
+        assert moved > stale, "heartbeat did not advance updated_at; the reaper would reclaim this"
+
+    asyncio.run(run())
+
+
+def test_heartbeat_stops_with_the_work_it_describes(client, monkeypatch):
+    """A leaked heartbeat would keep a dead scan looking alive to the reaper forever -- the exact
+    crash recovery the reaper exists to provide."""
+    monkeypatch.setattr(css, "_HEARTBEAT_SECONDS", 0.01)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        before = len(asyncio.all_tasks())
+        async with css._beating(scan):
+            await asyncio.sleep(0.02)
+        assert len(asyncio.all_tasks()) <= before
+
+        # And it really has stopped writing, not merely been dropped.
+        after = (await Scan.get(scan.id)).updated_at
+        await asyncio.sleep(0.05)
+        assert (await Scan.get(scan.id)).updated_at == after
 
     asyncio.run(run())

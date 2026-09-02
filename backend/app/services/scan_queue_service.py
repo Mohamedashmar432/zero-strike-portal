@@ -84,8 +84,18 @@ async def reap_stuck_scans() -> None:
         queued_status="queued",
         failed_status="failed",
         stuck_after=timedelta(seconds=settings.scan_timeout_seconds * settings.queue_stuck_multiplier),
-        crash_message="Reclaimed: worker likely crashed mid-scan",
-        dead_letter_message="Reclaimed: worker likely crashed mid-scan (retries exhausted)",
+        # "Crashed" is now a claim this can actually make: a live worker heartbeats updated_at
+        # every 30s (cloud_scan_service._heartbeat), so silence past the window really does mean
+        # the worker is gone -- a container restart or OOM kill -- rather than a scan that was
+        # merely slow. A slow one is bounded by the scanner subprocess's own timeout instead.
+        crash_message=(
+            "Reclaimed: the worker running this scan stopped reporting, so it was restarted or "
+            "killed mid-scan (most often the container running out of memory on a large "
+            "repository)."
+        ),
+        dead_letter_message=(
+            "Reclaimed: the worker running this scan stopped reporting; retries exhausted."
+        ),
     )
 
 
