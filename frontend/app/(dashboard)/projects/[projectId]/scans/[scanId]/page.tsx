@@ -15,6 +15,7 @@ import { OwaspChart } from "@/components/common/owasp-chart";
 import { FilterBar } from "@/components/common/filter-bar";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
+import { MetricStrip } from "@/components/common/metric-strip";
 import { StatCard } from "@/components/common/stat-card";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -689,14 +690,20 @@ export default function ScanDetailPage() {
 
       {completed && (
         <>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {/* The four severities are one comparable set, so they read as a strip rather
+              than four cards — and all four are shown, not just critical: a scan with 0
+              critical and 40 high used to render as a clean bill of health. */}
+          <MetricStrip
+            metrics={(["critical", "high", "medium", "low"] as const).map((severity) => ({
+              label: severity[0].toUpperCase() + severity.slice(1),
+              value: report?.stats.by_severity[severity] ?? 0,
+              tone: severity,
+            }))}
+          />
+
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             {[
               { label: "Total Findings", value: report?.stats.total_findings ?? findings?.total ?? 0 },
-              {
-                label: "Critical Unresolved",
-                value: report?.stats.by_severity.critical ?? 0,
-                valueClassName: "text-severity-critical",
-              },
               { label: "Files Scanned", value: report?.stats.files_scanned ?? "—" },
               {
                 label: "Duration",
