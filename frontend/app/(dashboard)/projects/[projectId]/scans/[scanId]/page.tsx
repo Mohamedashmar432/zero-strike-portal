@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, parseApiDate } from "@/lib/utils";
 import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
 import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
 import {
@@ -52,7 +52,7 @@ import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
-import { createCloudScan, getScan, type Scan } from "@/lib/api/scans";
+import { createCloudScan, getScan, SCAN_STAGE_LABELS, type Scan } from "@/lib/api/scans";
 
 // Client-side verdict derivation -- the backend has no separate `verdict` enum, only
 // is_false_positive/false_positive_confidence (see docs/ARCHITECTURE_REVIEW_AND_AI_ROADMAP.md).
@@ -77,7 +77,8 @@ function fileLine(file: string, line: number | null) {
 }
 
 function timeAgo(dateStr: string) {
-  const diffMs = Date.now() - new Date(dateStr).getTime();
+  // parseApiDate for the same reason as stageElapsed below: bare backend timestamps are UTC.
+  const diffMs = Date.now() - parseApiDate(dateStr).getTime();
   const mins = Math.round(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
@@ -85,6 +86,18 @@ function timeAgo(dateStr: string) {
   if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+// How long the scan has been in its current phase. Coarse on purpose: the useful signal is
+// "cloning for 40 minutes" vs "cloning for 20 seconds", not the exact second.
+function stageElapsed(since: string) {
+  // parseApiDate, not new Date: the backend serializes naive UTC, which new Date() reads as
+  // local time — a scan that started seconds ago rendered as "for 5 hours" at UTC+5:30.
+  const mins = Math.floor((Date.now() - parseApiDate(since).getTime()) / 60000);
+  if (mins < 1) return "just started";
+  if (mins < 60) return `for ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.floor(mins / 60);
+  return `for ${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 // Re-scanning a manual (non-connected) repo needs the token re-entered — the original
@@ -647,7 +660,9 @@ export default function ScanDetailPage() {
 
       {scan.status === "failed" && (
         <Alert variant="destructive">
-          <AlertTitle>Scan failed</AlertTitle>
+          <AlertTitle>
+            Scan failed{scan.stage ? ` while ${SCAN_STAGE_LABELS[scan.stage].toLowerCase()}` : ""}
+          </AlertTitle>
           <AlertDescription>{scan.error_message || "Scan failed."}</AlertDescription>
         </Alert>
       )}
@@ -659,6 +674,15 @@ export default function ScanDetailPage() {
             {scan.status === "running"
               ? "The scan is running on the server. This page updates automatically — no need to refresh."
               : "Waiting for the scanner to report…"}
+            {/* Which phase it is in, and how long it has been there. Without this a scan that
+                sits here for an hour looks identical to one that is about to finish, which is
+                what made a stuck large-repo scan impossible to tell from a slow one. */}
+            {scan.stage && (
+              <span className="mt-1 block text-xs">
+                {SCAN_STAGE_LABELS[scan.stage]}
+                {scan.stage_started_at ? ` · ${stageElapsed(scan.stage_started_at)}` : ""}
+              </span>
+            )}
           </AlertDescription>
         </Alert>
       )}

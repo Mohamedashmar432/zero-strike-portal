@@ -34,3 +34,20 @@ re-running this script puts it back to exactly what's documented here.
 
 Requires `MONGODB_URI` in `backend/.env` to point at a real, reachable MongoDB
 (Atlas or local) — see `docs/LOCAL_DEV_SETUP.md`.
+
+## Starting from an empty database
+
+```
+cd backend
+./.venv/Scripts/python scripts/seed_dev_users.py --reset          # prompts for the db name
+./.venv/Scripts/python scripts/seed_dev_users.py --reset --yes    # no prompt (CI/scripts)
+```
+
+`--reset` **drops the whole database** named by `MONGODB_DB_NAME` before seeding —
+users, projects, scans, findings, audit logs, AI usage, and the GridFS
+`scanner_binaries` bucket. Republish binaries from the release pipeline afterwards
+(`routers/admin_downloads.py`), or `/downloads` serves nothing.
+
+That db name is `zerostrike` in *every* environment, so the only thing separating
+dev from prod is which `MONGODB_URI` is in your `.env` — check it before running,
+and restart the backend after (it serves whatever it loaded at boot).

@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { ScanStage } from "./scans";
 
 export type BinaryChecklistItem = {
   os: string;
@@ -14,6 +15,8 @@ export type RunningScanItem = {
   project_id: string;
   started_at: string | null;
   stuck: boolean;
+  stage: ScanStage | null;
+  stage_started_at: string | null;
 };
 
 export type QueueStatus = {

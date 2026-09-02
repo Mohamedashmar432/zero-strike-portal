@@ -143,6 +143,39 @@ export type AiSettings = { project_byok_enabled: boolean };
  * One row per LLM call. Metadata only, deliberately — prompts carry customer source and
  * findings, so they are never stored or returned.
  */
+/** Mirrors LLMErrorCode in app/models/ai_usage_event.py — the stored contract, not a display
+ *  detail: adding a value there is a schema change here too. */
+export type LlmErrorCode =
+  | "context_length_exceeded"
+  | "rate_limited"
+  | "auth_failed"
+  | "model_not_found"
+  | "permission_denied"
+  | "bad_request"
+  | "timeout"
+  | "connection_error"
+  | "provider_unavailable"
+  | "malformed_response"
+  | "not_configured"
+  | "unknown";
+
+/** What each failure means and, where there is one, what to do about it. The point of the whole
+ *  error_code field: "LLMPermanentError" tells an admin nothing they can act on. */
+export const LLM_ERROR_LABELS: Record<LlmErrorCode, string> = {
+  context_length_exceeded: "Prompt too long for the model",
+  rate_limited: "Provider rate limit",
+  auth_failed: "Invalid API key",
+  model_not_found: "Model not found",
+  permission_denied: "Key lacks access to this model",
+  bad_request: "Provider rejected the request",
+  timeout: "Provider timed out",
+  connection_error: "Could not reach the provider",
+  provider_unavailable: "Provider unavailable",
+  malformed_response: "Response was not valid JSON",
+  not_configured: "No AI provider configured",
+  unknown: "Unclassified failure",
+};
+
 export type AiUsageEvent = {
   id: string;
   created_at: string;
@@ -155,6 +188,13 @@ export type AiUsageEvent = {
   model_name: string | null;
   status: "success" | "failed";
   error_type: string | null;
+  /** WHY the call failed, from a closed vocabulary. error_type reports "bad key", "no such
+   *  model" and "prompt too long" all as LLMPermanentError; this is what separates them. */
+  error_code: LlmErrorCode | null;
+  /** 1-based failover position, and the provider fallen back from past the first attempt —
+   *  so a failover chain reads as one chain rather than N unrelated outages. */
+  attempt: number;
+  failover_from: string | null;
   duration_ms: number;
   prompt_tokens: number;
   completion_tokens: number;
@@ -195,6 +235,9 @@ export type AiAnalytics = {
   by_feature: AiUsageFeatureRow[];
   by_model: (AiUsageTotals & { provider: string; model_name: string | null })[];
   by_project: (AiUsageTotals & { project_id: string | null; project_name: string })[];
+  /** Why the failed calls failed, over the same window. Rows predating error_code group under
+   *  "unknown", so these always add up to totals.failed. */
+  failure_reasons: { error_code: LlmErrorCode; count: number }[];
 };
 
 export type AiUsageEventPage = {

@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
+import litellm
 import pytest
 
 import app.services.ai_analysis_service as ai_analysis_service
@@ -486,5 +487,78 @@ def test_run_job_failure_path_marks_failed_without_corrupting_insight(client, mo
             AIFindingInsight.fingerprint == "fp-1", AIFindingInsight.project_id == "proj-x"
         )
         assert insight is None  # nothing written -- no corrupted/partial insight
+
+    asyncio.run(run())
+
+
+def test_failed_job_records_the_stage_and_classified_reason(client, monkeypatch):
+    """A failed AI job has to say where it died and why, in terms someone can act on.
+    error_message alone is fine for reading one job and useless for "which of my jobs died of a
+    too-small context window" (docs/OBSERVABILITY_SCAN_AND_AI.md)."""
+
+    async def fake_get_completion(messages, **kwargs):
+        raise litellm.ContextWindowExceededError(
+            message="too long", model="gpt-4o", llm_provider="openai"
+        )
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+
+    async def run():
+        await _create_active_provider()
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id="proj-obs", scan_type="cloud", triggered_by="cloud", status="completed",
+            created_at=now, updated_at=now,
+        )
+        await scan.insert()
+        await _make_finding("fp-obs", "rule-a", scan_id=str(scan.id), project_id="proj-obs").insert()
+
+        job = AIAnalysisJob(
+            kind="scan", project_id="proj-obs", scan_id=str(scan.id), scope_key=str(scan.id),
+            status="queued",
+        )
+        await job.insert()
+        await ai_analysis_service.run_job(job)
+
+        reloaded = await AIAnalysisJob.get(job.id)
+        assert reloaded.status == "failed"
+        assert reloaded.error_code == "context_length_exceeded"
+        # Kept on failure: it says which phase died, unlike a successful job which has no phase.
+        assert reloaded.stage == "analyzing"
+        assert reloaded.trace_id  # defaulted, so pre-existing rows validate too
+
+    asyncio.run(run())
+
+
+def test_successful_job_clears_its_stage(client, monkeypatch):
+    async def fake_get_completion(messages, **kwargs):
+        payload = json.loads(messages[1]["content"])
+        if "insights" in payload:
+            return {"summary": "ok", "top_recommendations": []}
+        return _enrichment_response([f["fingerprint"] for f in payload["findings"]])
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+
+    async def run():
+        await _create_active_provider()
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id="proj-obs2", scan_type="cloud", triggered_by="cloud", status="completed",
+            created_at=now, updated_at=now,
+        )
+        await scan.insert()
+        await _make_finding("fp-obs2", "rule-a", scan_id=str(scan.id), project_id="proj-obs2").insert()
+
+        job = AIAnalysisJob(
+            kind="scan", project_id="proj-obs2", scan_id=str(scan.id), scope_key=str(scan.id),
+            status="queued",
+        )
+        await job.insert()
+        await ai_analysis_service.run_job(job)
+
+        reloaded = await AIAnalysisJob.get(job.id)
+        assert reloaded.status == "completed"
+        assert reloaded.stage is None
+        assert reloaded.error_code is None
 
     asyncio.run(run())

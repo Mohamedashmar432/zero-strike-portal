@@ -85,6 +85,8 @@ def _to_response(
         started_at=scan.started_at,
         completed_at=scan.completed_at,
         error_message=scan.error_message,
+        stage=scan.stage,
+        stage_started_at=scan.stage_started_at,
         created_at=scan.created_at,
         updated_at=scan.updated_at,
         ai_analysis_status=ai.status if ai else None,

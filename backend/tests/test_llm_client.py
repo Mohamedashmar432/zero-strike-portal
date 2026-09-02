@@ -638,3 +638,90 @@ def test_tool_failover_skips_providers_that_are_not_tool_capable(client, monkeyp
         assert all("tiny-4b" not in m for m in seen), "lmstudio is not tool-capable; must be skipped"
 
     asyncio.run(run())
+
+
+# --- Classified failure reasons (docs/OBSERVABILITY_SCAN_AND_AI.md) ------------------------
+
+
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        # ContextWindowExceededError subclasses BadRequestError, so this pair is the whole reason
+        # _ERROR_CODES is ordered most-specific-first: flattening it to "bad_request" throws away
+        # the one failure a user can actually act on.
+        (
+            litellm.ContextWindowExceededError(message="too long", model="gpt-4o", llm_provider="openai"),
+            "context_length_exceeded",
+        ),
+        (litellm.BadRequestError(message="nope", model="gpt-4o", llm_provider="openai"), "bad_request"),
+        (litellm.AuthenticationError(message="bad key", llm_provider="openai", model="gpt-4o"), "auth_failed"),
+        (litellm.NotFoundError(message="no model", model="gpt-4o", llm_provider="openai"), "model_not_found"),
+        (litellm.RateLimitError(message="slow down", llm_provider="openai", model="gpt-4o"), "rate_limited"),
+        (llm_client.LLMMalformedResponseError("not json"), "malformed_response"),
+        (llm_client.LLMNotConfiguredError("nothing active"), "not_configured"),
+        (ValueError("something else entirely"), "unknown"),
+    ],
+)
+def test_classify_error_separates_the_failures_error_type_collapses(exc, expected):
+    """error_type reports "bad key", "no such model" and "prompt too long" all as
+    LLMPermanentError. Each needs a different fix from the user, and the provider message that
+    would say which cannot be stored (it can echo prompt content) — so the distinction is made
+    here, into a closed vocabulary."""
+    assert llm_client.classify_error(exc) == expected
+
+
+def test_failed_call_records_the_classified_reason(client, monkeypatch):
+    """The code has to reach the stored event, not just the classifier."""
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+
+    async def fake_acompletion(**kwargs):
+        raise litellm.ContextWindowExceededError(message="too long", model="gpt-4o", llm_provider="openai")
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        from app.models.ai_usage_event import AIUsageEvent
+
+        await _create_active_config()
+        with pytest.raises(llm_client.LLMPermanentError):
+            await llm_client.get_completion([{"role": "user", "content": "hi"}], feature="test")
+
+        event = await AIUsageEvent.find_one(AIUsageEvent.status == "failed")
+        assert event.error_type == "LLMPermanentError"
+        assert event.error_code == "context_length_exceeded"
+        assert event.attempt == 1
+        assert event.failover_from is None
+
+    asyncio.run(run())
+
+
+def test_failover_rows_read_as_one_chain(client, monkeypatch):
+    """Without attempt/failover_from a 3-provider failover writes rows that read as three
+    unrelated outages instead of one chain that ended in a success."""
+    monkeypatch.setattr(asyncio, "sleep", _no_delay)
+    seen: list[str] = []
+
+    async def fake_acompletion(**kwargs):
+        seen.append(kwargs["api_key"])
+        if len(seen) <= 3:  # first config: 3 retries, all rate-limited -> fails over
+            raise litellm.RateLimitError(message="slow down", llm_provider="openai", model="gpt-4o")
+        return _FakeResponse('{"ok": true}')
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        from app.models.ai_usage_event import AIUsageEvent
+
+        await _create_active_config(name="Primary", api_key="sk-first")
+        await _create_active_config(name="Backup", api_key="sk-second")
+
+        assert await llm_client.get_completion([{"role": "user", "content": "hi"}]) == {"ok": True}
+
+        events = await AIUsageEvent.find_all().sort("+created_at").to_list()
+        assert [(e.status, e.attempt, e.failover_from) for e in events] == [
+            ("failed", 1, None),
+            ("success", 2, "openai"),
+        ]
+        assert events[0].error_code == "rate_limited"
+
+    asyncio.run(run())

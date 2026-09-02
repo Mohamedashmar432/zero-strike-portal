@@ -34,6 +34,15 @@ from app.schemas.report import (
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
 _KINDS = {"sast", "secret", "sca", "config"}
 
+# Ceiling on the raw report blob stored inline on the Report doc. Mongo refuses any
+# document over 16 MB, and a big-repo report can exceed that on its own — which used to
+# blow up the Report insert *after* every Finding had already been written, leaving a scan
+# marked "failed" that actually had findings and no report to show for them. The findings
+# are the durable artefact; the blob is a convenience copy no route reads today, so it is
+# the part that gives way. The drop is recorded as a diagnostic rather than silently.
+# ponytail: move the blob to GridFS if anything ever needs the full raw report back.
+_MAX_RAW_JSON_BYTES = 8_000_000
+
 
 def normalize_finding_path(file: str, root_path: str | None) -> str:
     """Strip the scan's absolute root/clone-workdir prefix so `file` is repo-relative.
@@ -283,6 +292,21 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
 
     now = datetime.now(timezone.utc)
     duration_ms = round(report.duration_ns / 1_000_000) if report.duration_ns is not None else None
+    diagnostics = [_diagnostic(d) for d in report.diagnostics]
+    stored_raw_json: str | None = raw_json
+    if len(raw_json.encode("utf-8", errors="replace")) > _MAX_RAW_JSON_BYTES:
+        stored_raw_json = None
+        diagnostics.append(
+            DiagnosticEmbedded(
+                severity="warning",
+                message=(
+                    f"Raw report JSON ({len(raw_json) / 1_000_000:.1f} MB) exceeded the "
+                    f"{_MAX_RAW_JSON_BYTES / 1_000_000:.0f} MB inline storage limit and was not kept. "
+                    f"All {len(findings)} findings were ingested normally."
+                ),
+                location=None,
+            )
+        )
     await Report(
         scan_id=scan_id,
         project_id=project_id,
@@ -295,8 +319,8 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         branch=report.branch,
         hostname=report.hostname,
         stats=_stats(report.stats, findings),
-        diagnostics=[_diagnostic(d) for d in report.diagnostics],
-        raw_json=raw_json,
+        diagnostics=diagnostics,
+        raw_json=stored_raw_json,
         json_uploaded_at=now,
     ).insert()
 
@@ -309,6 +333,9 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     scan.status = "completed"
     scan.completed_at = now
     scan.updated_at = now
+    # A completed scan has no current phase, and a leftover "ingesting" would read as one.
+    # Only the failure paths keep `stage`, where it says where the pipeline stopped.
+    scan.stage = None
     await scan.save()
 
     # Completion frees a cloud-scan concurrency slot — harmless no-op for local/CI scans.

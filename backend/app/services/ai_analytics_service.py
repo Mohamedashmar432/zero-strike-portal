@@ -127,6 +127,16 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
             {"$group": {"_id": {"provider": "$provider", "model_name": "$model_name"}, **_SUMS}},
             {"$sort": {"cost_usd": -1}},
         ],
+        # WHY calls failed, over the same window. The totals already say how many failed; this is
+        # the row that says whether the fix is a bigger context window, a new key, or patience.
+        # Rows predating error_code have none, so they group under "unknown" rather than dropping
+        # out and making the reasons not add up to the failure count.
+        "failure_reasons": [
+            current,
+            {"$match": {"status": "failed"}},
+            {"$group": {"_id": {"$ifNull": ["$error_code", "unknown"]}, "count": {"$sum": 1}}},
+            {"$sort": {"count": -1, "_id": 1}},
+        ],
     }
     if project_id is None:
         facets["by_project"] = [
@@ -171,6 +181,9 @@ async def get_analytics(*, project_id: str | None, days: int = 30) -> dict:
             for r in faceted.get("by_model", [])
         ],
         "by_project": [],
+        "failure_reasons": [
+            {"error_code": r["_id"], "count": r["count"]} for r in faceted.get("failure_reasons", [])
+        ],
     }
     result["by_feature"].extend(_vanished_features(result["by_feature"], prev_by_feature))
 
@@ -260,6 +273,9 @@ async def list_events(
                 "model_name": e.model_name,
                 "status": e.status,
                 "error_type": e.error_type,
+                "error_code": e.error_code,
+                "attempt": e.attempt,
+                "failover_from": e.failover_from,
                 "duration_ms": e.duration_ms,
                 "prompt_tokens": e.prompt_tokens,
                 "completion_tokens": e.completion_tokens,

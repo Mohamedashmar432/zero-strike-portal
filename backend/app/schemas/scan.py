@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from app.models.scan import ScanStatus
+from app.models.scan import ScanStage, ScanStatus
 from app.schemas.dashboard import SeverityCounts
 
 
@@ -53,6 +53,10 @@ class ScanResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     error_message: str | None
+    # Which phase of the cloud-scan pipeline this is in (running) or stopped in (failed).
+    # Diagnostics only -- see Scan.stage; the UI must key behaviour off `status`, never this.
+    stage: ScanStage | None = None
+    stage_started_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     # Denormalized (read-side join) from the latest scan-level AIAnalysisJob, so any list/detail

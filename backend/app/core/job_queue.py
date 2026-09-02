@@ -55,8 +55,21 @@ async def reap_stuck(
             doc.retry_count += 1
             doc.status = queued_status
             doc.started_at = None
+            # A retry starts the pipeline over, so a stage left from the dead attempt would
+            # describe work nothing is doing. Only models that have the field (Scan,
+            # RemediationJob) — the primitive stays usable by ones that don't.
+            if hasattr(doc, "stage"):
+                doc.stage = None
+                if hasattr(doc, "stage_started_at"):
+                    doc.stage_started_at = None
         else:
             doc.status = failed_status
-            doc.error_message = dead_letter_message if doc.retry_count > 0 else crash_message
+            # Name the phase it died in. "Interrupted" alone sent whoever had to diagnose a
+            # stuck scan back to reading the source to guess between clone, scan and ingest;
+            # this is the one line that answers it (docs/OBSERVABILITY_SCAN_AND_AI.md).
+            stage = getattr(doc, "stage", None)
+            where = f" Last known phase: {stage}." if stage else ""
+            base = dead_letter_message if doc.retry_count > 0 else crash_message
+            doc.error_message = f"{base}{where}"
             doc.completed_at = now
         await doc.save()

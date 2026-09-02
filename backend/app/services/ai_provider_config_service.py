@@ -257,6 +257,9 @@ async def record_usage(
     feature: str = "unknown",
     duration_ms: int = 0,
     error_type: str | None = None,
+    error_code: str | None = None,
+    attempt: int = 1,
+    failover_from: str | None = None,
 ) -> None:
     """Atomic $inc so concurrent llm_client calls (analyze_findings_batch runs one call per
     rule_id group, gathered concurrently under a semaphore) against the same active
@@ -296,6 +299,9 @@ async def record_usage(
         feature=feature,
         status="success" if success else "failed",
         error_type=error_type,
+        error_code=error_code,
+        attempt=attempt,
+        failover_from=failover_from,
         duration_ms=duration_ms,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

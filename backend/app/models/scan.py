@@ -9,6 +9,11 @@ from pymongo import IndexModel
 ScanStatus = Literal["pending", "queued", "running", "completed", "failed"]
 ScanType = Literal["local", "cloud", "cicd"]
 
+# Observability-only sub-phase of status="running" for a cloud scan (see Scan.stage), in order:
+#   validating -> cloning -> scanning -> ingesting
+# Mirrors RemediationJob.stage, including the rule that nothing may gate logic on it.
+ScanStage = Literal["validating", "cloning", "scanning", "ingesting"]
+
 
 class Scan(Document):
     project_id: str
@@ -39,6 +44,17 @@ class Scan(Document):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
+    # Coarse phase within status="running" -- cloud scans only, and advisory ONLY. The queue
+    # claims and reaps on `status` (app.core.job_queue), so this must never be branched on; it
+    # exists because a scan sitting "running" for 20 minutes previously said nothing about
+    # whether it was cloning a 3GB repo or the scanner was wedged, which left diagnosing a
+    # stuck scan to re-reading the source (see docs/OBSERVABILITY_SCAN_AND_AI.md).
+    stage: ScanStage | None = None
+    # When the current stage began. Kept as its own field rather than derived from started_at so
+    # "cloning for 22 minutes" is directly readable, and because each stage write also touches
+    # updated_at -- which is what turns the reaper's staleness window into a real progress
+    # heartbeat instead of just "was claimed a long time ago".
+    stage_started_at: datetime | None = None
     # Reap-then-retry escalation (see app.core.job_queue.reap_stuck): a scan stuck
     # "running" past the crash-recovery window is requeued if retry_count+1 < max_attempts,
     # otherwise terminally failed. Defaults preserve the original always-terminal reap

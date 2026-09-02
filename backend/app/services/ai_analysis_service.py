@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.core.config import settings
 from app.core.retry import retry_transient
 from app.core.timeutils import as_utc
-from app.models.ai_analysis_job import AIAnalysisJob
+from app.models.ai_analysis_job import AIAnalysisJob, AIJobStage
 from app.models.ai_finding_insight import AIFindingInsight
 from app.models.ai_scan_insight import AIScanInsight
 from app.models.finding import Finding
@@ -523,6 +523,20 @@ async def synthesize_scan(
     return existing
 
 
+async def _stage(job: AIAnalysisJob, stage: AIJobStage) -> None:
+    """Record which phase of the job is running. Diagnostics only, and best-effort.
+
+    Surgical $set (like _progress below) so it cannot clobber concurrently-written progress
+    counters, and it swallows its own failure: the queue claims and reaps on `status`, so a
+    missing stage annotation must not turn a working job into a failed one.
+    """
+    try:
+        await job.set({AIAnalysisJob.stage: stage, AIAnalysisJob.updated_at: datetime.now(timezone.utc)})
+        job.stage = stage
+    except Exception:
+        logger.warning("could not record ai job stage", job_id=str(job.id), stage=stage, exc_info=True)
+
+
 async def run_job(job: AIAnalysisJob) -> None:
     """Entry point invoked by ai_job_queue_service after claiming a job. Always ends by
     writing the job to a terminal status -- a malformed/permanent LLM failure must never
@@ -536,6 +550,7 @@ async def run_job(job: AIAnalysisJob) -> None:
     job.status = "running"
     job.started_at = start
     job.updated_at = start
+    job.stage = "analyzing" if job.kind == "finding" else "loading"
     await job.save()
     try:
         if job.kind == "finding":
@@ -566,13 +581,18 @@ async def run_job(job: AIAnalysisJob) -> None:
                     }
                 )
 
+            await _stage(job, "analyzing")
             insights = await analyze_findings_batch(findings, force=job.force, progress_cb=_progress)
+            await _stage(job, "synthesizing")
             await synthesize_scan(scan, insights, intended=len(findings))
     except Exception as exc:
         logger.exception("ai analysis job failed", job_id=str(job.id), kind=job.kind)
         now = datetime.now(timezone.utc)
         job.status = "failed"
         job.error_message = str(exc)[:2000]
+        # Keep `stage`: on a failed job it records which phase died, which is the difference
+        # between "the provider rejected our prompt" and "we never got that far".
+        job.error_code = llm_client.classify_error(exc)
         job.completed_at = now
         job.updated_at = now
         await job.save()
@@ -584,7 +604,13 @@ async def run_job(job: AIAnalysisJob) -> None:
             project_id=job.project_id,
             target_type="ai_analysis_job",
             target_id=str(job.id),
-            metadata={"kind": job.kind, "scope_key": job.scope_key, "error": job.error_message},
+            metadata={
+                "kind": job.kind,
+                "scope_key": job.scope_key,
+                "error": job.error_message,
+                "error_code": job.error_code,
+                "stage": job.stage,
+            },
         )
         return
 
@@ -592,6 +618,7 @@ async def run_job(job: AIAnalysisJob) -> None:
     job.status = "completed"
     job.completed_at = now
     job.updated_at = now
+    job.stage = None  # no current phase once terminal-successful; only failures keep it
     await job.save()
     await audit_service.record(
         "AI Analysis Job Completed",
