@@ -17,6 +17,24 @@ from beanie import Document
 from pydantic import Field
 from pymongo import IndexModel
 
+# Closed vocabulary for AIUsageEvent.error_code. Defined here (with the model, not with the
+# classifier) because it is the stored contract: the analytics reader groups by it and the UI
+# labels it, so adding a value is a schema change, not an implementation detail.
+LLMErrorCode = Literal[
+    "context_length_exceeded",
+    "rate_limited",
+    "auth_failed",
+    "model_not_found",
+    "permission_denied",
+    "bad_request",
+    "timeout",
+    "connection_error",
+    "provider_unavailable",
+    "malformed_response",
+    "not_configured",
+    "unknown",
+]
+
 # ponytail: fixed 180-day retention via a TTL index rather than a settings knob and a reaper task.
 # The collection is unbounded (one row per LLM call) and prod runs on an Atlas M0 with a 512MB cap.
 # Lifetime totals survive on AIProviderConfig regardless, so expiring rows only costs old detail.
@@ -41,6 +59,18 @@ class AIUsageEvent(Document):
     # Exception class name (LLMPermanentError, LLMTransientError, ...) -- never the raw provider
     # message, which can echo back prompt content.
     error_type: str | None = None
+    # WHY it failed, from a closed vocabulary (see llm_client.classify_error). error_type alone
+    # collapses "your key is wrong", "that model does not exist" and "the prompt exceeds this
+    # model's window" into one string -- LLMPermanentError -- and those need three different
+    # actions from the user. Deliberately a code and not the provider's message: the no-raw-text
+    # rule in this module's docstring is what keeps prompt content out of a queryable collection,
+    # and a classified code carries the actionable part without it.
+    error_code: LLMErrorCode | None = None
+    # Which failover attempt this row is (1-based) and, past the first, the provider it fell back
+    # from. Without these a 3-provider failover writes three rows that read as three unrelated
+    # outages instead of one chain that ended in a success.
+    attempt: int = 1
+    failover_from: str | None = None
     duration_ms: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -56,4 +86,7 @@ class AIUsageEvent(Document):
             # Portal-wide dashboard: no project_id predicate, just the time window.
             IndexModel([("created_at", -1)]),
             IndexModel([("created_at", 1)], expireAfterSeconds=_RETENTION_SECONDS),
+            # Failure-reason breakdown on the analytics pages: status equality + time range,
+            # grouped by error_code. Sparse-ish in practice (most rows are successes).
+            IndexModel([("status", 1), ("created_at", -1)]),
         ]

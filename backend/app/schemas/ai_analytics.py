@@ -47,6 +47,15 @@ class AiUsageProjectRow(AiUsageTotals):
     project_name: str
 
 
+class AiFailureReason(BaseModel):
+    """One row of the failure-reason breakdown: how many calls died of this cause, over the same
+    window as the rest of the page. Exists so the most common AI failure is visible without
+    opening a single event row."""
+
+    error_code: str
+    count: int
+
+
 class AiAnalyticsResponse(BaseModel):
     days: int
     totals: AiUsageTotals
@@ -57,6 +66,9 @@ class AiAnalyticsResponse(BaseModel):
     by_feature: list[AiUsageFeatureRow]
     by_model: list[AiUsageModelRow]
     by_project: list[AiUsageProjectRow]  # portal scope only; empty for a single project
+    #: Why the failed calls failed, over the same window. Defaulted so an older client/response
+    #: shape still validates.
+    failure_reasons: list[AiFailureReason] = []
 
 
 class AiUsageEventRow(BaseModel):
@@ -71,6 +83,14 @@ class AiUsageEventRow(BaseModel):
     model_name: str | None
     status: str
     error_type: str | None
+    # Classified failure reason -- the field that separates "bad key" from "prompt too long",
+    # both of which error_type reports as LLMPermanentError. None on successes and on rows
+    # written before this shipped.
+    error_code: str | None = None
+    # 1-based failover position, and the provider fallen back from past the first attempt. Lets a
+    # failover chain be read as one chain rather than N unrelated failures.
+    attempt: int = 1
+    failover_from: str | None = None
     duration_ms: int
     prompt_tokens: int
     completion_tokens: int

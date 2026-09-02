@@ -333,6 +333,9 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     scan.status = "completed"
     scan.completed_at = now
     scan.updated_at = now
+    # A completed scan has no current phase, and a leftover "ingesting" would read as one.
+    # Only the failure paths keep `stage`, where it says where the pipeline stopped.
+    scan.stage = None
     await scan.save()
 
     # Completion frees a cloud-scan concurrency slot — harmless no-op for local/CI scans.

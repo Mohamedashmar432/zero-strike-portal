@@ -358,3 +358,113 @@ def test_run_sync_timeout_returns_even_when_a_grandchild_holds_the_output(tmp_pa
 
     assert "timed out" in str(exc.value)
     assert elapsed < 15, f"_run_sync took {elapsed:.1f}s to give up on a 2s timeout — it is waiting on the child tree"
+
+
+# --- Stage observability (docs/OBSERVABILITY_SCAN_AND_AI.md) -------------------------------
+
+
+def test_stage_advances_through_the_pipeline_and_clears_on_success(client, monkeypatch, tmp_path):
+    """The reason this layer exists: a scan sitting "running" must be able to say where it is.
+
+    Asserted as the observed *sequence*, not just the final value, because the final value of a
+    successful scan is None -- a test that only checked the end state would pass against a
+    version that never set a stage at all.
+    """
+    _patch_subprocess(monkeypatch, tmp_path)
+    seen: list[str] = []
+    real_stage = css._stage
+
+    async def spy(scan, stage):
+        seen.append(stage)
+        await real_stage(scan, stage)
+
+    monkeypatch.setattr(css, "_stage", spy)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+
+        assert seen == ["validating", "cloning", "scanning", "ingesting"]
+        assert reloaded.status == "completed"
+        # Cleared on success: a completed scan has no current phase, and a leftover "ingesting"
+        # would read as one.
+        assert reloaded.stage is None
+
+    asyncio.run(run())
+
+
+def test_failed_scan_keeps_the_stage_it_died_in(client, monkeypatch, tmp_path):
+    """A terminal failure keeps `stage` — that is the record of where the pipeline stopped, which
+    is exactly what product-flaw.md had to guess at."""
+    _patch_subprocess(monkeypatch, tmp_path, clone_rc=128)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+
+        assert reloaded.status == "failed"
+        assert reloaded.stage == "cloning"
+        assert reloaded.stage_started_at is not None
+
+    asyncio.run(run())
+
+
+def test_a_failing_stage_write_is_swallowed(client, monkeypatch, tmp_path):
+    """`stage` is advisory. Nothing gates on it, so a scan that cannot record where it is must
+    still run — otherwise the diagnostics layer becomes a new way to lose a scan. Exercises the
+    real helper against a save that raises, rather than a stand-in that cannot fail."""
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+
+        async def boom(*a, **kw):
+            raise RuntimeError("mongo said no")
+
+        monkeypatch.setattr(type(scan), "save", boom)
+        await css._stage(scan, "cloning")  # must not raise
+        # The in-memory scan still carries the stage it tried to write, so a caller that goes on
+        # to fail reports the right phase even when the annotation never reached Mongo.
+        assert scan.stage == "cloning"
+
+    asyncio.run(run())
+
+
+def test_scan_timeout_message_carries_the_scanner_stderr_tail(client, monkeypatch, tmp_path):
+    """The single most useful fact about a large-repo hang is the last thing the scanner said
+    before the budget ran out. The timeout path used to discard stderr entirely."""
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+    monkeypatch.setattr(css, "_kill_tree", lambda proc: None)
+
+    class _HangingProc:
+        pid = 4243
+        returncode = None
+
+        def wait(self, timeout=None):
+            raise css.subprocess.TimeoutExpired(cmd="scanner", timeout=timeout)
+
+    def factory(cmd, stdout=None, stderr=None, env=None, **kwargs):
+        if cmd[0] == "git":
+            return _FakeProc(0)
+        if stderr is not None:
+            stderr.write(b"parsing vendor/huge/generated_pb2.py\n")
+        return _HangingProc()
+
+    monkeypatch.setattr(css.subprocess, "Popen", factory)
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+
+        assert reloaded.status == "failed"
+        assert "generated_pb2.py" in reloaded.error_message
+        assert reloaded.stage == "scanning"
+
+    asyncio.run(run())

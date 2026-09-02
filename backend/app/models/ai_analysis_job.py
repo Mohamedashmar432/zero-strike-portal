@@ -10,6 +10,7 @@ on an already-in-flight scope returns the existing job instead of creating a dup
 
 from datetime import datetime, timezone
 from typing import Literal
+from uuid import uuid4
 
 from beanie import Document
 from pydantic import Field
@@ -17,6 +18,14 @@ from pymongo import IndexModel
 
 AIJobKind = Literal["finding", "scan"]
 AIJobStatus = Literal["queued", "running", "completed", "failed"]
+
+# Observability-only sub-phase of status="running", mirroring RemediationJob.stage (which had
+# this and AIAnalysisJob did not). A job sitting at 3/12 chunks could not say whether it was
+# fetching findings, waiting on a provider, or synthesizing -- and those fail for different
+# reasons. Advisory: app.core.job_queue claims and reaps on `status`, never on this.
+#   kind="finding": analyzing
+#   kind="scan":    loading -> analyzing -> synthesizing
+AIJobStage = Literal["loading", "analyzing", "synthesizing"]
 
 
 class AIAnalysisJob(Document):
@@ -33,6 +42,16 @@ class AIAnalysisJob(Document):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None
+    stage: AIJobStage | None = None
+    # Classified failure reason from llm_client.classify_error -- a closed vocabulary shared with
+    # AIUsageEvent.error_code. error_message carries the exception text, which is fine for a human
+    # reading one job but useless for "which of my AI jobs died of a too-small context window";
+    # this is the field the UI can turn into an actionable hint.
+    error_code: str | None = None
+    # uuid4 bound into structlog for the whole run, so this job's log lines can be pulled together
+    # out of interleaved concurrent-job output. Same role as RemediationJob.trace_id. Defaulted
+    # rather than required so rows written before this field validate on load.
+    trace_id: str = Field(default_factory=lambda: str(uuid4()))
     # Live progress for the "AI analyzing · N%" tag: number of enrichment batches (chunks)
     # done vs total. Set once the chunk count is known and bumped as each chunk finishes.
     # 0/0 = not started; the frontend derives % and a rough ETA from these + started_at.

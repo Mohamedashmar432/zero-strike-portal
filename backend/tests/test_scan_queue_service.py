@@ -263,3 +263,46 @@ def test_capacity_ignores_running_non_cloud_scans(client, monkeypatch):
         assert (await Scan.get(queued.id)).status == "running"
 
     asyncio.run(run())
+
+
+def test_reaped_scan_names_the_stage_it_was_stuck_in(client, monkeypatch):
+    """"Interrupted" alone sent whoever had to diagnose a stuck scan back to reading the source to
+    guess between clone, scan and ingest. The reap message now says which one it was, and a retry
+    clears the stage so it never describes work nothing is doing."""
+    monkeypatch.setattr(scan_queue_service.settings, "scan_timeout_seconds", 10)
+    monkeypatch.setattr(scan_queue_service.settings, "queue_stuck_multiplier", 3)
+
+    async def run():
+        stale_time = datetime.now(timezone.utc) - timedelta(seconds=1000)
+
+        def _stuck(**kw):
+            return Scan(
+                project_id="qproj",
+                scan_type="cloud",
+                triggered_by="cloud",
+                status="running",
+                repo_url="https://github.com/example/repo",
+                stage="cloning",
+                stage_started_at=stale_time,
+                created_at=stale_time,
+                updated_at=stale_time,
+                **kw,
+            )
+
+        terminal = _stuck()
+        retryable = _stuck(max_attempts=2)
+        await terminal.insert()
+        await retryable.insert()
+
+        await scan_queue_service.reap_stuck_scans()
+
+        dead = await Scan.get(terminal.id)
+        assert dead.status == "failed"
+        assert "cloning" in dead.error_message
+        # A retry starts the pipeline over, so the dead attempt's stage must not linger.
+        requeued = await Scan.get(retryable.id)
+        assert requeued.status == "queued"
+        assert requeued.stage is None
+        assert requeued.stage_started_at is None
+
+    asyncio.run(run())

@@ -148,6 +148,47 @@ _PERMANENT_EXCEPTIONS = (
 )
 
 
+# litellm exception class -> stored error_code, most specific first. ContextWindowExceededError
+# subclasses BadRequestError, so order matters: a truthful "your prompt is too long for this
+# model" must not be flattened into a generic "bad request" the user can do nothing with.
+_ERROR_CODES: tuple[tuple[type[BaseException], str], ...] = (
+    (litellm.ContextWindowExceededError, "context_length_exceeded"),
+    (litellm.AuthenticationError, "auth_failed"),
+    (litellm.PermissionDeniedError, "permission_denied"),
+    (litellm.NotFoundError, "model_not_found"),
+    (litellm.RateLimitError, "rate_limited"),
+    (litellm.Timeout, "timeout"),
+    (litellm.APIConnectionError, "connection_error"),
+    (litellm.ServiceUnavailableError, "provider_unavailable"),
+    (litellm.InternalServerError, "provider_unavailable"),
+    (litellm.BadRequestError, "bad_request"),
+    (LLMMalformedResponseError, "malformed_response"),
+    (LLMNotConfiguredError, "not_configured"),
+)
+
+
+def classify_error(exc: BaseException) -> str:
+    """Map an exception to one AIUsageEvent.error_code value.
+
+    The point of this function is that `error_type` -- the exception class name we already
+    stored -- cannot distinguish the three most common AI failures a user hits, because
+    "invalid API key", "no such model" and "prompt exceeds the context window" are all
+    LLMPermanentError. Each needs a different fix, and the raw provider message that would
+    have said which is not storable (it can echo prompt content), so the distinction has to
+    be made here, into a closed vocabulary. See docs/OBSERVABILITY_SCAN_AND_AI.md.
+
+    Never raises: it runs on a failure path, and a bad classification must not replace the
+    real error with a second one.
+    """
+    try:
+        for exc_type, code in _ERROR_CODES:
+            if isinstance(exc, exc_type):
+                return code
+    except Exception:  # pragma: no cover -- isinstance against a broken class object
+        pass
+    return "unknown"
+
+
 @retry_transient(_TRANSIENT_EXCEPTIONS, max_attempts=3)
 async def _call_acompletion(**kwargs):
     return await litellm.acompletion(**kwargs)
@@ -171,6 +212,9 @@ async def _record_usage_safe(
     feature: str = "unknown",
     duration_ms: int = 0,
     error_type: str | None = None,
+    error_code: str | None = None,
+    attempt: int = 1,
+    failover_from: str | None = None,
 ) -> None:
     """Never lets a usage-write hiccup surface as an error -- by the time this is called the
     provider call itself has already succeeded or definitively failed, so a bookkeeping
@@ -189,6 +233,9 @@ async def _record_usage_safe(
             feature=feature,
             duration_ms=duration_ms,
             error_type=error_type,
+            error_code=error_code,
+            attempt=attempt,
+            failover_from=failover_from,
         )
     except Exception:
         logger.exception("failed to record llm usage", config_id=str(config.id), success=success)
@@ -252,6 +299,8 @@ async def get_completion(
                 project_id=project_id,
                 scan_id=scan_id,
                 feature=feature,
+                attempt=index + 1,
+                failover_from=candidates[index - 1].provider if index else None,
             )
         except LLMTransientError as exc:
             last_transient = exc
@@ -276,6 +325,8 @@ async def _completion_with_config(
     project_id: str | None,
     scan_id: str | None,
     feature: str = "unknown",
+    attempt: int = 1,
+    failover_from: str | None = None,
 ) -> dict:
     """One completion attempt against one provider config. Usage is recorded against `config`, so a
     failed-over call bills the provider that actually served it."""
@@ -295,20 +346,28 @@ async def _completion_with_config(
     if response_format_json and config.provider in _JSON_OBJECT_PROVIDERS:
         kwargs["response_format"] = {"type": "json_object"}
 
-    attribution = {"project_id": project_id, "scan_id": scan_id, "feature": feature}
+    attribution = {
+        "project_id": project_id,
+        "scan_id": scan_id,
+        "feature": feature,
+        "attempt": attempt,
+        "failover_from": failover_from,
+    }
     started = time.perf_counter()
     try:
         response = await _call_acompletion(**kwargs)
     except _PERMANENT_EXCEPTIONS as exc:
         logger.warning("llm call failed permanently", error=str(exc))
         await _record_usage_safe(
-            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         raise LLMPermanentError(str(exc)) from exc
     except _TRANSIENT_EXCEPTIONS as exc:
         logger.error("llm call exhausted retries", error=str(exc))
         await _record_usage_safe(
-            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         raise LLMTransientError(str(exc)) from exc
     except litellm.APIError as exc:
@@ -318,7 +377,8 @@ async def _completion_with_config(
         # exceptions above subclass APIError, so this never shadows them.
         logger.warning("llm call failed with unmapped api error", error=str(exc))
         await _record_usage_safe(
-            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         raise LLMPermanentError(str(exc)) from exc
     duration_ms = _ms(started)
@@ -454,6 +514,8 @@ async def get_tool_completion(
             return await _tool_completion_with_config(
                 config, messages, tools=tools, tool_choice=tool_choice,
                 max_tokens=max_tokens, project_id=project_id, scan_id=scan_id, feature=feature,
+                attempt=index + 1,
+                failover_from=candidates[index - 1].provider if index else None,
             )
         except LLMTransientError as exc:
             last_transient = exc
@@ -478,6 +540,8 @@ async def _tool_completion_with_config(
     project_id: str | None,
     scan_id: str | None,
     feature: str = "unknown",
+    attempt: int = 1,
+    failover_from: str | None = None,
 ) -> LLMToolResponse:
     """One tool-calling attempt against one provider config."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
@@ -496,14 +560,21 @@ async def _tool_completion_with_config(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
-    attribution = {"project_id": project_id, "scan_id": scan_id, "feature": feature}
+    attribution = {
+        "project_id": project_id,
+        "scan_id": scan_id,
+        "feature": feature,
+        "attempt": attempt,
+        "failover_from": failover_from,
+    }
     started = time.perf_counter()
     try:
         response = await _call_acompletion(**kwargs)
     except _PERMANENT_EXCEPTIONS as exc:
         recovered = _recover_rejected_tool_name(exc)
         await _record_usage_safe(
-            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         if recovered is not None:
             logger.warning("recovered a tool call from a rejected-tool-name error", error=str(exc)[:300])
@@ -513,13 +584,15 @@ async def _tool_completion_with_config(
     except _TRANSIENT_EXCEPTIONS as exc:
         logger.error("llm tool call exhausted retries", error=str(exc))
         await _record_usage_safe(
-            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMTransientError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         raise LLMTransientError(str(exc)) from exc
     except litellm.APIError as exc:
         logger.warning("llm tool call failed with unmapped api error", error=str(exc))
         await _record_usage_safe(
-            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started), **attribution
+            config, success=False, error_type="LLMPermanentError", duration_ms=_ms(started),
+            error_code=classify_error(exc), **attribution
         )
         raise LLMPermanentError(str(exc)) from exc
 

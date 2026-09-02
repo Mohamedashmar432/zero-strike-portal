@@ -31,6 +31,7 @@ def _seed(events: list[dict]) -> None:
                 feature=e.get("feature", "analysis"),
                 status=e.get("status", "success"),
                 error_type=e.get("error_type"),
+                error_code=e.get("error_code"),
                 duration_ms=e.get("duration_ms", 100),
                 prompt_tokens=e.get("prompt_tokens", 10),
                 completion_tokens=e.get("completion_tokens", 5),
@@ -282,3 +283,31 @@ def test_feature_rows_carry_the_change_against_the_previous_window(client):
     assert rows["repo_doc"]["cost_usd"] == 0.0
     assert round(rows["repo_doc"]["cost_delta_usd"], 2) == -0.50
     assert rows["repo_doc"]["requests_delta"] == -1
+
+
+def test_failure_reasons_break_down_why_calls_failed(client):
+    """The totals say how many calls failed; this says whether the fix is a bigger context
+    window, a new key, or patience. Rows predating error_code group under "unknown" rather than
+    dropping out, so the reasons still add up to the failure count."""
+    owner = register_and_login(client, email="an-owner-fr@zerostrike.dev")
+    project = _create_project(client, _headers(owner), name="Reasons")
+
+    _seed(
+        [
+            {"project_id": project["id"], "status": "failed", "error_code": "context_length_exceeded"},
+            {"project_id": project["id"], "status": "failed", "error_code": "context_length_exceeded"},
+            {"project_id": project["id"], "status": "failed", "error_code": "auth_failed"},
+            {"project_id": project["id"], "status": "failed"},  # legacy row, no error_code
+            {"project_id": project["id"], "status": "success"},
+        ]
+    )
+
+    r = client.get(f"/api/v1/projects/{project['id']}/ai-analytics", headers=_headers(owner))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["failure_reasons"] == [
+        {"error_code": "context_length_exceeded", "count": 2},
+        {"error_code": "auth_failed", "count": 1},
+        {"error_code": "unknown", "count": 1},
+    ]
+    assert sum(row["count"] for row in body["failure_reasons"]) == body["totals"]["failed"]

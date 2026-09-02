@@ -29,7 +29,7 @@ import structlog
 
 from app.core.config import settings
 from app.core.retry import retry_transient
-from app.models.scan import Scan
+from app.models.scan import Scan, ScanStage
 from app.schemas.report import GoReportIn
 from app.services import report_ingestion_service, workspace_settings_service
 
@@ -124,6 +124,30 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         proc.wait(timeout=30)
 
 
+# How much of a killed process's stderr to keep. Enough for the last few scanner log lines
+# (which name the file being parsed), small enough that it can't bloat Scan.error_message —
+# _sanitize caps the whole message at 1000 chars downstream regardless.
+_STDERR_TAIL_BYTES = 2000
+
+
+def _stderr_tail(err_f) -> str:
+    """Last few KB of a timed-out process's stderr, as a suffix for its error message.
+
+    Best-effort: this runs on a failure path that must not be replaced by a second failure,
+    so an unreadable temp file yields no suffix rather than an exception.
+    """
+    try:
+        err_f.seek(0, os.SEEK_END)
+        size = err_f.tell()
+        err_f.seek(max(0, size - _STDERR_TAIL_BYTES))
+        text = err_f.read().decode(errors="replace").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    return f" Last scanner output: {text}"
+
+
 def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, bytes, bytes]:
     # Popen with output to temp FILES rather than subprocess.run with pipes, on purpose.
     # subprocess.run(capture_output=True, timeout=...) reads through pipes, and its timeout
@@ -141,13 +165,18 @@ def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[in
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 _kill_tree(proc)
+                # Keep what the process had written before it was killed. A timeout used to
+                # discard stderr entirely, throwing away the one line that says which file the
+                # scanner was working on when the budget ran out — the most useful fact there is
+                # about a large-repo hang, and the reason diagnosing one meant reading source.
+                tail = _stderr_tail(err_f)
                 if cmd[0] == settings.scanner_binary_path:
                     raise CloudScanError(
                         f"scan timed out after {timeout}s — the repository is too large to finish "
                         "in the current budget. Exclude large generated or vendored directories, "
-                        "or ask an administrator to raise SCAN_TIMEOUT_SECONDS."
+                        f"or ask an administrator to raise SCAN_TIMEOUT_SECONDS.{tail}"
                     )
-                raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}")
+                raise CloudScanError(f"command timed out after {timeout}s: {cmd[0]}{tail}")
             out_f.seek(0)
             err_f.seek(0)
             return proc.returncode, out_f.read(), err_f.read()
@@ -259,8 +288,28 @@ async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
                 "excluding additional large directories or increasing the scan container's memory."
             )
         raise CloudScanError(f"scanner exited {rc}: {err.decode(errors='replace')}")
+    await _stage(scan, "ingesting")
     report = GoReportIn.model_validate_json(out)
     await report_ingestion_service.ingest(scan, report, out.decode("utf-8", errors="replace"))
+
+
+async def _stage(scan: Scan, stage: ScanStage) -> None:
+    """Record which phase of the pipeline this scan is in. Diagnostics only.
+
+    Advisory by construction: the queue claims and reaps on `status` alone, so nothing branches
+    on `stage` and a failed write here must not fail the scan — a scan that finishes without
+    having said it was cloning is a worse log, not a worse scan. The write also refreshes
+    updated_at, which is what makes the reaper's staleness window a real progress heartbeat
+    rather than "claimed a long time ago" (see docs/OBSERVABILITY_SCAN_AND_AI.md).
+    """
+    now = datetime.now(timezone.utc)
+    scan.stage = stage
+    scan.stage_started_at = now
+    scan.updated_at = now
+    try:
+        await scan.save()
+    except Exception:
+        logger.warning("could not record stage %s for scan %s", stage, scan.id, exc_info=True)
 
 
 async def _fail(scan: Scan, message: str) -> None:
@@ -269,6 +318,8 @@ async def _fail(scan: Scan, message: str) -> None:
     scan.error_message = message
     scan.completed_at = now
     scan.updated_at = now
+    # Leave `stage` set: on a terminal failure it is the record of *where* the pipeline stopped,
+    # which is the whole point of having it. It is only meaningful alongside status="failed".
     await scan.save()
 
     # A failure frees a concurrency slot — nudge the queue rather than waiting for the next poll tick.
@@ -293,8 +344,11 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
 
     workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
     try:
+        await _stage(scan, "validating")
         validate_repo_url(scan.repo_url)
+        await _stage(scan, "cloning")
         await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme)
+        await _stage(scan, "scanning")
         await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
     except Exception as e:
         message = _sanitize(str(e), repo_token)
