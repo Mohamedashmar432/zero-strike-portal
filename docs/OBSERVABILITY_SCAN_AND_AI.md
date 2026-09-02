@@ -94,6 +94,27 @@ stage write that raises does not fail the scan; a timeout message carries the st
 litellm exception class maps to its expected `error_code`; a failover chain writes rows whose
 `attempt` increments.
 
+## What the browser pass caught
+
+Recorded because a QA pass that found nothing and one that was never run look identical later
+(`CLAUDE.md`).
+
+- **"for 5 hours" on a scan seconds old.** `stageElapsed` used `new Date()` on a backend
+  timestamp, and the backend serializes naive UTC (Mongo returns tz-naive datetimes), so the
+  browser read it as local time and skewed every elapsed reading by the viewer's UTC offset —
+  at UTC+5:30 a scan that had just started claimed to have been stuck for hours, which is worse
+  than showing nothing. Fixed by using the repo's existing `parseApiDate`. `timeAgo` on the same
+  page had the identical latent defect and was fixed with it.
+- Verified live: the Phase column renders "Running the scanner" for a running cloud scan; a
+  failed scan's alert reads "Scan failed while running the scanner" with the timeout message and
+  the scanner stderr tail naming the file it died on; `reap_stuck` against the real database
+  produces "Reclaimed: worker likely crashed mid-scan Last known phase: cloning."; the "Why calls
+  failed" card breaks 13 failures into their causes with pre-`error_code` rows grouped as
+  "Unclassified failure" so the counts still sum to the failure total, and the call log labels a
+  failure "Invalid API key" / "Prompt too long for the model" while older rows fall back to the
+  exception class name. Zero console errors, all requests 2xx, both roles exercised (the admin
+  surfaces correctly refuse a member session).
+
 ## Deliberately not done
 
 - No OpenTelemetry / distributed tracing. There is one process and one Mongo; a `trace_id` in

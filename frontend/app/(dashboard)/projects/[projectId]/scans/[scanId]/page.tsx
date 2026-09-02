@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, parseApiDate } from "@/lib/utils";
 import { owaspChartData, OWASP_TITLES } from "@/lib/owasp";
 import { PRIORITY_TIERS, PRIORITY_LABELS, PRIORITY_CLASS, type PriorityTier } from "@/lib/priority";
 import {
@@ -77,7 +77,8 @@ function fileLine(file: string, line: number | null) {
 }
 
 function timeAgo(dateStr: string) {
-  const diffMs = Date.now() - new Date(dateStr).getTime();
+  // parseApiDate for the same reason as stageElapsed below: bare backend timestamps are UTC.
+  const diffMs = Date.now() - parseApiDate(dateStr).getTime();
   const mins = Math.round(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
@@ -90,7 +91,9 @@ function timeAgo(dateStr: string) {
 // How long the scan has been in its current phase. Coarse on purpose: the useful signal is
 // "cloning for 40 minutes" vs "cloning for 20 seconds", not the exact second.
 function stageElapsed(since: string) {
-  const mins = Math.floor((Date.now() - new Date(since).getTime()) / 60000);
+  // parseApiDate, not new Date: the backend serializes naive UTC, which new Date() reads as
+  // local time — a scan that started seconds ago rendered as "for 5 hours" at UTC+5:30.
+  const mins = Math.floor((Date.now() - parseApiDate(since).getTime()) / 60000);
   if (mins < 1) return "just started";
   if (mins < 60) return `for ${mins} minute${mins === 1 ? "" : "s"}`;
   const hours = Math.floor(mins / 60);
