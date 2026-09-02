@@ -165,7 +165,19 @@ def create_app() -> FastAPI:
             mongo_ok = False
         scanner_ok = cloud_scan_service.scanner_available()
         healthy = mongo_ok and scanner_ok
-        body = {"status": "ok" if healthy else "degraded", "mongo": mongo_ok, "scanner": scanner_ok}
+        body = {
+            "status": "ok" if healthy else "degraded",
+            "mongo": mongo_ok,
+            "scanner": scanner_ok,
+            # Not decoration: which engine is deployed is the single fact that made the
+            # large-repo failures diagnosable, and it was unanswerable from outside the
+            # container. "unknown" means the image was built without SCANNER_REF stamped.
+            # `or "unknown"`: an ARG default does not cross Docker build stages, so a
+            # mis-scoped SCANNER_REF stamps an EMPTY string rather than failing. Empty would
+            # read as "no data" in a dashboard; "unknown" reads as "this image did not say",
+            # which is the thing worth noticing.
+            "scanner_build": settings.scanner_build_ref or "unknown",
+        }
         return JSONResponse(status_code=200 if healthy else 503, content=body)
 
     return app

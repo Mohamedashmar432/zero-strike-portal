@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # Server-side (cloud) scan execution. The scanner runs as a subprocess — no Docker at runtime.
     # Point scanner_binary_path at a local `zerostrike`/`zerostrike.exe` (dev) or the container binary.
     scanner_binary_path: str = "zerostrike"
+    # Which scanner build is baked into this image, stamped from the Dockerfile's SCANNER_REF at
+    # build time and reported by /health. Exists because "is the binary present" (which is all
+    # /health used to answer) cannot tell you it is ten releases old and missing every large-repo
+    # fix -- which is exactly how a v0.24.0 engine ran in production unnoticed. The binary itself
+    # cannot answer this: the build sets no version ldflag, so `zerostrike --version` says "dev".
+    scanner_build_ref: str = "unknown"
     scan_timeout_seconds: int = 900
     max_concurrent_cloud_scans: int = 2
     # Caps scanner goroutine parallelism (default is NumCPU). Two concurrent cloud scans each

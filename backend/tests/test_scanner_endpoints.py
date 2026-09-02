@@ -205,3 +205,20 @@ def test_scan_from_another_project_key_is_404(client):
         headers=_scanner(token_b),
     )
     assert r.status_code == 404
+
+
+def test_health_reports_which_scanner_build_is_deployed(client, monkeypatch):
+    """Which engine is deployed is the fact that made the large-repo failures diagnosable, and it
+    was unanswerable from outside the container -- "scanner": true only ever meant the file
+    exists, which a ten-releases-old build satisfies just as well as a current one."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "scanner_build_ref", "v0.34.0")
+    body = client.get("/health").json()
+    assert body["scanner_build"] == "v0.34.0"
+
+    # An image built without the ref stamped must say so rather than render as blank: an ARG
+    # default does not cross Docker build stages, so this is a realistic mis-build, not a
+    # hypothetical one.
+    monkeypatch.setattr(settings, "scanner_build_ref", "")
+    assert client.get("/health").json()["scanner_build"] == "unknown"

@@ -1,5 +1,12 @@
 # syntax=docker/dockerfile:1
 
+# Declared BEFORE the first FROM on purpose: an ARG default does not cross build stages, so a
+# per-stage default would have to be repeated and could drift. Global scope means both the
+# builder (which clones this ref) and the runtime (which stamps it into SCANNER_BUILD_REF for
+# /health) read the same value, with or without a --build-arg. Keep in sync with
+# deploy/docker-compose.yml's SCANNER_REF fallback and deploy/.env.example.
+ARG SCANNER_REF=v0.34.0
+
 # --- Stage 1: build the CGO-enabled Go scanner binary -------------------------
 # CGO is MANDATORY: a CGO_ENABLED=0 build registers zero tree-sitter parsers and
 # silently detects nothing (SAST becomes a no-op). The build-time smoke check
@@ -7,9 +14,7 @@
 FROM golang:1.26-bookworm AS scanner-builder
 
 ARG SCANNER_REPO=https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git
-# Keep in sync with deploy/docker-compose.yml's SCANNER_REF fallback and
-# deploy/.env.example -- all three must match or environments silently diverge.
-ARG SCANNER_REF=v0.34.0
+ARG SCANNER_REF
 ENV CGO_ENABLED=1
 
 WORKDIR /src
@@ -52,6 +57,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=scanner-builder /out/zerostrike /usr/local/bin/zerostrike
+
+# Stamp which engine went in, so /health can report it. The binary cannot say: the build above
+# sets no version ldflag, so `zerostrike --version` prints "dev" regardless of the ref. Without
+# this, "is prod running the scanner I think it is" needs a shell in the container -- which is
+# how a v0.24.0 engine, missing every large-repo fix, ran in production unnoticed.
+ARG SCANNER_REF
+ENV SCANNER_BUILD_REF=${SCANNER_REF}
 
 WORKDIR /app
 # ponytail: one COPY, not two — Railway's remote build cache has been observed

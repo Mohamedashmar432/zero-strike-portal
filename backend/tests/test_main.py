@@ -10,7 +10,14 @@ def test_health_reports_ok_when_mongo_and_scanner_are_up(client, monkeypatch):
     monkeypatch.setattr(cloud_scan_service, "scanner_available", lambda: True)
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "mongo": True, "scanner": True}
+    # Exact shape on purpose -- /health is a contract other things poll. scanner_build says WHICH
+    # engine is baked in, which "scanner": True cannot (a ten-releases-old binary is present too).
+    assert resp.json() == {
+        "status": "ok",
+        "mongo": True,
+        "scanner": True,
+        "scanner_build": "unknown",  # not stamped outside a Docker build
+    }
 
 
 def test_health_returns_503_when_mongo_ping_fails(client, monkeypatch):
