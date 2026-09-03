@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, Settings } from "lucide-react";
+import { BookOpen, Menu, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -110,6 +110,12 @@ export function MobileNav() {
             ))}
           </RequireRole>
           <div className="legend px-3 pb-1.5 pt-4 text-muted-foreground">Workspace</div>
+          <MobileNavItem
+            href="/guide"
+            label="Developer Guide"
+            icon={BookOpen}
+            isActive={pathname?.startsWith("/guide") ?? false}
+          />
           <MobileNavItem
             href="/settings/profile"
             label="Settings"

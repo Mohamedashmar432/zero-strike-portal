@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, Search, Settings } from "lucide-react";
+import { BookOpen, PanelLeftClose, PanelLeftOpen, Search, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
@@ -206,6 +206,13 @@ export function Sidebar({ pinned, onTogglePin }: { pinned: boolean; onTogglePin:
         <div className={groupLabelClass(false)}>
           Workspace
         </div>
+        <NavItem
+          href="/guide"
+          label="Developer Guide"
+          icon={BookOpen}
+          isActive={pathname?.startsWith("/guide") ?? false}
+          labelClass={labelClass}
+        />
         <NavItem
           href="/settings/profile"
           label="Settings"
