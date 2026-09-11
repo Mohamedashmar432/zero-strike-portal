@@ -5,7 +5,7 @@
 # builder (which clones this ref) and the runtime (which stamps it into SCANNER_BUILD_REF for
 # /health) read the same value, with or without a --build-arg. Keep in sync with
 # deploy/docker-compose.yml's SCANNER_REF fallback and deploy/.env.example.
-ARG SCANNER_REF=v0.34.0
+ARG SCANNER_REF=v0.36.0
 
 # --- Stage 1: build the CGO-enabled Go scanner binary -------------------------
 # CGO is MANDATORY: a CGO_ENABLED=0 build registers zero tree-sitter parsers and
