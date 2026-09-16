@@ -7,8 +7,12 @@ export type ScanStatusCounts = Record<ScanStatus, number>;
 
 export type ProjectStatsItem = {
   project_id: string;
+  /** All-time volume: every finding ever ingested, summed across scans. Not current exposure. */
   total_findings: number;
   findings_by_severity: SeverityCounts;
+  /** Current exposure: the latest completed scan per repository. What the list renders. */
+  current_findings: number;
+  current_findings_by_severity: SeverityCounts;
   scan_status_counts: ScanStatusCounts;
   risk_repo_count: number;
   total_repo_count: number;

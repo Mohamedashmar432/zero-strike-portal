@@ -23,10 +23,20 @@ export type RecentScanItem = {
   ai_analysis_progress_total: number;
 };
 
+/** How much of the workspace the current-exposure number actually saw. */
+export type PostureCoverage = {
+  repos_scanned: number;
+  repos_without_completed_scan: number;
+  has_unlinked_scans: boolean;
+};
+
 export type DashboardStats = {
   project_count: number;
+  /** Historical volume — every scan ever run, not current exposure. */
   scan_count: number;
+  /** Current exposure: the latest completed scan per repository, never the all-time sum. */
   findings_by_severity: SeverityCounts;
+  posture_coverage: PostureCoverage;
   recent_scans: RecentScanItem[];
 };
 

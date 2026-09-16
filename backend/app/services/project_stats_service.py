@@ -150,6 +150,80 @@ async def resolve_scope_coverage(
     return ScopeCoverage(list(latest_per_key.values()), repos_in_scope, len(covered), newest)
 
 
+@dataclass(frozen=True)
+class PostureCoverage:
+    """Current-posture scan selection for a set of projects, plus what it could not cover.
+
+    The coverage counts travel with the scan ids for the same reason ScopeCoverage's do: a
+    posture number is only as complete as the scans behind it, and a dashboard that reports
+    exposure without saying how many repos it actually saw is the more misleading of the two.
+    """
+
+    scan_ids_by_project: dict[str, list[str]]
+    repos_scanned: int
+    repos_without_completed_scan: int
+    has_unlinked_scans: bool
+
+    @property
+    def all_scan_ids(self) -> list[str]:
+        return [sid for ids in self.scan_ids_by_project.values() for sid in ids]
+
+
+async def current_posture_scan_ids(project_ids: list[str] | None) -> PostureCoverage:
+    """The scans that make up *current* exposure: the newest completed scan per repo scope.
+
+    Same semantics as resolve_scope_coverage(scope="latest"), but resolved for many projects in
+    two queries instead of two per project. The workspace dashboard needs this across every
+    project a user can see, where the per-project function is an N+1.
+
+    project_ids=None means every project (the admin dashboard). Failed/running/queued scans are
+    ignored — they say nothing about current exposure — and the unlinked bucket is kept as its
+    own scope rather than dropped, so hand-pasted and CI scans still count.
+    """
+    scan_query = (
+        Scan.find(Scan.status == "completed")
+        if project_ids is None
+        else Scan.find(In(Scan.project_id, project_ids), Scan.status == "completed")
+    )
+    scans = await scan_query.sort(-Scan.created_at).to_list()
+
+    repo_query = (
+        ProjectRepo.find_all() if project_ids is None else ProjectRepo.find(In(ProjectRepo.project_id, project_ids))
+    )
+    repos = await repo_query.to_list()
+
+    repos_by_project: dict[str, list[ProjectRepo]] = {}
+    for repo in repos:
+        repos_by_project.setdefault(repo.project_id, []).append(repo)
+
+    resolvers = {pid: repo_key_resolver(rs) for pid, rs in repos_by_project.items()}
+    empty_resolver = repo_key_resolver([])
+
+    # (project_id, scope_key) -> newest completed scan id. Scans are already newest-first, so
+    # the first hit per key wins.
+    latest: dict[str, dict[str, str]] = {}
+    covered_repo_keys: set[tuple[str, str]] = set()
+    has_unlinked = False
+    for scan in scans:
+        resolve = resolvers.get(scan.project_id, empty_resolver)
+        key = resolve(scan)
+        per_project = latest.setdefault(scan.project_id, {})
+        if key not in per_project:
+            per_project[key] = str(scan.id)
+            if key == _UNLINKED:
+                has_unlinked = True
+            else:
+                covered_repo_keys.add((scan.project_id, key))
+
+    total_repos = len(repos)
+    return PostureCoverage(
+        scan_ids_by_project={pid: list(keys.values()) for pid, keys in latest.items()},
+        repos_scanned=len(covered_repo_keys),
+        repos_without_completed_scan=max(total_repos - len(covered_repo_keys), 0),
+        has_unlinked_scans=has_unlinked,
+    )
+
+
 async def resolve_scope_scan_ids(
     project_id: str, scope: str, project_repo_ids: list[str] | None = None
 ) -> list[str]:
@@ -291,11 +365,42 @@ async def get_projects_stats(user: User, project_ids: list[str] | None = None) -
     )
     repo_count_by_project = {g["_id"]: g["count"] for g in repo_count_groups}
 
+    # Current exposure, alongside the all-time rollup above. The rollup accumulates across scans
+    # (a rescanned repo counts twice), so it answers "how much have we ever found", not "how much
+    # is outstanding" — the projects list needs the latter.
+    posture = await current_posture_scan_ids(ids)
+    current_total_by_project: dict[str, int] = {}
+    current_severity_by_project: dict[str, SeverityCounts] = {}
+    posture_scan_ids = posture.all_scan_ids
+    if posture_scan_ids:
+        current_groups = await _aggregate(
+            Finding,
+            [
+                {"$match": {"scan_id": {"$in": posture_scan_ids}}},
+                {
+                    "$group": {
+                        "_id": {"project_id": "$project_id", "severity": "$severity"},
+                        "count": {"$sum": 1},
+                    }
+                },
+            ],
+        )
+        for g in current_groups:
+            pid = g["_id"]["project_id"]
+            sev = g["_id"].get("severity")
+            n = g.get("count", 0)
+            current_total_by_project[pid] = current_total_by_project.get(pid, 0) + n
+            counts = current_severity_by_project.setdefault(pid, SeverityCounts())
+            if sev is not None and hasattr(counts, sev):
+                setattr(counts, sev, n)
+
     return {
         pid: ProjectStatsItem(
             project_id=pid,
             total_findings=total_by_project.get(pid, 0),
             findings_by_severity=severity_by_project.get(pid, SeverityCounts()),
+            current_findings=current_total_by_project.get(pid, 0),
+            current_findings_by_severity=current_severity_by_project.get(pid, SeverityCounts()),
             scan_status_counts=scan_status_by_project.get(pid, ScanStatusCounts()),
             risk_repo_count=risk_repo_by_project.get(pid, 0),
             total_repo_count=repo_count_by_project.get(pid, 0),

@@ -6,8 +6,13 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.scan import Scan
 from app.models.user import User
-from app.schemas.dashboard import DashboardStatsResponse, RecentScanItem, SeverityCounts
-from app.services import ai_analysis_service
+from app.schemas.dashboard import (
+    DashboardStatsResponse,
+    PostureCoverageOut,
+    RecentScanItem,
+    SeverityCounts,
+)
+from app.services import ai_analysis_service, project_stats_service
 
 RECENT_SCANS_LIMIT = 5
 
@@ -87,15 +92,43 @@ def _to_severity_counts(groups: list[dict]) -> SeverityCounts:
     return counts
 
 
+async def _current_posture(project_ids: list[str] | None) -> tuple[SeverityCounts, PostureCoverageOut]:
+    """Severity distribution over current exposure only.
+
+    Findings are stored per scan and never superseded, so grouping the whole collection counts a
+    repo scanned ten times ten times over. Current exposure is the newest completed scan per repo
+    scope — the same selection compliance audits already use — so a fixed finding stops counting.
+    """
+    coverage = await project_stats_service.current_posture_scan_ids(project_ids)
+    scan_ids = coverage.all_scan_ids
+    coverage_out = PostureCoverageOut(
+        repos_scanned=coverage.repos_scanned,
+        repos_without_completed_scan=coverage.repos_without_completed_scan,
+        has_unlinked_scans=coverage.has_unlinked_scans,
+    )
+    if not scan_ids:
+        # No completed scans: zero exposure. Never fall through to an unfiltered aggregate.
+        return SeverityCounts(), coverage_out
+
+    groups = await _severity_groups(
+        [
+            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
+        ]
+    )
+    return _to_severity_counts(groups), coverage_out
+
+
 async def get_stats(user: User) -> DashboardStatsResponse:
     if user.role == "admin":
         project_count = await Project.count()
         scan_count = await Scan.count()
-        severity_groups = await _severity_groups([{"$group": {"_id": "$severity", "count": {"$sum": 1}}}])
+        severity_counts, coverage = await _current_posture(None)
         return DashboardStatsResponse(
             project_count=project_count,
             scan_count=scan_count,
-            findings_by_severity=_to_severity_counts(severity_groups),
+            findings_by_severity=severity_counts,
+            posture_coverage=coverage,
             recent_scans=await _recent_scans(None),
         )
 
@@ -108,15 +141,11 @@ async def get_stats(user: User) -> DashboardStatsResponse:
         )
 
     scan_count = await Scan.find(In(Scan.project_id, project_ids)).count()
-    severity_groups = await _severity_groups(
-        [
-            {"$match": {"project_id": {"$in": project_ids}}},
-            {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
-        ]
-    )
+    severity_counts, coverage = await _current_posture(project_ids)
     return DashboardStatsResponse(
         project_count=len(project_ids),
         scan_count=scan_count,
-        findings_by_severity=_to_severity_counts(severity_groups),
+        findings_by_severity=severity_counts,
+        posture_coverage=coverage,
         recent_scans=await _recent_scans(project_ids),
     )
