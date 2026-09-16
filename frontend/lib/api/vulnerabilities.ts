@@ -88,6 +88,12 @@ export type ScanRegressionResponse = {
   scan_id: string;
   baseline_scan_id: string | null;
   has_baseline: boolean;
+  /**
+   * Whether this is the newest completed scan of its repo scope. A vulnerability carries only
+   * its LAST reconciliation outcome, so a superseded scan's buckets drain to zero as later
+   * scans re-observe its findings — those zeros must not be rendered as "nothing changed".
+   */
+  is_latest_for_scope: boolean;
   new: RegressionBucket;
   unchanged: RegressionBucket;
   reopened: RegressionBucket;

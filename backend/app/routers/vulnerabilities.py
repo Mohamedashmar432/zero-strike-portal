@@ -395,6 +395,7 @@ async def get_scan_regression(
         .to_list()
     )
     scope_scans = [s for s in completed if resolve(s) == scope_key]
+    is_latest = bool(scope_scans) and str(scope_scans[0].id) == scan_id
     try:
         self_index = next(i for i, s in enumerate(scope_scans) if str(s.id) == scan_id)
         baseline = scope_scans[self_index + 1] if self_index + 1 < len(scope_scans) else None
@@ -428,6 +429,7 @@ async def get_scan_regression(
         scan_id=scan_id,
         baseline_scan_id=str(baseline.id) if baseline else None,
         has_baseline=baseline is not None,
+        is_latest_for_scope=is_latest,
         new=RegressionBucket(count=counts["new"], items=buckets["new"]),
         unchanged=RegressionBucket(count=counts["unchanged"], items=buckets["unchanged"]),
         reopened=RegressionBucket(count=counts["reopened"], items=buckets["reopened"]),

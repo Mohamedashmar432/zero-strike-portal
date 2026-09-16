@@ -48,6 +48,14 @@ export function ScanRegressionSection({ projectId, scanId }: { projectId: string
       <CardContent className="space-y-3">
         {isLoading ? (
           <Skeleton className="h-20 w-full" />
+        ) : data && !data.is_latest_for_scope ? (
+          // A superseded scan's counts have drained to whichever later scan re-observed each
+          // vulnerability, so they would read as "this scan changed nothing" when it may have
+          // introduced everything. Say the numbers are gone rather than show misleading zeros.
+          <p className="text-xs text-muted-foreground">
+            A newer scan has since run for this repository. What changed is tracked against the
+            most recent scan, so the breakdown is no longer available for this one.
+          </p>
         ) : (
           <>
             <p className="text-xs text-muted-foreground">

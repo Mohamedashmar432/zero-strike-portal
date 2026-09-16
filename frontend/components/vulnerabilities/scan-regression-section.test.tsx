@@ -27,6 +27,7 @@ function response(over: Partial<ScanRegressionResponse> = {}): ScanRegressionRes
     scan_id: "s1",
     baseline_scan_id: "s0",
     has_baseline: true,
+    is_latest_for_scope: true,
     new: bucket(0),
     unchanged: bucket(0),
     reopened: bucket(0),
@@ -77,6 +78,20 @@ describe("ScanRegressionSection", () => {
       expect(container.textContent).toContain("Compared with the previous completed scan")
     );
     expect(container.textContent).not.toContain("no baseline exists");
+  });
+
+  test("hides the breakdown for a scan a newer one has superseded", async () => {
+    // Its buckets have drained to the later scan that re-observed each vulnerability, so
+    // rendering zeros would claim this scan changed nothing.
+    vi.mocked(getScanRegression).mockResolvedValue(
+      response({ is_latest_for_scope: false, new: bucket(0), unchanged: bucket(0) })
+    );
+
+    const { container } = renderWithClient(<ScanRegressionSection projectId="p1" scanId="s1" />);
+
+    await waitFor(() => expect(container.textContent).toContain("A newer scan has since run"));
+    expect(container.textContent).not.toContain("Compared with the previous completed scan");
+    expect(container.textContent).not.toContain("First comparable scan");
   });
 
   test("counts come from the bucket total, not the capped item preview", async () => {
