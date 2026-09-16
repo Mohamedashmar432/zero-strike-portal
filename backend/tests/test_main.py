@@ -56,3 +56,49 @@ def test_response_generates_request_id_when_absent(client):
     assert r1.headers["x-request-id"]
     assert r2.headers["x-request-id"]
     assert r1.headers["x-request-id"] != r2.headers["x-request-id"]
+
+
+# --- Malformed ObjectIds ------------------------------------------------------------------
+# Beanie's Document.get() RAISES on an id that isn't a valid ObjectId rather than returning
+# None, so before the InvalidId handler every hand-typed, truncated or stale URL surfaced as a
+# raw 500: an unhandled crash in the logs and a plain-text body that breaks a .json() parse.
+# Found by an adversarial QA pass, not by the feature suites — no UI ever types a bad id.
+
+
+def _auth(client):
+    from tests.test_auth_flow import register_and_login
+
+    tokens = register_and_login(client, email="bad-id-probe@zerostrike.dev")
+    return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+def test_malformed_object_id_is_404_not_500(client):
+    headers = _auth(client)
+    real = client.post("/api/v1/projects", json={"name": "P"}, headers=headers).json()["id"]
+
+    for path in (
+        "/api/v1/projects/not-an-id",
+        "/api/v1/scans/not-an-id",
+        "/api/v1/projects/not-an-id/vulnerabilities",
+        f"/api/v1/projects/{real}/vulnerabilities/not-an-id",
+        f"/api/v1/projects/{real}/scans/not-an-id/regression",
+        "/api/v1/projects/not-an-id/audit-log",
+    ):
+        resp = client.get(path, headers=headers)
+        assert resp.status_code != 500, f"{path} crashed instead of 404"
+        assert resp.status_code in (403, 404), f"{path} -> {resp.status_code}"
+        # Must stay JSON: a plain-text 500 body is what broke the client's .json() parse.
+        assert "detail" in resp.json()
+
+
+def test_malformed_object_id_on_a_write_is_404_not_500(client):
+    headers = _auth(client)
+    real = client.post("/api/v1/projects", json={"name": "P2"}, headers=headers).json()["id"]
+
+    resp = client.patch(
+        f"/api/v1/projects/{real}/vulnerabilities/not-an-id/status",
+        json={"status": "in_progress"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert "detail" in resp.json()

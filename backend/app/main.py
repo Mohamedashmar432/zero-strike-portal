@@ -2,6 +2,8 @@ import asyncio
 import contextlib
 from contextlib import asynccontextmanager
 
+from bson.errors import InvalidId
+from pydantic import ValidationError
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -157,6 +159,31 @@ def create_app() -> FastAPI:
         # A GitHub/Azure DevOps API call failed (bad/expired token, rate limit, outage) — 502 signals
         # our server is fine but the upstream provider isn't, distinct from a validation 4xx.
         return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+    def _is_bad_object_id(exc: ValidationError) -> bool:
+        """Whether a ValidationError is Beanie rejecting a malformed document id.
+
+        Beanie validates the id through PydanticObjectId rather than raising bson's InvalidId,
+        so the marker is the error message. Checked rather than catching ValidationError
+        wholesale: a response-model serialization failure is a genuine server bug and must keep
+        surfacing as a 500, not get quietly relabelled "not found".
+        """
+        return bool(errs := exc.errors()) and all(
+            "PydanticObjectId" in str(e.get("msg", "")) for e in errs
+        )
+
+    @app.exception_handler(InvalidId)
+    @app.exception_handler(ValidationError)
+    async def invalid_object_id_handler(request: Request, exc: Exception):
+        # Every `Document.get(id)` raises rather than returning None when the id isn't a valid
+        # ObjectId, so any hand-typed, truncated or stale URL reached the client as a raw 500 —
+        # an unhandled crash in the logs, and a plain-text body that breaks the frontend's
+        # .json() parse on the way out. A malformed id is "no such thing", which is a 404.
+        # Handled once here rather than guarded at each call site, so routes added later can't
+        # reintroduce it.
+        if isinstance(exc, ValidationError) and not _is_bad_object_id(exc):
+            raise exc
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
 
     @app.get("/health")
     async def health():
