@@ -29,6 +29,9 @@ from app.services import project_repo_service
 
 # Group key used for scans that match no connected repo (legacy/CI/hand-pasted URLs).
 _UNLINKED = "__unlinked__"
+# Public alias — vulnerability_service groups by this same key and needs it without
+# reaching into a private name or duplicating the literal.
+UNLINKED_REPO_KEY = _UNLINKED
 
 _RISK_SEVERITIES = ["critical", "high"]
 _ALL_SEVERITIES = {"critical", "high", "medium", "low", "info"}

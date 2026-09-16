@@ -7,7 +7,7 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
-from beanie.operators import In
+from beanie.operators import In, Or
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 
 from app.core.deps import get_current_user
@@ -916,9 +916,20 @@ def _comment_out(c: FindingComment, umap: dict[str, User]) -> CommentOut:
 @router.get("/findings/{finding_id}/comments", response_model=CommentListResponse)
 async def list_finding_comments(finding_id: str, user: User = Depends(get_current_user)):
     finding = await _get_finding_or_404_and_authorize(finding_id, user)
-    comments = (
-        await FindingComment.find(FindingComment.finding_id == str(finding.id)).sort("+created_at").to_list()
-    )
+    # Match on vulnerability_id (the durable cross-scan key) OR the legacy finding_id, so a
+    # comment left before a rescan minted this finding's current ObjectId still renders here.
+    # One $or query, not two merged ones -- Mongo never returns the same document twice for a
+    # compound $or, so the union is already deduplicated and already sorted by the .sort() below.
+    if finding.vulnerability_id:
+        query = FindingComment.find(
+            Or(
+                FindingComment.vulnerability_id == finding.vulnerability_id,
+                FindingComment.finding_id == str(finding.id),
+            )
+        )
+    else:
+        query = FindingComment.find(FindingComment.finding_id == str(finding.id))
+    comments = await query.sort("+created_at").to_list()
     umap = await _users_map({c.author_user_id for c in comments})
     return CommentListResponse(items=[_comment_out(c, umap) for c in comments])
 
@@ -935,6 +946,7 @@ async def create_finding_comment(
         finding_id=str(finding.id),
         scan_id=finding.scan_id,
         project_id=finding.project_id,
+        vulnerability_id=finding.vulnerability_id,
         author_user_id=str(user.id),
         body=body,
         created_at=datetime.now(timezone.utc),

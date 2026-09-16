@@ -84,6 +84,11 @@ class Finding(Document):
     rationale: str | None = None
     remediation: str | None = None
     taint_context: TaintContextEmbedded | None = None
+    # Stamped by vulnerability_service.reconcile_scan right after ingestion, not at map time —
+    # a Finding is mapped before its Vulnerability row is resolved/created. None for
+    # unfingerprinted findings (nothing to reconcile against) and for findings ingested
+    # before this field existed.
+    vulnerability_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:

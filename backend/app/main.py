@@ -37,6 +37,7 @@ from app.routers import (
     scanner_scans,
     scans,
     users,
+    vulnerabilities,
     workspace_settings,
 )
 from app.services import (
@@ -146,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(remediation_settings.router, prefix="/api/v1")
     app.include_router(compliance.router, prefix="/api/v1")
     app.include_router(compliance.project_router, prefix="/api/v1")
+    app.include_router(vulnerabilities.router, prefix="/api/v1")
     app.include_router(workspace_settings.router, prefix="/api/v1")
     app.include_router(workspace_settings.project_router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")

@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
@@ -5,6 +6,7 @@ from beanie.operators import In
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.deps import get_current_user
+from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_repo import ProjectRepo
@@ -16,6 +18,7 @@ from app.schemas.ai_provider_config import (
     AIProviderConfigUpdateRequest,
     AIProviderTestResponse,
 )
+from app.schemas.audit_log import AuditLogResponse
 from app.schemas.common import Page
 from app.schemas.project import (
     OwaspSummaryResponse,
@@ -393,6 +396,80 @@ async def get_project_scan_activity(project_id: str, user: User = Depends(get_cu
     await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)
     return await project_stats_service.get_project_scan_activity(project_id)
+
+
+@router.get("/{project_id}/audit-log", response_model=Page)
+async def get_project_audit_log(
+    project_id: str,
+    action_prefix: str | None = Query(None, description="Case-sensitive prefix match on action"),
+    target_type: str | None = Query(None),
+    actor_user_id: str | None = Query(None),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    user: User = Depends(get_current_user),
+):
+    """Every member's operational traceability for their own project -- unlike the admin-only
+    /audit-logs surface, this is member-gated rather than admin-gated, since anyone working in
+    the project needs to see what changed here. The `project_id` equality filter below is what
+    keeps this from ever leaking another project's rows or the portal-wide (project_id=None)
+    admin actions -- there is no branch that could accidentally widen it.
+
+    Server-side `.skip()/.limit()` with a separate `.count()`, deliberately not the admin
+    endpoint's load-the-whole-window-into-memory approach (see its own docstring admitting
+    that doesn't scale) -- a long-lived project's history has no bounded window here.
+    """
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+
+    criteria: list = [AuditLog.project_id == project_id]
+    if action_prefix:
+        criteria.append({"action": {"$regex": f"^{re.escape(action_prefix)}"}})
+    if target_type:
+        criteria.append(AuditLog.target_type == target_type)
+    if actor_user_id:
+        criteria.append(AuditLog.actor_user_id == actor_user_id)
+    if since:
+        criteria.append(AuditLog.created_at >= since)
+    if until:
+        criteria.append(AuditLog.created_at <= until)
+
+    query = AuditLog.find(*criteria)
+    total = await query.count()
+    logs = (
+        await query.sort(-AuditLog.created_at)
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+        .to_list()
+    )
+
+    actor_ids = {log.actor_user_id for log in logs if log.actor_user_id}
+    actor_oids = [PydanticObjectId(i) for i in actor_ids if PydanticObjectId.is_valid(i)]
+    actors = (
+        {str(u.id): u.email for u in await User.find(In(User.id, actor_oids)).to_list()}
+        if actor_oids
+        else {}
+    )
+
+    items = [
+        AuditLogResponse(
+            id=str(log.id),
+            actor_type=log.actor_type,
+            actor_user_id=log.actor_user_id,
+            actor_email=actors.get(log.actor_user_id or ""),
+            action=log.action,
+            category=audit_service.classify(log.action, log.project_id),
+            target_type=log.target_type,
+            target_id=log.target_id,
+            project_id=log.project_id,
+            metadata=log.metadata,
+            ip_address=log.ip_address,
+            created_at=log.created_at,
+        )
+        for log in logs
+    ]
+    return Page(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/{project_id}/ai-usage", response_model=ProjectAiUsageResponse)

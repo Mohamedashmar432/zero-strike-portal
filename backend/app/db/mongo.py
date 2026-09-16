@@ -29,6 +29,7 @@ from app.models.repo_credential import RepoCredential
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
 from app.models.user import User
+from app.models.vulnerability import Vulnerability
 from app.models.workspace_settings import WorkspaceSettings
 
 _client: AsyncIOMotorClient | None = None
@@ -75,6 +76,7 @@ async def connect_to_mongo() -> None:
             ComplianceAudit,
             ScanAutoFixQuota,
             AutoFixQuotaRequest,
+            Vulnerability,
         ],
     )
 
