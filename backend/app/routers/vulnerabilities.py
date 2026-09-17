@@ -108,6 +108,11 @@ async def _get_vuln_or_404(project_id: str, vulnerability_id: str) -> Vulnerabil
     return v
 
 
+async def _scans_by_id(findings: list[Finding]) -> dict[str, Scan]:
+    oids = [PydanticObjectId(sid) for sid in {f.scan_id for f in findings} if PydanticObjectId.is_valid(sid)]
+    return {str(s.id): s for s in await Scan.find(In(Scan.id, oids)).to_list()} if oids else {}
+
+
 def _emails_for(rows: list[Vulnerability]) -> set[str]:
     ids: set[str] = set()
     for v in rows:
@@ -197,12 +202,22 @@ async def get_vulnerability(
         Finding.project_id == project_id, Finding.vulnerability_id == str(vuln.id)
     ).to_list()
     if not findings:
-        findings = await Finding.find(
+        # repo_scope_key is half this vulnerability's identity (the same fingerprint in another
+        # repo is a different vulnerability, never this one's history) -- so the legacy fallback
+        # has to filter by scope too, not just fingerprint, using the same resolver reconcile_scan
+        # used to assign repo_scope_key in the first place.
+        legacy = await Finding.find(
             Finding.project_id == project_id, Finding.fingerprint == vuln.fingerprint
         ).to_list()
+        resolve = stats_svc.repo_key_resolver(await project_repo_service.list_repos(project_id))
+        legacy_scans_by_id = await _scans_by_id(legacy)
+        findings = [
+            f
+            for f in legacy
+            if (s := legacy_scans_by_id.get(f.scan_id)) is not None and resolve(s) == vuln.repo_scope_key
+        ]
 
-    scan_oids = [PydanticObjectId(sid) for sid in {f.scan_id for f in findings} if PydanticObjectId.is_valid(sid)]
-    scans_by_id = {str(s.id): s for s in await Scan.find(In(Scan.id, scan_oids)).to_list()} if scan_oids else {}
+    scans_by_id = await _scans_by_id(findings)
 
     observations = [
         VulnerabilityScanObservation(
@@ -259,7 +274,7 @@ async def update_vulnerability_status(
     user: User = Depends(get_current_user),
 ):
     await project_service.get_project_or_404(project_id)
-    await project_service.require_member(project_id, user)
+    role = await project_service.require_member(project_id, user)
     vuln = await _get_vuln_or_404(project_id, vulnerability_id)
 
     now = datetime.now(timezone.utc)
@@ -269,7 +284,24 @@ async def update_vulnerability_status(
         "resolution_comment": vuln.resolution_comment,
     }
 
-    if payload.status == "resolved":
+    if payload.status == "accepted_risk":
+        if role not in ("owner", "admin"):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Owner or admin privileges required to accept risk"
+            )
+        if not (payload.resolution_comment or "").strip():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "resolution_comment is required to accept risk"
+            )
+        was_resolved = vuln.status == "resolved"
+        vuln.status = "accepted_risk"
+        vuln.resolution_reason = None
+        vuln.resolution_comment = payload.resolution_comment
+        vuln.resolved_at = None
+        vuln.resolved_by_user_id = None
+        if was_resolved:
+            vuln.reopened_at = now
+    elif payload.status == "resolved":
         if not payload.resolution_reason:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
@@ -298,8 +330,8 @@ async def update_vulnerability_status(
             vuln.resolved_at = None
             vuln.resolved_by_user_id = None
             vuln.reopened_at = now
-        # in_progress / open / accepted_risk: first_seen_at and assignee are left untouched --
-        # this endpoint never writes them.
+        # in_progress / open: first_seen_at and assignee are left untouched -- this endpoint
+        # never writes them.
 
     vuln.updated_at = now
     await vuln.save()

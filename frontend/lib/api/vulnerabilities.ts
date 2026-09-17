@@ -128,6 +128,11 @@ export function statusChangeBlockReason(
   reason: ResolutionReason | null,
   comment: string
 ): string | null {
+  if (status === "accepted_risk") {
+    // Accepting risk has no scanner evidence behind it at all, so it always needs a reason.
+    if (comment.trim() === "") return "A comment is required to accept risk.";
+    return null;
+  }
   if (status !== "resolved") return null;
   if (!reason) return "Pick a resolution reason.";
   // Marking something fixed by hand overrides scanner evidence, so it has to be explained.

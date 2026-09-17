@@ -37,14 +37,21 @@ def _invite(client, headers, project_id, email, role="collaborator"):
     assert r.status_code == 201
 
 
-def _seed_and_reconcile(project_id, specs, *, status="completed", created_at=None):
+def _seed_and_reconcile(project_id, specs, *, status="completed", created_at=None, project_repo_id=None):
     """Insert a Scan + its Findings directly, then run the real reconcile_scan over them --
     exactly what report_ingestion_service.ingest() does after a real scan. Returns
     (scan_id, {fingerprint: Finding})."""
 
     async def _do():
         now = created_at or datetime.now(timezone.utc)
-        scan = Scan(project_id=project_id, scan_type="cloud", status=status, created_at=now, updated_at=now)
+        scan = Scan(
+            project_id=project_id,
+            scan_type="cloud",
+            status=status,
+            project_repo_id=project_repo_id,
+            created_at=now,
+            updated_at=now,
+        )
         await scan.insert()
         findings = []
         for spec in specs:
@@ -321,11 +328,69 @@ def test_accepted_risk_leaves_first_seen_and_assignee_untouched(client):
     client.patch(f"{base}/{vid}/assignment", json={"assignee_user_id": collab_id}, headers=headers)
 
     before = client.get(f"{base}/{vid}", headers=headers).json()
-    r = client.patch(f"{base}/{vid}/status", json={"status": "accepted_risk"}, headers=headers)
+    r = client.patch(
+        f"{base}/{vid}/status",
+        json={"status": "accepted_risk", "resolution_comment": "Compensating control in the gateway."},
+        headers=headers,
+    )
     assert r.status_code == 200
     after = r.json()
     assert after["first_seen_at"] == before["first_seen_at"]
     assert after["assignee_user_id"] == collab_id
+    assert after["resolution_comment"] == "Compensating control in the gateway."
+
+
+def test_accepted_risk_without_comment_is_rejected(client):
+    owner = register_and_login(client, email="vuln-ar-nocomment@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    _seed_and_reconcile(project["id"], [{"fingerprint": "fp-a"}])
+    vid = _vuln_id(project["id"], "fp-a")
+    url = f"{VULN_URL.format(project_id=project['id'])}/{vid}/status"
+
+    r = client.patch(url, json={"status": "accepted_risk"}, headers=headers)
+    assert r.status_code == 400
+
+    r = client.patch(url, json={"status": "accepted_risk", "resolution_comment": "   "}, headers=headers)
+    assert r.status_code == 400
+
+    r = client.patch(
+        url,
+        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted for Q1."},
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+
+def test_collaborator_cannot_accept_risk(client):
+    owner = register_and_login(client, email="vuln-ar-owner@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    collaborator = register_and_login(client, email="vuln-ar-collab@zs.dev")
+    _invite(client, headers, project["id"], "vuln-ar-collab@zs.dev")
+    _seed_and_reconcile(project["id"], [{"fingerprint": "fp-a"}])
+    vid = _vuln_id(project["id"], "fp-a")
+    url = f"{VULN_URL.format(project_id=project['id'])}/{vid}/status"
+    collab_headers = _headers(collaborator)
+
+    r = client.patch(
+        url,
+        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted."},
+        headers=collab_headers,
+    )
+    assert r.status_code == 403
+
+    # The 403 is the role gate, not the comment gate -- a collaborator can still move statuses
+    # that aren't accepted_risk.
+    r = client.patch(url, json={"status": "in_progress"}, headers=collab_headers)
+    assert r.status_code == 200
+
+    r = client.patch(
+        url,
+        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted."},
+        headers=headers,
+    )
+    assert r.status_code == 200
 
 
 # --- assignment --------------------------------------------------------------------------
@@ -519,6 +584,69 @@ def test_detail_includes_observations_and_activity(client):
     observed_scan_ids = {o["scan_id"] for o in body["observations"]}
     assert observed_scan_ids == {scan1_id, scan2_id}
     assert any(e["action"] == "Vulnerability Status Updated" for e in body["activity"])
+
+
+def test_legacy_fingerprint_fallback_does_not_cross_repos(client):
+    """Pre-reconciliation findings (no vulnerability_id) are matched back to a vulnerability by
+    fingerprint alone. repo_scope_key is half a vulnerability's identity, so that fallback must
+    not pull in another repo's findings just because they share a fingerprint."""
+    owner = register_and_login(client, email="vuln-legacy-repo@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+
+    async def _make_repo(label):
+        from app.models.project_repo import ProjectRepo
+
+        now = datetime.now(timezone.utc)
+        repo = ProjectRepo(
+            project_id=project["id"],
+            provider="github",
+            organization="acme",
+            repo_full_name=f"acme/{label}",
+            clone_url=f"https://github.com/acme/{label}.git",
+            selected_branch="main",
+            created_by="o1",
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.insert()
+        return str(repo.id)
+
+    repo_a_id = asyncio.run(_make_repo("legacy-a"))
+    repo_b_id = asyncio.run(_make_repo("legacy-b"))
+
+    scan_a_id, findings_a = _seed_and_reconcile(
+        project["id"], [{"fingerprint": "fp-shared"}], project_repo_id=repo_a_id
+    )
+    scan_b_id, findings_b = _seed_and_reconcile(
+        project["id"], [{"fingerprint": "fp-shared"}], project_repo_id=repo_b_id
+    )
+
+    async def _vuln_id_for_scope(scope_key):
+        v = await Vulnerability.find_one(
+            Vulnerability.project_id == project["id"],
+            Vulnerability.fingerprint == "fp-shared",
+            Vulnerability.repo_scope_key == scope_key,
+        )
+        return str(v.id)
+
+    vid_a = asyncio.run(_vuln_id_for_scope(repo_a_id))
+
+    # De-link repo A's finding to force the legacy fingerprint-fallback path.
+    async def _delink():
+        f = findings_a["fp-shared"]
+        f.vulnerability_id = None
+        await f.save()
+
+    asyncio.run(_delink())
+
+    r = client.get(f"{VULN_URL.format(project_id=project['id'])}/{vid_a}", headers=headers)
+    assert r.status_code == 200
+    observed_scan_ids = {o["scan_id"] for o in r.json()["observations"]}
+    # Still finds its own repo's legacy finding...
+    assert scan_a_id in observed_scan_ids
+    # ...but never repo B's, even though it shares the same fingerprint.
+    assert scan_b_id not in observed_scan_ids
 
 
 # --- project-scoped audit log --------------------------------------------------------------

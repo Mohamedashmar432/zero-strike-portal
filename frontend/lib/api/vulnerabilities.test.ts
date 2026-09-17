@@ -5,8 +5,17 @@ describe("statusChangeBlockReason", () => {
   test("allows non-resolving transitions with no reason or comment", () => {
     expect(statusChangeBlockReason("open", null, "")).toBeNull();
     expect(statusChangeBlockReason("in_progress", null, "")).toBeNull();
-    // Accepted risk is still an unresolved vulnerability — it needs no resolution reason.
-    expect(statusChangeBlockReason("accepted_risk", null, "")).toBeNull();
+  });
+
+  test("blocks accepting risk with no comment", () => {
+    // No resolution reason needed — accepted risk is still an unresolved vulnerability — but a
+    // comment always is, since there's no scanner evidence behind the decision at all.
+    expect(statusChangeBlockReason("accepted_risk", null, "")).toMatch(/comment/i);
+    expect(statusChangeBlockReason("accepted_risk", null, "   ")).toMatch(/comment/i);
+  });
+
+  test("allows accepting risk once explained", () => {
+    expect(statusChangeBlockReason("accepted_risk", null, "Compensating control in the gateway.")).toBeNull();
   });
 
   test("blocks resolving without a reason", () => {

@@ -1,5 +1,7 @@
+import asyncio
 from pathlib import Path
 
+from app.models.vulnerability import Vulnerability
 from app.services import data_management_service
 from tests.test_auth_flow import register_and_login
 from tests.test_users import _admin_headers
@@ -249,10 +251,17 @@ def test_reap_stuck_scans_is_admin_only_and_succeeds(client):
 # --- regression: project deletion must not orphan collections ---
 
 
+def _vulnerability_count(project_id):
+    return asyncio.run(Vulnerability.find(Vulnerability.project_id == project_id).count())
+
+
 def test_deleting_a_project_leaves_no_rows_behind_for_it(client):
     headers = _admin_headers(client, email="data-cascade@zerostrike.dev")
     project_id = _seed_project_with_scan(client, headers, "Cascade")
     assert _totals(client, headers, project_id)["scan_data"] > 0
+    # Queried straight off the collection, not via the stats registry that CATEGORIES also
+    # feeds — so a model that's never registered there can't make this check vacuous.
+    assert _vulnerability_count(project_id) > 0
 
     assert client.delete(f"/api/v1/projects/{project_id}", headers=headers).status_code == 204
 
@@ -260,3 +269,4 @@ def test_deleting_a_project_leaves_no_rows_behind_for_it(client):
     # The audit trail deliberately outlives the project it describes — everything else goes.
     leftovers = {key: total for key, total in scoped.items() if key != "audit_log" and total}
     assert leftovers == {}, leftovers
+    assert _vulnerability_count(project_id) == 0
