@@ -7,6 +7,7 @@ service — the single place the Go PascalCase report becomes portal data.
 from collections import Counter
 from datetime import datetime, timezone
 
+import structlog
 from beanie import PydanticObjectId
 
 from app.core.owasp import OWASP_CODES_ORDERED
@@ -30,6 +31,8 @@ from app.schemas.report import (
     GoReportIn,
     GoStatsIn,
 )
+
+logger = structlog.get_logger(__name__)
 
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
 _KINDS = {"sast", "secret", "sca", "config"}
@@ -323,6 +326,18 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         raw_json=stored_raw_json,
         json_uploaded_at=now,
     ).insert()
+
+    # Reconciliation must never fail the ingest -- a scan that produced a valid report has
+    # completed whether or not its findings could be linked to cross-scan Vulnerability rows.
+    # insert_many doesn't reliably populate ids on the local Finding objects across Beanie
+    # versions, so re-query the ones just written to give reconciliation real ids to stamp.
+    try:
+        from app.services import vulnerability_service
+
+        inserted_findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+        await vulnerability_service.reconcile_scan(scan, inserted_findings)
+    except Exception:
+        logger.exception("vulnerability reconciliation failed", scan_id=scan_id)
 
     scan.scanner_version = report.scanner_version or scan.scanner_version
     scan.git_commit = report.git_commit or scan.git_commit

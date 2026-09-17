@@ -200,7 +200,11 @@ async def get_scan(scan_id: str, user: User = Depends(get_current_user)):
     scan = await scan_service.get_scan_or_404(scan_id)
     await project_service.require_member(scan.project_id, user)
     ai_status = await ai_analysis_service.latest_scan_ai_status([str(scan.id)])
-    return _to_response(scan, ai_status.get(str(scan.id)))
+    # The list endpoint has always passed severity counts; this one didn't, so scan detail's
+    # severity tiles read zero for every scan while the findings table below them listed the
+    # very findings they were counting.
+    severity = await project_stats_service.get_severity_by_scan_ids([str(scan.id)])
+    return _to_response(scan, ai_status.get(str(scan.id)), severity.get(str(scan.id)))
 
 
 @router.get("/scans/{scan_id}/report", response_model=ReportResponse)

@@ -25,7 +25,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { getDashboardStats, type RecentScanItem, type SeverityCounts } from "@/lib/api/dashboard";
+import {
+  getDashboardStats,
+  type PostureCoverage,
+  type RecentScanItem,
+  type SeverityCounts,
+} from "@/lib/api/dashboard";
 import { listProjects, type Project } from "@/lib/api/projects";
 
 function severityScore(counts: SeverityCounts) {
@@ -43,13 +48,27 @@ const SEVERITY_DOT: Record<string, string> = {
 type SortBy = "recent" | "severity" | "status";
 
 /**
- * Total exposure band. The page's hero is the actual severity distribution
+ * Current exposure band. The page's hero is the actual severity distribution
  * across the whole workspace — one wide spectrum plus a keyed legend — rather
  * than a row of big numbers. The distribution is the thing a security engineer
  * is trying to read on arrival; the totals are follow-up detail, which is why
  * they sit in the strip *below* this.
+ *
+ * "Current" is load-bearing, not decoration: findings are stored per scan and never
+ * superseded, so this used to sum every scan ever run and counted a rescanned repo
+ * once per scan. It now reflects the latest completed scan per repository, which is
+ * why the coverage line below says how many repos that actually covered — an
+ * exposure number without its coverage reads as complete when it isn't.
  */
-function ExposureBand({ counts, isLoading }: { counts?: SeverityCounts; isLoading: boolean }) {
+function ExposureBand({
+  counts,
+  coverage,
+  isLoading,
+}: {
+  counts?: SeverityCounts;
+  coverage?: PostureCoverage;
+  isLoading: boolean;
+}) {
   const empty: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
   const c = counts ?? empty;
   const total = SEVERITY_ORDER.reduce((sum, s) => sum + c[s], 0);
@@ -57,7 +76,7 @@ function ExposureBand({ counts, isLoading }: { counts?: SeverityCounts; isLoadin
   return (
     <section className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="legend text-muted-foreground">Total Exposure</h2>
+        <h2 className="legend text-muted-foreground">Current Exposure</h2>
         {isLoading ? (
           <Skeleton className="h-6 w-20" />
         ) : (
@@ -67,6 +86,20 @@ function ExposureBand({ counts, isLoading }: { counts?: SeverityCounts; isLoadin
           </p>
         )}
       </div>
+
+      <p className="mt-1 text-xs text-muted-foreground">
+        Based on the latest completed scan for each repository.
+        {!isLoading && coverage ? (
+          <>
+            {" "}
+            {coverage.repos_scanned} repo{coverage.repos_scanned === 1 ? "" : "s"} scanned
+            {coverage.repos_without_completed_scan > 0
+              ? `, ${coverage.repos_without_completed_scan} with no completed scan`
+              : ""}
+            {coverage.has_unlinked_scans ? ", plus unlinked scans" : ""}.
+          </>
+        ) : null}
+      </p>
 
       <div className="mt-3">
         {isLoading ? (
@@ -120,8 +153,10 @@ export default function DashboardPage() {
   const metrics = [
     {
       label: "Total Scans",
+      // Historical volume, deliberately worded so it can't be read as current coverage —
+      // the severity numbers beside it come from the latest scan per repo, not from all of these.
       value: (data?.scan_count ?? 0).toLocaleString(),
-      hint: "Across all active repositories",
+      hint: "All scans ever run",
     },
     {
       label: "Projects",
@@ -185,7 +220,11 @@ export default function DashboardPage() {
       </div>
 
       <div className="signal-in" style={{ "--d": "60ms" } as React.CSSProperties}>
-        <ExposureBand counts={data?.findings_by_severity} isLoading={isLoading} />
+        <ExposureBand
+          counts={data?.findings_by_severity}
+          coverage={data?.posture_coverage}
+          isLoading={isLoading}
+        />
       </div>
 
       <div className="signal-in" style={{ "--d": "120ms" } as React.CSSProperties}>

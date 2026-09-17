@@ -26,6 +26,8 @@ const EMPTY_STATS: ProjectStatsItem = {
   project_id: "",
   total_findings: 0,
   findings_by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+  current_findings: 0,
+  current_findings_by_severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
   scan_status_counts: { pending: 0, queued: 0, running: 0, completed: 0, failed: 0 },
   risk_repo_count: 0,
   total_repo_count: 0,
@@ -166,13 +168,13 @@ function ProjectsPageContent() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="readout text-sm text-foreground">
-                          {s.total_findings}
-                          <span className="legend ml-1.5 text-muted-foreground">findings</span>
+                          {s.current_findings}
+                          <span className="legend ml-1.5 text-muted-foreground">open findings</span>
                         </span>
                         <ScanStatusSummaryPills counts={s.scan_status_counts} />
                       </div>
-                      <SeveritySpectrum counts={s.findings_by_severity} />
-                      <SeverityCountPills counts={s.findings_by_severity} />
+                      <SeveritySpectrum counts={s.current_findings_by_severity} />
+                      <SeverityCountPills counts={s.current_findings_by_severity} />
                     </div>
                     <button
                       type="button"
@@ -203,7 +205,9 @@ function ProjectsPageContent() {
               <TableRow>
                 <TableHead>Project Name</TableHead>
                 <TableHead className="w-28">Spectrum</TableHead>
-                <TableHead>Findings</TableHead>
+                <TableHead title="From the latest completed scan for each repository">
+                  Open Findings
+                </TableHead>
                 <TableHead>Scan Status</TableHead>
                 <TableHead>At-Risk Repos</TableHead>
                 <TableHead>Status</TableHead>
@@ -235,9 +239,9 @@ function ProjectsPageContent() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <SeveritySpectrum counts={s.findings_by_severity} />
+                        <SeveritySpectrum counts={s.current_findings_by_severity} />
                       </TableCell>
-                      <TableCell className="readout text-foreground">{s.total_findings}</TableCell>
+                      <TableCell className="readout text-foreground">{s.current_findings}</TableCell>
                       <TableCell>
                         <ScanStatusSummaryPills counts={s.scan_status_counts} />
                       </TableCell>

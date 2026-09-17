@@ -40,10 +40,15 @@ export const queryKeys = {
     aiEvents: (projectId: string, filters: Record<string, unknown>) =>
       ["projects", projectId, "ai-events", filters] as const,
     policy: (projectId: string) => ["projects", projectId, "policy"] as const,
+    vulnerabilities: (projectId: string, filters: Record<string, unknown>) =>
+      ["projects", projectId, "vulnerabilities", filters] as const,
+    vulnerability: (projectId: string, vulnerabilityId: string) =>
+      ["projects", projectId, "vulnerabilities", vulnerabilityId] as const,
   },
   scans: {
     detail: (scanId: string) => ["scans", scanId] as const,
     report: (scanId: string) => ["scans", scanId, "report"] as const,
+    regression: (scanId: string) => ["scans", scanId, "regression"] as const,
     findings: (
       scanId: string,
       filters: {

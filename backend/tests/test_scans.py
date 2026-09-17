@@ -1,7 +1,9 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 import app.services.scan_queue_service as scan_queue_service
+from app.models.scan import Scan
 from tests.test_auth_flow import register_and_login
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
@@ -392,3 +394,39 @@ def test_delete_project_cascades_scans_findings_reports(client):
     findings_left, reports_left = asyncio.run(counts())
     assert findings_left == 0
     assert reports_left == 0
+
+
+def test_scan_detail_reports_severity_counts(client):
+    """Scan detail used to omit severity entirely, so its tiles read zero for every scan while
+    the findings table below them listed the findings they were counting. The list endpoint
+    always had them, which is why nothing noticed."""
+    from app.models.finding import Finding, LocationEmbedded
+
+    tokens = register_and_login(client, email="scan-detail-sev@zerostrike.dev")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    project = client.post("/api/v1/projects", json={"name": "SevP"}, headers=headers).json()
+
+    async def _seed():
+        now = datetime.now(timezone.utc)
+        scan = await Scan(
+            project_id=project["id"], scan_type="cicd", triggered_by="ci", status="completed",
+            created_at=now, updated_at=now,
+        ).insert()
+        for sev in ("critical", "high", "high"):
+            await Finding(
+                scan_id=str(scan.id), project_id=project["id"], severity=sev,
+                message="m", location=LocationEmbedded(file="a.py"),
+            ).insert()
+        return str(scan.id)
+
+    scan_id = asyncio.run(_seed())
+
+    detail = client.get(f"/api/v1/scans/{scan_id}", headers=headers).json()
+    assert detail["findings_by_severity"] is not None, "scan detail must carry severity counts"
+    assert detail["findings_by_severity"]["critical"] == 1
+    assert detail["findings_by_severity"]["high"] == 2
+
+    listed = client.get(f"/api/v1/projects/{project['id']}/scans", headers=headers).json()
+    row = next(s for s in listed["items"] if s["id"] == scan_id)
+    # Detail and list describe the same scan; they must not disagree.
+    assert detail["findings_by_severity"] == row["findings_by_severity"]

@@ -10,6 +10,7 @@ import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
+import { ScanRegressionSection } from "@/components/vulnerabilities/scan-regression-section";
 import { CodeSnippet } from "@/components/findings/code-snippet";
 import { OwaspChart } from "@/components/common/owasp-chart";
 import { FilterBar } from "@/components/common/filter-bar";
@@ -713,6 +714,8 @@ export default function ScanDetailPage() {
               <StatCard key={stat.label} size="sm" {...stat} />
             ))}
           </div>
+
+          <ScanRegressionSection projectId={projectId} scanId={scanId} />
 
           <Card>
             <CardHeader>

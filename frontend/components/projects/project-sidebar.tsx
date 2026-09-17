@@ -10,12 +10,14 @@ import {
   LayoutDashboard,
   Radar,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Swords,
   Users,
   Wand2,
 } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { Project, ProjectScanActivity } from "@/lib/api/projects";
 
@@ -36,6 +38,10 @@ export interface ProjectSidebarCategory {
     isPreview?: boolean;
     /** Unreleased — omitted from the rail but the tab still exists. */
     hidden?: boolean;
+    /** Navigates to its own route instead of switching the in-page tab. The vulnerability
+     *  work queue is a route rather than a tab because its rows deep-link to a detail page
+     *  under the same segment, and `?tab=` cannot carry that. */
+    href?: string;
   }[];
 }
 
@@ -53,6 +59,7 @@ interface ProjectSidebarProps {
 }
 
 export function ProjectSidebar({
+  project,
   activeTab,
   onTabChange,
   counts,
@@ -70,6 +77,12 @@ export function ProjectSidebar({
         // PreviewNotice markers are untouched.
         { id: "dast", label: "DAST Endpoints", icon: Activity, isPreview: true, hidden: true },
         { id: "attack-sim", label: "Attack Simulation", icon: Swords, isPreview: true, hidden: true },
+        {
+          id: "vulnerabilities",
+          label: "Vulnerabilities",
+          icon: ShieldAlert,
+          href: `/projects/${project.id}/vulnerabilities`,
+        },
         { id: "history", label: "Scan History", icon: History },
       ],
     },
@@ -136,18 +149,14 @@ export function ProjectSidebar({
               {cat.items.filter((item) => !item.hidden).map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onTabChange(item.id)}
-                    className={cn(
-                      "group relative flex w-full cursor-pointer items-center justify-between py-1.5 pl-3.5 pr-2.5 text-left font-mono text-[12px] tracking-[-0.01em] transition-colors duration-150",
-                      isActive
-                        ? "bg-accent font-semibold text-foreground"
-                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                    )}
-                  >
+                const className = cn(
+                  "group relative flex w-full cursor-pointer items-center justify-between py-1.5 pl-3.5 pr-2.5 text-left font-mono text-[12px] tracking-[-0.01em] transition-colors duration-150",
+                  isActive
+                    ? "bg-accent font-semibold text-foreground"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                );
+                const inner = (
+                  <>
                     {isActive && <span className="absolute inset-y-0 left-0 w-[3px] bg-signal" />}
                     <div className="flex items-center gap-2.5 min-w-0">
                       <Icon
@@ -183,6 +192,22 @@ export function ProjectSidebar({
                         </span>
                       )}
                     </div>
+                  </>
+                );
+                // A routed item renders as a link so middle-click and open-in-new-tab still
+                // work; a tab item stays a button because it changes no URL segment.
+                return item.href ? (
+                  <Link key={item.id} href={item.href} className={className}>
+                    {inner}
+                  </Link>
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onTabChange(item.id)}
+                    className={className}
+                  >
+                    {inner}
                   </button>
                 );
               })}

@@ -31,8 +31,14 @@ class ScanStatusCounts(BaseModel):
 
 class ProjectStatsItem(BaseModel):
     project_id: str
+    # All-time volume: every finding ever ingested, summed across scans. A repo scanned ten
+    # times contributes ten times over, so this is history, never current exposure. Kept for
+    # compatibility; the UI shows current_findings instead.
     total_findings: int
     findings_by_severity: SeverityCounts
+    # Current exposure: the newest completed scan per repo scope.
+    current_findings: int = 0
+    current_findings_by_severity: SeverityCounts = SeverityCounts()
     scan_status_counts: ScanStatusCounts
     risk_repo_count: int
     total_repo_count: int
