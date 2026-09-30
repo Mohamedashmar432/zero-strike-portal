@@ -211,3 +211,41 @@ def test_collaborator_cannot_change_roles(client):
         headers=_headers(collab),
     )
     assert r.status_code == 403
+
+
+def test_demotion_race_guard_reverts_when_no_owner_left(client, monkeypatch):
+    from app.models.project_member import ProjectMember
+
+    owner = register_and_login(client, email="mowner11@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    owner_member_id = next(
+        m["id"]
+        for m in client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()
+        if m["role"] == "owner"
+    )
+
+    # Simulate the race: the pre-check saw a second owner (which a concurrent request then demoted).
+    real_find = ProjectMember.find
+    calls = {"n": 0}
+
+    class _Count:
+        def __init__(self, n):
+            self.n = n
+
+        async def count(self):
+            return self.n
+
+    def fake_find(*a, **k):
+        calls["n"] += 1
+        return _Count(2) if calls["n"] == 1 else real_find(*a, **k)
+
+    monkeypatch.setattr(ProjectMember, "find", fake_find)
+    r = client.patch(
+        f"/api/v1/projects/{project['id']}/members/{owner_member_id}",
+        json={"role": "collaborator"},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 409
+    monkeypatch.setattr(ProjectMember, "find", real_find)
+    members = client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()
+    assert [m["role"] for m in members] == ["owner"]

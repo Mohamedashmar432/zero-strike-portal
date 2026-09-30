@@ -291,8 +291,18 @@ async def update_member_role(
         if owner_count <= 1:
             raise HTTPException(status.HTTP_409_CONFLICT, "Cannot demote the last owner")
 
+    demoting_owner = member.role == "owner" and payload.role != "owner"
     member.role = payload.role
     await member.save()
+    if demoting_owner:
+        # Race guard: the pre-check above is read-then-write, so two concurrent demotions can
+        # both pass it. Recount after saving and undo ours if no owner is left.
+        if await ProjectMember.find(
+            ProjectMember.project_id == project_id, ProjectMember.role == "owner"
+        ).count() == 0:
+            member.role = "owner"
+            await member.save()
+            raise HTTPException(status.HTTP_409_CONFLICT, "Cannot demote the last owner")
     await audit_service.record(
         "Member Role Updated",
         actor_user_id=str(user.id),

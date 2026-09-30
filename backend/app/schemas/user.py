@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.auth import BcryptSafePassword
+
 
 class UpdateUserRequest(BaseModel):
     role: Literal["admin", "user"] | None = None
@@ -15,4 +17,4 @@ class UpdateProfileRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=8)
+    new_password: BcryptSafePassword = Field(min_length=8)

@@ -210,7 +210,11 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
 // CI runner variants are a documented future extension, not built now.
 // Hardcoded to "latest" (YAGNI) — see localInstallCmd for the same call on the local-scan side.
 function cicdInstallCmd(origin: string): string {
-  return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o ./zerostrike && chmod +x ./zerostrike`;
+  // Verify against the portal's checksums.txt (lines are "<sha256>  zerostrike_linux_amd64") so
+  // a corrupted or tampered download fails the CI step instead of running. Note this checks
+  // integrity against the same server; it is not an independent signature.
+  const base = `${origin}/api/v1/downloads/zerostrike/latest`;
+  return `curl -fsSL ${base}/linux-amd64 -o zerostrike_linux_amd64 && curl -fsSL ${base}/checksums.txt -o checksums.txt && grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c - && mv zerostrike_linux_amd64 zerostrike && chmod +x ./zerostrike`;
 }
 
 function cicdFilename(provider: CiProvider): string {

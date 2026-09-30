@@ -23,7 +23,11 @@ import structlog
 
 from app.core.config import settings
 from app.schemas.report import GoReportIn
-from app.services.cloud_scan_service import validate_repo_url  # single SSRF source of truth
+from app.services.cloud_scan_service import (  # single SSRF source of truth
+    CloudScanError,
+    git_hardening_entries,
+    validate_repo_url,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -47,18 +51,28 @@ def sanitize(message: str, token: str | None) -> str:
     return message[:1000]
 
 
-def _token_env(token: str | None, auth_scheme: str) -> dict:
+def _token_env(
+    token: str | None, auth_scheme: str, repo_url: str | None = None, pinned_ips: list[str] | None = None
+) -> dict:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    entries: list[tuple[str, str]] = []
     if token:
         # Auth header via env config (not argv/URL) so the token never lands in `ps`/logs.
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
         if auth_scheme == "basic":
             basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Basic {basic}"
+            entries.append(("http.extraHeader", f"AUTHORIZATION: Basic {basic}"))
         else:
-            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Bearer {token}"
+            entries.append(("http.extraHeader", f"AUTHORIZATION: Bearer {token}"))
+
+    if repo_url:
+        entries += git_hardening_entries(repo_url, pinned_ips)
+
+    if entries:
+        env["GIT_CONFIG_COUNT"] = str(len(entries))
+    for i, (key, value) in enumerate(entries):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
     return env
 
 
@@ -89,7 +103,12 @@ async def clone_repo(
     """Clone into an empty workdir. depth=1 + single_branch is enough to push a NEW branch (its only
     parent is the fetched tip); if a push is later rejected as shallow, call `git(..., ["fetch",
     "--unshallow", "origin"])` and retry once (see ai_remediation_apply_service)."""
-    env = _token_env(token, auth_scheme)
+    # Validated here, not left to callers: an unvalidated `--upload-pack=<cmd>` clone_url is RCE.
+    try:
+        pinned_ips = validate_repo_url(repo_url)
+    except CloudScanError as exc:
+        raise GitWorkspaceError(str(exc))
+    env = _token_env(token, auth_scheme, repo_url, pinned_ips)
     shutil.rmtree(workdir, ignore_errors=True)
     os.makedirs(workdir, exist_ok=True)
     cmd = ["git", "clone"]
@@ -99,7 +118,7 @@ async def clone_repo(
         cmd += ["--single-branch"]
     if branch:
         cmd += ["--branch", branch]
-    cmd += [repo_url, workdir]
+    cmd += ["--", repo_url, workdir]
     rc, _out, err = await _run(cmd, settings.remediation_job_timeout_seconds, env=env)
     if rc != 0:
         raise GitWorkspaceError(f"git clone failed (exit {rc}): {err.decode(errors='replace')}")

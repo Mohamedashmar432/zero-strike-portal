@@ -1,9 +1,15 @@
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
+
+from app.core.security import validate_password_bytes
+
+BcryptSafePassword = Annotated[str, AfterValidator(validate_password_bytes)]
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: BcryptSafePassword
     name: str
 
 
@@ -41,4 +47,4 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(min_length=8)
+    new_password: BcryptSafePassword = Field(min_length=8)

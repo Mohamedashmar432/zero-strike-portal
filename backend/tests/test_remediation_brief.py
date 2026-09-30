@@ -128,7 +128,7 @@ def test_brief_includes_scan_metadata_and_the_patch(client):
         assert "# Remediation brief — Acme API" in out
         assert "`abc1234`" in out and "`1.2.3`" in out
         assert "CWE-89" in out and "A03:2021" in out
-        assert "tainted query reaches execute()" in out
+        assert r"tainted query reaches execute\(\)" in out
         assert "```diff" in out
         assert "Use a bound parameter." in out
         assert "Awaiting review" in out
@@ -362,3 +362,28 @@ def test_brief_endpoint_denies_a_non_member(client):
         headers={"Authorization": f"Bearer {outsider['access_token']}"},
     )
     assert r.status_code == 403
+
+
+# --- markdown injection ---------------------------------------------------------------------
+
+
+def test_repo_controlled_path_and_message_cannot_inject_markdown(client):
+    async def run():
+        project, scan = await _scan()
+        f = await _finding(scan, file="a`b``c.py")
+        f.message = "[click](http://evil) ![x](y) <b>hi</b>"
+        await f.save()
+        p = await _proposal(scan, f)
+        out = brief.render_proposal_section(p, f)
+        assert "```a`b``c.py```" in out  # fence longer than the longest inner run
+        assert "[click](http://evil)" not in out
+        assert r"\[click\]\(http://evil\)" in out
+        assert r"\!\[x\]\(y\)" in out
+        assert "<b>" not in out
+
+    asyncio.run(run())
+
+
+def test_inline_code_pads_edge_backticks():
+    assert brief._inline_code("`x") == "`` `x ``"
+    assert brief._inline_code("plain.py") == "`plain.py`"

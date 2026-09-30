@@ -372,3 +372,12 @@ def test_oversized_raw_json_is_dropped_with_a_diagnostic_not_a_failed_ingest(cli
         assert any("inline storage limit" in d.message for d in report.diagnostics)
 
     asyncio.run(run())
+
+
+def test_map_finding_redacts_secret_in_sast_snippet(client):
+    report = _load()
+    raw = next(f for f in report.findings if f.kind == "sast")
+    raw.evidence[0].snippet = 'token = "ghp_' + "a1B2c3D4e5" * 3 + 'a1B2c3"'
+    mapped = ingest_svc._map_finding("s1", "p1", raw)
+    assert "ghp_" not in mapped.evidence[0].snippet
+    assert "REDACTED" in mapped.evidence[0].snippet

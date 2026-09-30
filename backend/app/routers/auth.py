@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from app.core import rate_limit
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.rate_limit import client_ip
 from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -31,7 +32,7 @@ def _to_user_response(user: User) -> UserResponse:
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, request: Request):
     rate_limit.enforce(
-        f"register:{request.client.host if request.client else 'unknown'}",
+        f"register:{client_ip(request)}",
         settings.rate_limit_register_max_attempts,
         settings.rate_limit_register_window_seconds,
     )
@@ -43,18 +44,23 @@ async def register(payload: RegisterRequest, request: Request):
 @router.post("/login", response_model=TokenPairResponse)
 async def login(payload: LoginRequest, request: Request):
     rate_limit.enforce(
-        f"login:{request.client.host if request.client else 'unknown'}:{payload.email}",
+        f"login:{client_ip(request)}:{payload.email.strip().lower()}",
         settings.rate_limit_login_max_attempts,
         settings.rate_limit_login_window_seconds,
     )
+    rate_limit.enforce(
+        f"login-account:{payload.email.strip().lower()}",
+        settings.rate_limit_login_account_max_attempts,
+        settings.rate_limit_login_account_window_seconds,
+    )
     user = await auth_service.authenticate(payload.email, payload.password)
     access_token, refresh_token, expires_in = await auth_service.issue_token_pair(
-        user, user_agent=request.headers.get("user-agent"), ip=request.client.host if request.client else None
+        user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
     )
     user.last_login_at = datetime.now(timezone.utc)
     await user.save()
     await audit_service.record(
-        "login", actor_user_id=str(user.id), ip_address=request.client.host if request.client else None
+        "login", actor_user_id=str(user.id), ip_address=client_ip(request)
     )
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
@@ -64,7 +70,7 @@ async def refresh(payload: RefreshRequest, request: Request):
     access_token, refresh_token, expires_in = await auth_service.refresh_token_pair(
         payload.refresh_token,
         user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
@@ -85,7 +91,7 @@ async def me(user: User = Depends(get_current_user)):
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(payload: ForgotPasswordRequest, request: Request):
     rate_limit.enforce(
-        f"forgot-password:{request.client.host if request.client else 'unknown'}:{payload.email}",
+        f"forgot-password:{client_ip(request)}:{payload.email}",
         settings.rate_limit_forgot_password_max_attempts,
         settings.rate_limit_forgot_password_window_seconds,
     )
