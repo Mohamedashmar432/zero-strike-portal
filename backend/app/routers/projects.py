@@ -646,7 +646,7 @@ async def test_project_ai_provider(
         await llm_client.test_connection(
             provider=config.provider,
             model_name=config.model_name,
-            api_key=ai_provider_config_service.decrypt_api_key(config),
+            api_key=await llm_client.load_api_key(config),
             base_url=config.base_url,
             temperature=config.temperature,
         )

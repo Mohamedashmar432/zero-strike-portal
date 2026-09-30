@@ -47,8 +47,10 @@ class AIProviderConfig(Document):
     project_id: str | None = None
     provider: AIProvider = "anthropic"
     model_name: str | None = None
-    # Encrypted at rest via app.core.security.encrypt_secret/decrypt_secret — never store
-    # or return the raw key (see ai_provider_config_service, routers/ai_provider_config.py).
+    # The key itself lives in Azure Key Vault when AZURE_KEY_VAULT_URL is set: only its secret name
+    # is stored here. api_key_encrypted is the Fernet fallback (vault off) and legacy rows awaiting
+    # scripts/migrate_ai_keys_to_keyvault.py. Never store or return the raw key.
+    api_key_secret_name: str | None = None
     api_key_encrypted: str | None = None
     base_url: str | None = None
     temperature: float = 0.0

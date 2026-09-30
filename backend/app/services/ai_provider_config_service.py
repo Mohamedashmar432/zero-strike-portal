@@ -1,8 +1,9 @@
 """Manages the multi-provider AIProviderConfig collection: CRUD, which one (if any) is
 "active" (the one llm_client actually uses), and per-provider running usage/cost totals.
 
-The provider API key is encrypted at rest via app.core.security's existing Fernet
-helpers (built on settings.oauth_encryption_key) -- reused as-is, no new crypto code.
+The provider API key lives in Azure Key Vault when AZURE_KEY_VAULT_URL is set (Mongo keeps only
+the secret's name -- docs/KEYVAULT_BYOK.md). With the vault off, and for legacy rows not yet
+migrated, it is Fernet-encrypted at rest via app.core.security (settings.oauth_encryption_key).
 """
 
 from datetime import datetime, timezone
@@ -10,11 +11,15 @@ from datetime import datetime, timezone
 from beanie import PydanticObjectId
 from beanie.operators import Inc, Set
 from fastapi import HTTPException, status
+from structlog import get_logger
 
 from app.core import security
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider, AIProviderConfig
 from app.models.ai_usage_event import AIUsageEvent
-from app.services import report_template_service
+from app.services import report_template_service, secret_store
+from app.services.secret_store import SecretStoreError
+
+logger = get_logger(__name__)
 
 # Everything below is scoped: project_id=None is the portal-wide, admin-managed scope, and any
 # other value is one project's own. The two never mix -- see resolve_failover_configs.
@@ -116,10 +121,58 @@ async def ai_ready(project_id: str | None = None) -> bool:
     return config is not None and await is_ready(config)
 
 
-def decrypt_api_key(config: AIProviderConfig) -> str | None:
-    if not config.api_key_encrypted:
-        return None
-    return security.decrypt_secret(config.api_key_encrypted)
+def has_api_key(config: AIProviderConfig) -> bool:
+    return bool(config.api_key_secret_name or config.api_key_encrypted)
+
+
+async def get_api_key(config: AIProviderConfig) -> str | None:
+    """Vault first, then the Fernet ciphertext (legacy rows and vault-off mode). Raises
+    SecretStoreError if the vault cannot be read."""
+    if config.api_key_secret_name:
+        return await secret_store.get(config.api_key_secret_name)
+    if config.api_key_encrypted:
+        return security.decrypt_secret(config.api_key_encrypted)
+    return None
+
+
+async def _store_key(config: AIProviderConfig, api_key: str) -> None:
+    """Persist `api_key` onto `config` (vault when configured, else Fernet). The caller saves the
+    doc afterwards, so a vault failure leaves Mongo untouched."""
+    if not secret_store.enabled():
+        config.api_key_encrypted = security.encrypt_secret(api_key)
+        return
+    name = config.api_key_secret_name
+    if name is None:
+        # Imported here: workspace_settings_service pulls in modules that import this one.
+        from app.services import workspace_settings_service
+
+        project = await workspace_settings_service.load_project(config.project_id)
+        name = secret_store.secret_name(str(config.id), project.name if project else None)
+    tags = {
+        "project_id": config.project_id or "",
+        "config_id": str(config.id),
+        "scope": "project" if config.project_id else "portal",
+    }
+    try:
+        await secret_store.put(name, api_key, tags)
+    except SecretStoreError as exc:
+        logger.error("key vault write failed", config_id=str(config.id), error=str(exc))
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Key Vault unavailable — the API key was not saved."
+        ) from exc
+    config.api_key_secret_name = name
+    config.api_key_encrypted = None
+
+
+async def _drop_secret(name: str | None) -> None:
+    """Best-effort soft delete after the doc no longer references the secret: an orphaned secret is
+    harmless, a failed request is not."""
+    if not name:
+        return
+    try:
+        await secret_store.delete(name)
+    except SecretStoreError as exc:
+        logger.warning("key vault delete failed", secret_name=name, error=str(exc))
 
 
 async def is_ready(config: AIProviderConfig | None = None) -> bool:
@@ -133,7 +186,7 @@ async def is_ready(config: AIProviderConfig | None = None) -> bool:
         return False
     if config.provider in NO_KEY_REQUIRED_PROVIDERS:
         return True
-    return decrypt_api_key(config) is not None
+    return has_api_key(config)
 
 
 async def create_config(
@@ -152,18 +205,20 @@ async def create_config(
     was_empty = await AIProviderConfig.find(AIProviderConfig.project_id == project_id).count() == 0
     now = datetime.now(timezone.utc)
     config = AIProviderConfig(
+        id=PydanticObjectId(),  # allocated up front: the secret name embeds it
         name=name,
         project_id=project_id,
         provider=provider,
         model_name=model_name,
         base_url=base_url,
         temperature=temperature,
-        api_key_encrypted=security.encrypt_secret(api_key) if api_key else None,
         is_active=was_empty,
         created_at=now,
         updated_at=now,
         updated_by=created_by,
     )
+    if api_key:
+        await _store_key(config, api_key)
     await config.insert()
     return config
 
@@ -183,8 +238,9 @@ async def update_config(
 ) -> AIProviderConfig:
     """Applies the update payload's omitted-vs-clear api_key semantics:
     - api_key omitted (None) and clear_api_key falsy -> existing encrypted key untouched.
-    - clear_api_key=True -> api_key_encrypted wiped, regardless of an api_key also being sent.
-    - api_key provided (non-empty) -> re-encrypted and stored, replacing whatever was there.
+    - clear_api_key=True -> the key reference wiped (and its vault secret soft-deleted), regardless
+      of an api_key also being sent.
+    - api_key provided (non-empty) -> stored again, replacing whatever was there.
 
     Never touches is_active. Raises 400 if this config is currently active and the
     prospective (post-update) state would leave it not ready -- an admin editing the live
@@ -198,10 +254,13 @@ async def update_config(
     if temperature is not None:
         config.temperature = temperature
 
+    old_secret_name = None
     if clear_api_key:
+        old_secret_name = config.api_key_secret_name
+        config.api_key_secret_name = None
         config.api_key_encrypted = None
     elif api_key:
-        config.api_key_encrypted = security.encrypt_secret(api_key)
+        await _store_key(config, api_key)
 
     if config.is_active and not await is_ready(config):
         raise HTTPException(
@@ -212,12 +271,14 @@ async def update_config(
     config.updated_at = datetime.now(timezone.utc)
     config.updated_by = updated_by
     await config.save()
+    await _drop_secret(old_secret_name)
     return config
 
 
 async def delete_config(config_id: str, project_id: str | None = None) -> None:
     config = await get_config_or_404(config_id, project_id)
     await config.delete()
+    await _drop_secret(config.api_key_secret_name)
 
 
 async def set_active(config_id: str | None, project_id: str | None = None) -> AIProviderConfig | None:

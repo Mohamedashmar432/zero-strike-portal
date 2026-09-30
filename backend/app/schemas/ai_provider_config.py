@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.core.timeutils import as_utc
 from app.models.ai_provider_config import AIProvider
+from app.services import ai_provider_config_service
 
 
 class AIProviderConfigCreateRequest(BaseModel):
@@ -61,7 +62,7 @@ class AIProviderConfigResponse(BaseModel):
             base_url=config.base_url,
             temperature=config.temperature,
             is_active=config.is_active,
-            has_api_key=config.api_key_encrypted is not None,
+            has_api_key=ai_provider_config_service.has_api_key(config),
             total_requests=config.total_requests,
             total_failed_requests=config.total_failed_requests,
             total_prompt_tokens=config.total_prompt_tokens,

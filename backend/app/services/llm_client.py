@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.retry import retry_transient
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider
 from app.services import ai_provider_config_service
+from app.services.secret_store import SecretStoreError
 
 logger = structlog.get_logger(__name__)
 
@@ -106,6 +107,15 @@ def _resolve_api_key(provider: AIProvider, api_key: str | None) -> str | None:
     if provider in NO_KEY_REQUIRED_PROVIDERS:
         return _PLACEHOLDER_API_KEY
     return api_key
+
+
+async def load_api_key(config: ai_provider_config_service.AIProviderConfig) -> str | None:
+    """The config's key, with a vault outage surfaced as transient so the call fails over to the
+    next config in the same scope (never across scopes -- see resolve_failover_configs)."""
+    try:
+        return await ai_provider_config_service.get_api_key(config)
+    except SecretStoreError as exc:
+        raise LLMTransientError("The API key could not be read from Key Vault.") from exc
 
 
 class LLMError(Exception):
@@ -331,7 +341,7 @@ async def _completion_with_config(
     """One completion attempt against one provider config. Usage is recorded against `config`, so a
     failed-over call bills the provider that actually served it."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
-    api_key = _resolve_api_key(config.provider, ai_provider_config_service.decrypt_api_key(config))
+    api_key = _resolve_api_key(config.provider, await load_api_key(config))
     kwargs: dict = {
         "model": model,
         "messages": messages,
@@ -545,7 +555,7 @@ async def _tool_completion_with_config(
 ) -> LLMToolResponse:
     """One tool-calling attempt against one provider config."""
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
-    api_key = _resolve_api_key(config.provider, ai_provider_config_service.decrypt_api_key(config))
+    api_key = _resolve_api_key(config.provider, await load_api_key(config))
     kwargs: dict = {
         "model": model,
         "messages": messages,

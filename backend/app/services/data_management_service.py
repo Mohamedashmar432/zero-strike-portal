@@ -5,13 +5,15 @@ Two callers share it so they can never drift apart:
   * project_service.delete_project_cascade — deleting one project.
 
 Anything NOT listed here is deliberately never purged: User, WorkspaceSettings,
-AIProviderConfig / RepoCredential / OAuthConnection (credentials), RemediationSettings
+RepoCredential / OAuthConnection (credentials; portal-wide AIProviderConfig too, while a
+project's BYOK configs go with the project), RemediationSettings
 (a workspace singleton) and ScannerBinary (GridFS build artifacts, not portal data).
 Adding a project-scoped collection? Add it here — the cascade picks it up for free.
 """
 
 from dataclasses import dataclass, field
 
+import structlog
 from beanie import Document
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -19,6 +21,7 @@ from bson.errors import InvalidId
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.ai_finding_insight import AIFindingInsight
 from app.models.ai_fix_proposal import AIFixProposal
+from app.models.ai_provider_config import AIProviderConfig
 from app.models.ai_remediation_job import RemediationJob
 from app.models.ai_scan_insight import AIScanInsight
 from app.models.ai_usage_event import AIUsageEvent
@@ -36,6 +39,9 @@ from app.models.remediation_project_doc import RemediationProjectDoc
 from app.models.report import Report
 from app.models.scan import Scan
 from app.models.vulnerability import Vulnerability
+from app.services import secret_store
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -168,7 +174,25 @@ async def purge(categories: list[str], project_id: str | None = None) -> dict[st
             if count:
                 await model.find(scope).delete()
             deleted[name] = deleted.get(name, 0) + count
+    if "projects" in expand(categories):
+        deleted["ai_provider_config"] = await _purge_project_ai_keys(project_id)
     return deleted
+
+
+async def _purge_project_ai_keys(project_id: str | None) -> int:
+    """Project BYOK configs go with their project, and their Key Vault secrets are soft-deleted
+    after the docs. Best-effort on the vault: a purge must not be blocked by it (an orphaned secret
+    is harmless). Portal-wide configs (project_id None) are never touched."""
+    scope = {"project_id": project_id if project_id is not None else {"$ne": None}}
+    configs = await AIProviderConfig.find(scope).to_list()
+    await AIProviderConfig.find(scope).delete()
+    for config in configs:
+        if config.api_key_secret_name:
+            try:
+                await secret_store.delete(config.api_key_secret_name)
+            except secret_store.SecretStoreError as exc:
+                logger.warning("key vault delete failed", secret_name=config.api_key_secret_name, error=str(exc))
+    return len(configs)
 
 
 async def purge_project(project_id: str) -> dict[str, int]:

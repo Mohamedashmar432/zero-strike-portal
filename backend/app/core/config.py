@@ -144,6 +144,7 @@ class Settings(BaseSettings):
     # unlike jwt_secret's throwaway-dev-value pattern) because a rotating key would make previously
     # encrypted Mongo rows undecryptable. Override in production via env/secrets file.
     oauth_encryption_key: str = "3RmU3vG6nF1sVw8lXe0aP7wQyKzD2bT9cH4jN6oI5uY="
+    azure_key_vault_url: str = ""  # empty = AI provider keys stay Fernet-encrypted in Mongo
     backend_public_url: str = "http://localhost:8000"  # used to build each provider's redirect_uri
     frontend_origin: str = "http://localhost:3000"  # where /connections/{provider}/callback redirects to
 

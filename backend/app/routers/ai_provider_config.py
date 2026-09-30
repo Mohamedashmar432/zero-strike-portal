@@ -127,8 +127,8 @@ async def deactivate_ai_provider(user: User = Depends(require_admin)):
 @router.post("/{provider_id}/test", response_model=AIProviderTestResponse)
 async def test_ai_provider(provider_id: str, user: User = Depends(require_admin)):
     config = await ai_provider_config_service.get_config_or_404(provider_id)
-    api_key = ai_provider_config_service.decrypt_api_key(config)
     try:
+        api_key = await llm_client.load_api_key(config)
         await llm_client.test_connection(
             provider=config.provider,
             model_name=config.model_name,
