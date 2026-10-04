@@ -89,7 +89,14 @@ def test_stats_counts_seeded_scan_data(client):
 
     body = client.get("/api/v1/admin/data/stats", headers=headers).json()
     keys = [c["key"] for c in body["categories"]]
-    assert keys == ["scan_data", "ai_artifacts", "compliance", "ai_usage", "audit_log", "projects"]
+    assert keys == [
+        "scan_data",
+        "ai_artifacts",
+        "compliance",
+        "ai_usage",
+        "audit_log",
+        "projects",
+    ]
 
     by_key = {c["key"]: c for c in body["categories"]}
     assert by_key["scan_data"]["total"] > 0

@@ -104,7 +104,18 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _retr
   return res.json() as Promise<T>;
 }
 
-export async function apiFetchBlob(path: string, options: RequestInit = {}, _retried = false): Promise<Blob> {
+function filenameFromContentDisposition(value: string | null): string | null {
+  // Matches filename="..." (quoted, as the backend always sends it) — not the filename*=
+  // RFC 5987 form, which this app's endpoints don't emit.
+  const match = value?.match(/filename="([^"]+)"/);
+  return match ? match[1] : null;
+}
+
+export async function apiFetchBlob(
+  path: string,
+  options: RequestInit = {},
+  _retried = false
+): Promise<{ blob: Blob; filename: string | null }> {
   const { accessToken } = getTokens();
   const headers = new Headers(options.headers);
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -122,5 +133,5 @@ export async function apiFetchBlob(path: string, options: RequestInit = {}, _ret
     throw new ApiError(res.status, body);
   }
 
-  return res.blob();
+  return { blob: await res.blob(), filename: filenameFromContentDisposition(res.headers.get("Content-Disposition")) };
 }

@@ -88,8 +88,8 @@ export function ProjectAutoFixSection({
 
   const brief = useMutation({
     mutationFn: async () => {
-      const blob = await downloadScanBrief(scanId);
-      saveBlob(blob, `zerostrike-remediation-${scanId}.md`);
+      const { blob } = await downloadScanBrief(scanId);
+      saveBlob(blob, `thinkshield-remediation-${scanId}.md`);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not generate the brief"),
   });

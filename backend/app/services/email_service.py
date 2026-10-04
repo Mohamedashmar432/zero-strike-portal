@@ -24,7 +24,7 @@ def send_email(to_address: str, subject: str, text_body: str, html_body: str | N
     without SMTP configured.
     """
     if not settings.smtp_host:
-        logger.warning("SMTP not configured (smtp_host empty) — skipping email to %s", to_address)
+        logger.warning("SMTP not configured (smtp_host empty) — skipping email")
         return
 
     message = MIMEMultipart("alternative")
@@ -49,14 +49,14 @@ def send_password_reset_email(to_address: str, reset_url: str, ttl_minutes: int)
     ttl_minutes must reflect the caller's actual token lifetime (settings.password_reset_token_ttl_minutes)
     — the email body quotes it directly, so a mismatch would tell users the wrong expiry.
     """
-    subject = "Reset your ZeroStrike Portal password"
+    subject = "Reset your thinkShield Portal password"
     text_body = (
-        "You requested a password reset for your ZeroStrike Portal account.\n\n"
+        "You requested a password reset for your thinkShield Portal account.\n\n"
         f"Reset your password using this link:\n{reset_url}\n\n"
         f"This link expires in {ttl_minutes} minutes. If you did not request this, you can ignore this email."
     )
     html_body = (
-        "<p>You requested a password reset for your ZeroStrike Portal account.</p>"
+        "<p>You requested a password reset for your thinkShield Portal account.</p>"
         f'<p><a href="{reset_url}">Reset your password</a></p>'
         f"<p>This link expires in {ttl_minutes} minutes. If you did not request this, you can ignore this "
         "email.</p>"

@@ -223,9 +223,9 @@ export function CreatePrButton({
           <DialogHeader>
             <DialogTitle>Create pull request?</DialogTitle>
             <DialogDescription>
-              ZeroStrike will push a branch and open a pull request titled{" "}
+              thinkShield will push a branch and open a pull request titled{" "}
               <span className="font-mono text-foreground">
-                zero-strike/security fix: {proposal.finding_rule_name ?? "finding"}
+                thinkshield/security fix: {proposal.finding_rule_name ?? "finding"}
               </span>{" "}
               on the connected repository. Nothing is committed to your default branch — you merge the PR
               yourself after review.

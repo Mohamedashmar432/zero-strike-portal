@@ -12,6 +12,14 @@ from app.core.config import settings
 _BCRYPT_MAX_BYTES = 72  # bcrypt silently ignores/rejects input beyond this
 
 
+def validate_password_bytes(password: str) -> str:
+    """Pydantic validator: bcrypt only uses the first 72 bytes, so refuse longer input
+    rather than silently truncating it. Not applied to login (existing hashes stay valid)."""
+    if len(password.encode()) > _BCRYPT_MAX_BYTES:
+        raise ValueError(f"Password must be at most {_BCRYPT_MAX_BYTES} bytes")
+    return password
+
+
 def hash_password(password: str) -> str:
     truncated = password.encode()[:_BCRYPT_MAX_BYTES]
     return bcrypt.hashpw(truncated, bcrypt.gensalt()).decode()

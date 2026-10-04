@@ -115,6 +115,7 @@ export const queryKeys = {
   settings: {
     reportTemplate: () => ["settings", "report-template"] as const,
     workspace: () => ["settings", "workspace"] as const,
+    emailTemplates: () => ["settings", "email-templates"] as const,
   },
   notifications: {
     list: () => ["notifications"] as const,

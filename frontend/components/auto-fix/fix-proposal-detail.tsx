@@ -91,8 +91,8 @@ export function FixProposalDetail({
 
   const download = useMutation({
     mutationFn: async () => {
-      const blob = await downloadFixPatch(proposal.id);
-      saveBlob(blob, `zerostrike-fix-${proposal.id}.patch`);
+      const { blob } = await downloadFixPatch(proposal.id);
+      saveBlob(blob, `thinkshield-fix-${proposal.id}.patch`);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "No patch available"),
   });

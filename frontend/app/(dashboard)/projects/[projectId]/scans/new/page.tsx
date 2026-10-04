@@ -32,9 +32,9 @@ function scannerServerOrigin(): string {
 }
 
 const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: typeof Terminal }[] = [
-  { value: "local", label: "Local", description: "Run the ZeroStrike CLI on your machine and upload results with a project token.", icon: Terminal },
-  { value: "cloud", label: "Cloud", description: "Give ZeroStrike a repo URL and it clones + scans it server-side.", icon: Cloud },
-  { value: "cicd", label: "CI/CD", description: "Add ZeroStrike to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
+  { value: "local", label: "Local", description: "Run the thinkShield CLI on your machine and upload results with a project token.", icon: Terminal },
+  { value: "cloud", label: "Cloud", description: "Give thinkShield a repo URL and it clones + scans it server-side.", icon: Cloud },
+  { value: "cicd", label: "CI/CD", description: "Add thinkShield to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
 
 const CI_PROVIDERS: { value: CiProvider; label: string }[] = [
@@ -166,7 +166,7 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Run the ZeroStrike CLI on your machine — it uploads results here automatically. A scan appears in
+        Run the thinkShield CLI on your machine — it uploads results here automatically. A scan appears in
         this list once the CLI runs.
       </p>
       <div className="space-y-2">
@@ -210,7 +210,11 @@ function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () =
 // CI runner variants are a documented future extension, not built now.
 // Hardcoded to "latest" (YAGNI) — see localInstallCmd for the same call on the local-scan side.
 function cicdInstallCmd(origin: string): string {
-  return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o ./zerostrike && chmod +x ./zerostrike`;
+  // Verify against the portal's checksums.txt (lines are "<sha256>  zerostrike_linux_amd64") so
+  // a corrupted or tampered download fails the CI step instead of running. Note this checks
+  // integrity against the same server; it is not an independent signature.
+  const base = `${origin}/api/v1/downloads/zerostrike/latest`;
+  return `curl -fsSL ${base}/linux-amd64 -o zerostrike_linux_amd64 && curl -fsSL ${base}/checksums.txt -o checksums.txt && grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c - && mv zerostrike_linux_amd64 zerostrike && chmod +x ./zerostrike`;
 }
 
 function cicdFilename(provider: CiProvider): string {
@@ -227,16 +231,16 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
   if (provider === "github_actions") {
     return [
       "# .github/workflows/zerostrike.yml",
-      "name: ZeroStrike SAST",
+      "name: thinkShield SAST",
       "on: [push, pull_request]",
       "jobs:",
       "  zerostrike:",
       "    runs-on: ubuntu-latest",
       "    steps:",
       "      - uses: actions/checkout@v4",
-      "      - name: Install ZeroStrike scanner",
+      "      - name: Install thinkShield scanner",
       `        run: ${install}`,
-      "      - name: ZeroStrike scan",
+      "      - name: thinkShield scan",
       `        run: ${cmdGh}`,
     ].join("\n");
   }
@@ -255,9 +259,9 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
     "# azure-pipelines.yml",
     "steps:",
     `  - script: ${install}`,
-    "    displayName: Install ZeroStrike scanner",
+    "    displayName: Install thinkShield scanner",
     `  - script: ${cmdAz}`,
-    "    displayName: ZeroStrike scan",
+    "    displayName: thinkShield scan",
   ].join("\n");
 }
 
@@ -267,7 +271,7 @@ function CicdSetupStep({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Add ZeroStrike to your pipeline. Store a project token as a secret named{" "}
+        Add thinkShield to your pipeline. Store a project token as a secret named{" "}
         <code>ZEROSTRIKE_TOKEN</code> (generate one on the Project Tokens tab), then drop in the snippet.
       </p>
       <div className="space-y-2">
@@ -417,7 +421,7 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
   return (
     <form onSubmit={handleSubmit((values) => mutation.mutate(values))} className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        ZeroStrike clones the repository and scans it on the server.
+        thinkShield clones the repository and scans it on the server.
       </p>
 
       {source === "connected" ? (

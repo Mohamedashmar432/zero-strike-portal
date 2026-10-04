@@ -24,6 +24,9 @@ async def get_current_user(
     user = await User.get(claims["sub"])
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    # Login already refuses these; this covers a token minted before the account was gated.
+    if user.approval_status != "approved":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account has not been approved")
     return user
 
 

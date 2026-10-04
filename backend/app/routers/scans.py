@@ -246,10 +246,11 @@ async def get_scan_report_pdf(scan_id: str, user: User = Depends(get_current_use
     template = await report_template_service.get_effective_template(project)
     findings = await Finding.find(Finding.scan_id == scan_id).to_list()
     pdf_bytes = await pdf_report_service.render_scan_report_pdf(scan, report, findings, template, project.name)
+    filename = pdf_report_service.build_report_filename(scan, report, project.name)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="scan-{scan_id}-report.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

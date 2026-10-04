@@ -5,3 +5,5 @@ Thumbs.db
 .serena/
 .claude/
 *.log
+
+brag-output/

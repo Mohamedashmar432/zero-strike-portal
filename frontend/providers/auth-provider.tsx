@@ -11,7 +11,8 @@ type AuthContextValue = {
   isAuthenticating: boolean;
   isRestoringSession: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
+  /** Resolves to the new account; a `pending` one is NOT signed in. */
+  register: (email: string, password: string, name: string) => Promise<authApi.User>;
   logout: () => Promise<void>;
   updateProfile: (payload: { name?: string; email?: string }) => Promise<void>;
 };
@@ -56,8 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function register(email: string, password: string, name: string) {
     setIsAuthenticating(true);
     try {
-      await authApi.register(email, password, name);
+      const created = await authApi.register(email, password, name);
+      if (created.approval_status === "pending") return created;
       await login(email, password);
+      return created;
     } finally {
       setIsAuthenticating(false);
     }

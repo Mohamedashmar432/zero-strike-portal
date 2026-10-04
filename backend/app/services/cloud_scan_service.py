@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 import structlog
 
 from app.core.config import settings
+from app.core.repo_url import check_repo_url_syntax
 from app.core.retry import retry_transient
 from app.models.scan import Scan, ScanStage
 from app.schemas.report import GoReportIn
@@ -78,23 +79,51 @@ def _workdir_root() -> str:
     return str(root)
 
 
-def validate_repo_url(repo_url: str) -> None:
-    """Reject non-http(s) schemes and hosts that resolve to loopback/private/link-local
-    (SSRF + cloud-metadata 169.254.169.254 defense)."""
-    parsed = urlparse(repo_url)
-    if parsed.scheme not in ("http", "https"):
-        raise CloudScanError("repo_url must be an http or https URL")
-    host = parsed.hostname
-    if not host:
-        raise CloudScanError("repo_url has no host")
+def validate_repo_url(repo_url: str) -> list[str]:
+    """Reject non-http(s) URLs, option-looking values, userinfo, and hosts that resolve to anything
+    not globally routable (SSRF + cloud-metadata 169.254.169.254 + CGNAT 100.64/10 defense).
+
+    Returns the vetted IP strings so the caller can pin git to them (see git_hardening_entries) --
+    git would otherwise re-resolve the host and a rebinding DNS server could answer differently."""
     try:
-        infos = socket.getaddrinfo(host, None)
+        parsed = check_repo_url_syntax(repo_url)
+    except ValueError as exc:
+        raise CloudScanError(str(exc))
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
     except socket.gaierror:
         raise CloudScanError("repo_url host does not resolve")
+    vetted: list[str] = []
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+        raw = info[4][0].split("%")[0]
+        ip = ipaddress.ip_address(raw)
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
             raise CloudScanError("repo_url resolves to a disallowed address")
+        if raw not in vetted:
+            vetted.append(raw)
+    if not vetted:
+        raise CloudScanError("repo_url host does not resolve")
+    return vetted
+
+
+def git_hardening_entries(repo_url: str, ips: list[str] | None) -> list[tuple[str, str]]:
+    """GIT_CONFIG entries every network clone must carry: http(s) only (no file://, ext::), no
+    redirect following (a redirect would bypass the host vetting), and the host pinned to the first
+    vetted IP so git cannot re-resolve to a different one. `ips` empty/None skips the pin."""
+    entries = [
+        ("protocol.allow", "never"),
+        ("protocol.https.allow", "always"),
+        ("protocol.http.allow", "always"),
+        ("http.followRedirects", "false"),
+    ]
+    if ips:
+        parsed = urlparse(repo_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        ip = f"[{ips[0]}]" if ":" in ips[0] else ips[0]
+        entries.append(("http.curloptResolve", f"{parsed.hostname}:{port}:{ip}"))
+    return entries
 
 
 def _sanitize(message: str, repo_token: str | None) -> str:
@@ -192,7 +221,7 @@ def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[in
                 cmd[0],
             )
             raise CloudScanError(
-                f"ZeroStrike scanner is not available on this server (binary not found at "
+                f"thinkShield scanner is not available on this server (binary not found at "
                 f"'{cmd[0]}'). This is a portal configuration issue, not a problem with your repo — "
                 "contact an administrator."
             )
@@ -205,14 +234,18 @@ async def _run(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[i
 
 
 async def _clone(
-    repo_url: str, branch: str | None, workdir: str, repo_token: str | None, auth_scheme: str = "bearer"
+    repo_url: str,
+    branch: str | None,
+    workdir: str,
+    repo_token: str | None,
+    auth_scheme: str = "bearer",
+    pinned_ips: list[str] | None = None,
 ) -> None:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    entries: list[tuple[str, str]] = []
     if repo_token:
         # Inject the auth header via env config (not argv/URL) so the token never lands in `ps` or logs.
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
         if auth_scheme == "basic":
             # GitHub tokens (PAT or OAuth) and Azure DevOps PATs all authenticate git-over-HTTPS via
             # HTTP Basic (token as password) — Bearer here gets silently rejected instead (see
@@ -221,13 +254,18 @@ async def _clone(
             # credential helper ("could not read Username ... terminal prompts disabled").
             # "x-access-token" is GitHub's own placeholder and Azure DevOps ignores the username.
             basic_token = base64.b64encode(f"x-access-token:{repo_token}".encode()).decode()
-            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Basic {basic_token}"
+            entries.append(("http.extraHeader", f"AUTHORIZATION: Basic {basic_token}"))
         else:
-            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: Bearer {repo_token}"
+            entries.append(("http.extraHeader", f"AUTHORIZATION: Bearer {repo_token}"))
+    entries += git_hardening_entries(repo_url, pinned_ips)
+    env["GIT_CONFIG_COUNT"] = str(len(entries))
+    for i, (key, value) in enumerate(entries):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
     cmd = ["git", "clone", "--depth", "1"]
     if branch:
         cmd += ["--branch", branch]
-    cmd += [repo_url, workdir]
+    cmd += ["--", repo_url, workdir]
 
     @retry_transient((_TransientCloneError,), max_attempts=3, base_delay=2.0)
     async def _do_clone() -> None:
@@ -398,9 +436,9 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
         # real failure is never racing a beat.
         async with _beating(scan):
             await _stage(scan, "validating")
-            validate_repo_url(scan.repo_url)
+            pinned_ips = validate_repo_url(scan.repo_url)
             await _stage(scan, "cloning")
-            await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme)
+            await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme, pinned_ips)
             await _stage(scan, "scanning")
             await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
     except Exception as e:

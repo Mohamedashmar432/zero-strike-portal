@@ -410,7 +410,7 @@ async def download_scan_brief(scan_id: str, user: User = Depends(get_current_use
     return Response(
         content=markdown,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="zerostrike-remediation-{scan_id}.md"'},
+        headers={"Content-Disposition": f'attachment; filename="thinkshield-remediation-{scan_id}.md"'},
     )
 
 
@@ -737,7 +737,7 @@ async def download_fix_patch(proposal_id: str, user: User = Depends(get_current_
     diff = _unified_diff(proposal.original_code, proposal.patched_code, proposal.file_path)
     if diff is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No patch available for this proposal")
-    filename = f"zerostrike-fix-{proposal_id}.patch"
+    filename = f"thinkshield-fix-{proposal_id}.patch"
     return Response(
         content=diff + "\n",
         media_type="text/x-patch",

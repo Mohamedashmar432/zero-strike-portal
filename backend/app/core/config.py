@@ -164,9 +164,17 @@ class Settings(BaseSettings):
     # (auth_service._prune_refresh_tokens) — bounds unbounded growth of User.refresh_tokens.
     refresh_token_retention_days: int = 7
 
+    # Number of reverse proxies in front of the app that append to X-Forwarded-For. 0 = use
+    # the socket peer and ignore the header. See app.core.rate_limit.client_ip.
+    trusted_proxy_hops: int = 0
+
     # In-memory sliding-window rate limits (app.core.rate_limit) for auth endpoints.
     rate_limit_login_max_attempts: int = 10
     rate_limit_login_window_seconds: int = 60
+    # Account-wide login bucket keyed on the email alone, so rotating source IPs cannot
+    # multiply the guess budget against one account.
+    rate_limit_login_account_max_attempts: int = 20
+    rate_limit_login_account_window_seconds: int = 900
     rate_limit_register_max_attempts: int = 5
     rate_limit_register_window_seconds: int = 60
     rate_limit_forgot_password_max_attempts: int = 5

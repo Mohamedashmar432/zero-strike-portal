@@ -449,11 +449,11 @@ export default function ScanDetailPage() {
   async function handleDownloadPdf() {
     setDownloadingPdf(true);
     try {
-      const blob = await downloadReportPdf(scanId);
+      const { blob, filename } = await downloadReportPdf(scanId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `scan-${scanId}-report.pdf`;
+      a.download = filename ?? `scan-${scanId}-report.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -926,7 +926,7 @@ export default function ScanDetailPage() {
             </div>
           )}
           <footer className="border-t border-border pt-6 text-center text-xs text-muted-foreground">
-            ZeroStrike Security Platform Scan Engine
+            thinkShield Security Platform Scan Engine
             {report?.scanner_version || scan.scanner_version ? ` v${report?.scanner_version ?? scan.scanner_version}` : ""}
             {" · "}
             Last scan completed {timeAgo(scan.completed_at ?? scan.created_at)}.

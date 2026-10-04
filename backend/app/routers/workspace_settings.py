@@ -10,19 +10,29 @@ Two routers, deliberately split by principal:
   here, so it holds for every reader of the resolved policy and not just for this endpoint.
 """
 
-from fastapi import APIRouter, Depends
+import asyncio
 
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.core import email_templates
+from app.core.config import settings
 from app.core.deps import get_current_user, require_admin
 from app.models.project import Project
 from app.models.user import User
 from app.models.workspace_settings import WorkspaceSettings
+from app.schemas.common import MessageResponse
 from app.schemas.workspace_settings import (
+    EmailTemplateOut,
+    EmailTemplateUpdateRequest,
     ProjectPolicyResponse,
     ProjectPolicyUpdateRequest,
     WorkspaceSettingsResponse,
     WorkspaceSettingsUpdateRequest,
 )
-from app.services import audit_service, project_service, workspace_settings_service
+from app.services import audit_service, email_service, project_service, workspace_settings_service
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/workspace-settings", tags=["workspace-settings"])
 project_router = APIRouter(tags=["workspace-settings"])
@@ -40,6 +50,8 @@ def _to_response(ws: WorkspaceSettings) -> WorkspaceSettingsResponse:
         compliance_audit_ai_narrative=ws.compliance_audit_ai_narrative,
         compliance_auto_audit_on_scan=ws.compliance_auto_audit_on_scan,
         compliance_evidence_retention_days=ws.compliance_evidence_retention_days,
+        signup_requires_approval=ws.signup_requires_approval,
+        signup_notify_admin_ids=ws.signup_notify_admin_ids,
     )
 
 
@@ -54,6 +66,19 @@ async def update_workspace_settings(
     payload: WorkspaceSettingsUpdateRequest, user: User = Depends(require_admin)
 ):
     changed = payload.model_dump(exclude_unset=True)
+    if "signup_requires_approval" in changed and changed["signup_requires_approval"] is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "signup_requires_approval must be true or false"
+        )
+    if "signup_notify_admin_ids" in changed:
+        if changed["signup_notify_admin_ids"] is None:
+            changed["signup_notify_admin_ids"] = []
+        ids = changed["signup_notify_admin_ids"] = list(dict.fromkeys(changed["signup_notify_admin_ids"]))
+        admins = await User.find(User.role == "admin", User.is_active == True).to_list()  # noqa: E712
+        if set(ids) - {str(a.id) for a in admins}:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Signup reviewers must be active admins"
+            )
     ws = await workspace_settings_service.update_workspace_settings(
         updated_by=str(user.id), **changed
     )
@@ -64,6 +89,100 @@ async def update_workspace_settings(
         metadata=changed,
     )
     return _to_response(ws)
+
+
+# --- email templates (portal admin) ------------------------------------------
+
+_SAMPLE = {
+    "name": "Alex Sample",
+    "email": "alex.sample@example.com",
+    "action_url": "https://portal.example.com/admin/users?status=pending",
+    "reason": "Reason: Please request access through your team lead.",
+}
+
+
+def _template_out(t: email_templates.EmailTemplate, overrides: dict) -> EmailTemplateOut:
+    custom = overrides.get(t.key) or {}
+    return EmailTemplateOut(
+        key=t.key,
+        label=t.label,
+        description=t.description,
+        placeholders=list(t.placeholders),
+        default_subject=t.subject,
+        default_body=t.body,
+        subject=custom.get("subject"),
+        body=custom.get("body"),
+    )
+
+
+def _template_or_404(key: str) -> email_templates.EmailTemplate:
+    t = email_templates.BY_KEY.get(key)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown email template")
+    return t
+
+
+@router.get("/email-templates", response_model=list[EmailTemplateOut])
+async def list_email_templates(user: User = Depends(require_admin)):
+    ws = await workspace_settings_service.get_workspace_settings()
+    return [_template_out(t, ws.email_templates) for t in email_templates.TEMPLATES]
+
+
+@router.put("/email-templates/{key}", response_model=EmailTemplateOut)
+async def update_email_template(
+    key: str, payload: EmailTemplateUpdateRequest, user: User = Depends(require_admin)
+):
+    t = _template_or_404(key)
+    subject = (payload.subject or "").strip()
+    body = (payload.body or "").strip()
+    bad = email_templates.unknown_placeholders(key, subject, body)
+    if bad:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Unknown placeholder(s): {', '.join('{' + b + '}' for b in bad)}. "
+            f"Available: {', '.join('{' + p + '}' for p in t.placeholders)}",
+        )
+    ws = await workspace_settings_service.get_workspace_settings()
+    overrides = dict(ws.email_templates)
+    if subject or body:
+        overrides[key] = {k: v for k, v in (("subject", subject), ("body", body)) if v}
+    else:
+        overrides.pop(key, None)  # blank = reset to default
+    ws = await workspace_settings_service.update_workspace_settings(
+        updated_by=str(user.id), email_templates=overrides
+    )
+    await audit_service.record(
+        "Email Template Updated",
+        actor_user_id=str(user.id),
+        target_type="email_template",
+        target_id=key,
+        metadata={"reset": key not in overrides},
+    )
+    return _template_out(t, ws.email_templates)
+
+
+@router.post("/email-templates/{key}/test", response_model=MessageResponse)
+async def send_test_email(key: str, user: User = Depends(require_admin)):
+    """Render the template with sample data and mail it to the calling admin. Doubles as the
+    SMTP check: unlike a real notification, a failure is reported instead of swallowed."""
+    _template_or_404(key)
+    if not settings.smtp_host:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Email delivery is not configured (SMTP_HOST is empty)"
+        )
+    ws = await workspace_settings_service.get_workspace_settings()
+    subject, text, html = email_templates.render(key, ws.email_templates, _SAMPLE)
+    try:
+        await asyncio.to_thread(
+            email_service.send_email, user.email, f"[Test] {subject}", text, html
+        )
+    except Exception:
+        logger.exception("test email failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "The mail server rejected the message; check the server log",
+        )
+    return MessageResponse(message=f"Test email sent to {user.email}")
 
 
 async def _policy_response(project: Project, *, can_manage: bool) -> ProjectPolicyResponse:

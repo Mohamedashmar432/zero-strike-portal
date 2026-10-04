@@ -7,6 +7,7 @@ non-admin, since every operation spans projects the caller may not be a member o
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.core.deps import require_admin
+from app.core.rate_limit import client_ip
 from app.models.user import User
 from app.schemas.data_management import (
     DataStatsResponse,
@@ -45,7 +46,7 @@ async def purge_data(payload: PurgeRequest, request: Request, admin: User = Depe
         project_id=payload.project_id,
         target_type="portal_data",
         metadata={"categories": expanded, "deleted": deleted},
-        ip_address=request.client.host if request.client else None,
+        ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
     return PurgeResponse(

@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 from bson.errors import InvalidId
 from pydantic import ValidationError
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.request_context import bind_request_context
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
@@ -109,7 +110,12 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="ZeroStrike Portal API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="thinkShield Portal API",
+        version="0.1.0",
+        lifespan=lifespan,
+        dependencies=[Depends(bind_request_context)],
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -117,6 +123,10 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Without this, `fetch`'s Response.headers can't see Content-Disposition cross-origin,
+        # so the frontend's download filename (project-repo-date.pdf) silently falls back to a
+        # hardcoded default — browsers expose only a fixed "safelist" of headers by default.
+        expose_headers=["Content-Disposition"],
     )
     # Added after CORS so it's the outermost layer (Starlette wraps in reverse add order) —
     # every request gets a request_id bound before anything else runs.

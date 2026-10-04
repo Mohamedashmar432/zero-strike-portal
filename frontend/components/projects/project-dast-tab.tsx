@@ -36,14 +36,14 @@ interface ProjectDastTabProps {
 }
 
 export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
-  const [targetUrl, setTargetUrl] = useState("https://api.zerostrike.io/v1");
+  const [targetUrl, setTargetUrl] = useState("https://api.example.com/v1");
   const [profile, setProfile] = useState("api_fuzzing");
   const [isScanning, setIsScanning] = useState(false);
 
   const mockRuns = [
     {
       id: "dast-8831",
-      target: "https://api.zerostrike.io/v1",
+      target: "https://api.example.com/v1",
       profile: "API Fuzzing & Injection",
       endpointsTested: 48,
       vulnerabilities: { high: 1, medium: 2, low: 4 },
@@ -53,7 +53,7 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
     },
     {
       id: "dast-8820",
-      target: "https://staging.zerostrike.io/api",
+      target: "https://staging.example.com/api",
       profile: "Passive Baseline",
       endpointsTested: 32,
       vulnerabilities: { high: 0, medium: 1, low: 3 },
@@ -173,7 +173,7 @@ export function ProjectDastTab({ projectId }: ProjectDastTabProps) {
                   <div className="relative">
                     <Server className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      defaultValue="https://api.zerostrike.io/v1/openapi.json"
+                      defaultValue="https://api.example.com/v1/openapi.json"
                       className="pl-8 text-xs font-mono"
                       placeholder="URL or Upload OpenAPI 3.0"
                     />

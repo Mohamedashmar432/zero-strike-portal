@@ -14,10 +14,13 @@ import {
   updateNotificationPreferences,
   type NotificationPreferences,
 } from "@/lib/api/notifications";
+import { SignupApprovalCard } from "@/components/settings/signup-approval-card";
 import { queryKeys } from "@/lib/api/query-keys";
+import { useAuth } from "@/providers/auth-provider";
 
 export default function NotificationSettingsPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.notifications.preferences(),
     queryFn: getNotificationPreferences,
@@ -150,6 +153,8 @@ export default function NotificationSettingsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {user?.role === "admin" && <SignupApprovalCard />}
     </div>
   );
 }

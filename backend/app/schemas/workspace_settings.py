@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
+from app.core import email_templates
 from app.core.compliance_catalog import SUPPORTED_FRAMEWORK_KEYS
 from app.models.workspace_settings import AuditScope
 
@@ -31,6 +32,27 @@ class WorkspaceSettingsResponse(BaseModel):
     compliance_audit_ai_narrative: bool
     compliance_auto_audit_on_scan: bool
     compliance_evidence_retention_days: int | None
+    signup_requires_approval: bool
+    signup_notify_admin_ids: list[str]
+
+
+class EmailTemplateOut(BaseModel):
+    key: str
+    label: str
+    description: str
+    placeholders: list[str]
+    default_subject: str
+    default_body: str
+    # The admin's override, or None when the built-in default is in use.
+    subject: str | None
+    body: str | None
+
+
+class EmailTemplateUpdateRequest(BaseModel):
+    """Both fields null/blank resets the template to its default."""
+
+    subject: str | None = Field(default=None, max_length=email_templates.SUBJECT_MAX)
+    body: str | None = Field(default=None, max_length=email_templates.BODY_MAX)
 
 
 class WorkspaceSettingsUpdateRequest(BaseModel):
@@ -52,6 +74,9 @@ class WorkspaceSettingsUpdateRequest(BaseModel):
     # 0 is not "keep forever" -- null is. A 0-day retention would reap an audit the moment
     # it completed, which is never what someone means.
     compliance_evidence_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    signup_requires_approval: bool | None = None
+    # Checked against real active admins in the router (needs the database).
+    signup_notify_admin_ids: list[str] | None = None
 
     _check_frameworks = field_validator("compliance_frameworks")(_validate_frameworks)
 

@@ -16,6 +16,9 @@ export interface WorkspaceSettings {
   compliance_audit_ai_narrative: boolean;
   compliance_auto_audit_on_scan: boolean;
   compliance_evidence_retention_days: number | null;
+  signup_requires_approval: boolean;
+  /** Admins who get the "new signup request" email. Empty = every active admin. */
+  signup_notify_admin_ids: string[];
 }
 
 /** Only the fields this surface owns — report template and BYOK are written by their own pages. */
@@ -30,8 +33,40 @@ export type WorkspaceSettingsUpdate = Partial<
     | "compliance_audit_ai_narrative"
     | "compliance_auto_audit_on_scan"
     | "compliance_evidence_retention_days"
+    | "signup_requires_approval"
+    | "signup_notify_admin_ids"
   >
 >;
+
+export interface EmailTemplate {
+  key: string;
+  label: string;
+  description: string;
+  placeholders: string[];
+  default_subject: string;
+  default_body: string;
+  /** The admin's override; null while the built-in default is in use. */
+  subject: string | null;
+  body: string | null;
+}
+
+export function listEmailTemplates() {
+  return apiFetch<EmailTemplate[]>("/workspace-settings/email-templates");
+}
+
+/** Blank subject and body reset the template to its default. */
+export function updateEmailTemplate(key: string, payload: { subject: string; body: string }) {
+  return apiFetch<EmailTemplate>(`/workspace-settings/email-templates/${key}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendTestEmail(key: string) {
+  return apiFetch<{ message: string }>(`/workspace-settings/email-templates/${key}/test`, {
+    method: "POST",
+  });
+}
 
 export function getWorkspaceSettings() {
   return apiFetch<WorkspaceSettings>("/workspace-settings");

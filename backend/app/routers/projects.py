@@ -291,8 +291,18 @@ async def update_member_role(
         if owner_count <= 1:
             raise HTTPException(status.HTTP_409_CONFLICT, "Cannot demote the last owner")
 
+    demoting_owner = member.role == "owner" and payload.role != "owner"
     member.role = payload.role
     await member.save()
+    if demoting_owner:
+        # Race guard: the pre-check above is read-then-write, so two concurrent demotions can
+        # both pass it. Recount after saving and undo ours if no owner is left.
+        if await ProjectMember.find(
+            ProjectMember.project_id == project_id, ProjectMember.role == "owner"
+        ).count() == 0:
+            member.role = "owner"
+            await member.save()
+            raise HTTPException(status.HTTP_409_CONFLICT, "Cannot demote the last owner")
     await audit_service.record(
         "Member Role Updated",
         actor_user_id=str(user.id),
@@ -564,6 +574,7 @@ async def create_project_ai_provider(
     await audit_service.record(
         "Project AI Provider Added",
         actor_user_id=str(user.id),
+        project_id=project_id,
         target_type="ai_provider_config",
         target_id=str(config.id),
         metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
@@ -594,6 +605,7 @@ async def update_project_ai_provider(
     await audit_service.record(
         "Project AI Provider Updated",
         actor_user_id=str(user.id),
+        project_id=project_id,
         target_type="ai_provider_config",
         target_id=str(config.id),
         metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
@@ -611,6 +623,7 @@ async def delete_project_ai_provider(
     await audit_service.record(
         "Project AI Provider Removed",
         actor_user_id=str(user.id),
+        project_id=project_id,
         target_type="ai_provider_config",
         target_id=str(config.id),
         metadata={"project_id": project_id, "provider": config.provider, "name": config.name},
@@ -628,6 +641,7 @@ async def activate_project_ai_provider(
     await audit_service.record(
         "Project AI Provider Activated",
         actor_user_id=str(user.id),
+        project_id=project_id,
         target_type="ai_provider_config",
         target_id=str(config.id),
         metadata={"project_id": project_id, "provider": config.provider},
@@ -655,6 +669,7 @@ async def test_project_ai_provider(
         await audit_service.record(
             "Project AI Provider Test Connection Failed",
             actor_user_id=str(user.id),
+            project_id=project_id,
             target_type="ai_provider_config",
             target_id=str(config.id),
             metadata={"project_id": project_id, "provider": config.provider, "error": str(exc)},

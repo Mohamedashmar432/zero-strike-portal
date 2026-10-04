@@ -8,8 +8,20 @@ export type Page<T> = {
   page_size: number;
 };
 
-export function listUsers(page = 1, pageSize = 20) {
-  return apiFetch<Page<User>>(`/users?page=${page}&page_size=${pageSize}`);
+export function listUsers(page = 1, pageSize = 20, approvalStatus?: User["approval_status"]) {
+  const status = approvalStatus ? `&approval_status=${approvalStatus}` : "";
+  return apiFetch<Page<User>>(`/users?page=${page}&page_size=${pageSize}${status}`);
+}
+
+export function approveUser(id: string) {
+  return apiFetch<User>(`/users/${id}/approve`, { method: "POST" });
+}
+
+export function rejectUser(id: string, reason?: string) {
+  return apiFetch<User>(`/users/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason?.trim() || null }),
+  });
 }
 
 export function updateMyProfile(payload: { name?: string; email?: string }) {

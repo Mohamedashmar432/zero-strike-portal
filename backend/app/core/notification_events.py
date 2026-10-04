@@ -91,6 +91,19 @@ EVENTS: tuple[NotificationEvent, ...] = (
         audience="admin",
         default_email=True,
     ),
+    NotificationEvent(
+        key="user.signup_requested",
+        label="New signup request",
+        description="Someone registered and is waiting for an admin to approve their access.",
+        audience="admin",
+        default_email=True,
+    ),
+    NotificationEvent(
+        key="email.delivery_failed",
+        label="Email delivery failing",
+        description="The portal could not send an email. Check SMTP settings and the server log.",
+        audience="admin",
+    ),
 )
 
 BY_KEY = {e.key: e for e in EVENTS}

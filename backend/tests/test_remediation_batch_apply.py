@@ -247,7 +247,7 @@ def test_batch_of_one_keeps_the_single_fix_pr_shape(client, monkeypatch):
         (p,) = await _reload(proposals)
         assert p.review_state == "pr_open"
         assert p.branch_name.startswith("zerostrike/fix-") and "batch" not in p.branch_name
-        assert state["prs"][0]["title"] == "zero-strike/security fix: Rule a.py"
+        assert state["prs"][0]["title"] == "thinkshield/security fix: Rule a.py"
 
     asyncio.run(run())
 

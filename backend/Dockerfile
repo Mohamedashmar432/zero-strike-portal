@@ -84,10 +84,11 @@ EXPOSE 8000
 # though it starts up healthy. ${PORT:-8000} keeps 8000 as the default for
 # docker-compose/local runs that never set $PORT.
 #
-# --proxy-headers/--forwarded-allow-ips: this container is never directly internet-exposed
-# (only the caddy service publishes ports, per deploy/docker-compose.yml) — Caddy's
-# reverse_proxy sets X-Forwarded-For, so trusting it here is what makes request.client.host
-# reflect the real visitor IP instead of Caddy's internal container IP (needed for
-# per-IP rate limiting on /auth/*). In local dev (no proxy in front), there's no
-# X-Forwarded-For header, so uvicorn falls back to the direct-connection peer as before.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+# Client IP for rate limiting/audit: uvicorn's --proxy-headers with --forwarded-allow-ips='*'
+# takes the LEFTMOST X-Forwarded-For entry, which is client-supplied and therefore spoofable
+# (rotating it yields a fresh rate-limit bucket per request). So uvicorn is NOT told to trust
+# proxy headers; app.core.rate_limit.client_ip instead reads the entry TRUSTED_PROXY_HOPS from
+# the RIGHT of X-Forwarded-For -- the address our own outermost proxy appended. 1 = one proxy in
+# front (Railway's edge, or Caddy in deploy/). Set it to the real proxy count for other setups.
+ENV TRUSTED_PROXY_HOPS=1
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

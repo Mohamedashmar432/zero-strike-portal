@@ -12,6 +12,7 @@ wired and inert rather than absent, so configuring SMTP is the only step needed 
 """
 
 import asyncio
+import time
 from datetime import datetime, timezone
 
 import structlog
@@ -29,6 +30,11 @@ logger = structlog.get_logger(__name__)
 # asyncio holds only a weak reference to a running task, so a bare create_task() can be
 # garbage-collected mid-send. Same guard the queue services use.
 _in_flight: set[asyncio.Task] = set()
+
+# Monotonic time of the last email-failure alert; None until one is sent. Module-level so a
+# dead SMTP host alerts admins once an hour instead of once per failed message.
+_EMAIL_FAILURE_ALERT_INTERVAL = 3600.0
+_last_email_failure_alert: float | None = None
 
 
 def wants(user: User, event_key: str, channel: str) -> bool:
@@ -76,8 +82,15 @@ async def notify(
     body: str = "",
     link: str | None = None,
     severity: NotificationSeverity = "info",
+    only_user_ids: list[str] | None = None,
+    email_message: tuple[str, str, str | None] | None = None,
 ) -> int:
     """Deliver one event to everyone eligible who wants it. Returns the in-app row count.
+
+    `only_user_ids` narrows an admin event to admins someone chose explicitly; those users are
+    emailed regardless of their own email preference, because being picked is the opt-in.
+    `email_message` is (subject, text, html) and replaces the generic "[thinkShield] title"
+    email — used where an admin has customised the wording.
 
     Never raises. An unknown event key is a programming error and is logged as one rather
     than thrown, because the alternative is a background task dying on a typo in a string.
@@ -88,6 +101,8 @@ async def notify(
             return 0
 
         users = await _recipients(event_key, project_id)
+        if only_user_ids is not None:
+            users = [u for u in users if str(u.id) in only_user_ids]
         if not users:
             return 0
 
@@ -107,11 +122,17 @@ async def notify(
         if rows:
             await Notification.insert_many(rows)
 
-        email_targets = [u.email for u in users if wants(u, event_key, "email")]
+        email_targets = [
+            u.email
+            for u in users
+            if only_user_ids is not None or wants(u, event_key, "email")
+        ]
         if email_targets:
             # smtplib is blocking; the whole batch goes to one worker thread so a slow or
             # unreachable SMTP host cannot stall the event loop.
-            task = asyncio.create_task(_send_emails(email_targets, title, body, link))
+            task = asyncio.create_task(
+                _send_emails(email_targets, title, body, link, email_message, event_key)
+            )
             _in_flight.add(task)
             task.add_done_callback(_in_flight.discard)
 
@@ -121,21 +142,59 @@ async def notify(
         return 0
 
 
-async def _send_emails(addresses: list[str], title: str, body: str, link: str | None) -> None:
-    def _send() -> None:
+async def _send_emails(
+    addresses: list[str],
+    title: str,
+    body: str,
+    link: str | None,
+    message: tuple[str, str, str | None] | None = None,
+    event_key: str | None = None,
+) -> None:
+    def _send() -> int:
         text = body or title
         if link:
             text = f"{text}\n\n{link}"
+        subject, text, html = message or (f"[thinkShield] {title}", text, None)
+        failures = 0
         for address in addresses:
             try:
-                email_service.send_email(address, f"[ZeroStrike] {title}", text)
+                email_service.send_email(address, subject, text, html)
             except Exception:
-                logger.warning("notification email failed", to=address, exc_info=True)
+                failures += 1
+                logger.warning("notification email failed", exc_info=True)
+        return failures
 
     try:
-        await asyncio.to_thread(_send)
+        failures = await asyncio.to_thread(_send)
     except Exception:
         logger.exception("notification email batch failed")
+        return
+    # The alert itself is an email event; reporting its own failure would loop.
+    if failures and event_key != "email.delivery_failed":
+        await report_email_failure("notification")
+
+
+async def report_email_failure(context: str) -> None:
+    """Tell admins outbound email is failing, at most once an hour. Never raises.
+
+    The body names the kind of email, never a recipient.
+    """
+    global _last_email_failure_alert
+    try:
+        now = time.monotonic()
+        last = _last_email_failure_alert
+        if last is not None and now - last < _EMAIL_FAILURE_ALERT_INTERVAL:
+            return
+        _last_email_failure_alert = now
+        await notify(
+            "email.delivery_failed",
+            title="Outbound email is failing",
+            body=f"The portal could not send a {context} email. Check SMTP settings and the server log.",
+            link="/settings/notifications",
+            severity="error",
+        )
+    except Exception:
+        logger.exception("email failure alert failed")
 
 
 # --- read side ---------------------------------------------------------------

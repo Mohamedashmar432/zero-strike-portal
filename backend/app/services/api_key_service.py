@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, Request, status
 
 from app.core import security
+from app.core.rate_limit import client_ip
 from app.models.api_key import ApiKey
 
 # ponytail: coarse last-used resolution — one write at most per this window per key, not per
@@ -38,6 +39,6 @@ async def resolve_api_key(raw_token: str, request: Request | None = None) -> Api
     last = key.last_used_at
     if last is None or now - last.replace(tzinfo=timezone.utc) >= _LAST_USED_WRITE_INTERVAL:
         key.last_used_at = now
-        key.last_used_ip = request.client.host if request and request.client else None
+        key.last_used_ip = client_ip(request) if request else None
         await key.save()
     return key

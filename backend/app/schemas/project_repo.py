@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+from app.core.repo_url import check_repo_url_syntax
 
 
 class ProjectRepoCreateRequest(BaseModel):
@@ -21,6 +23,12 @@ class ProjectRepoCreateRequest(BaseModel):
     clone_url: str
     selected_branch: str
     label: str | None = None
+
+    @field_validator("clone_url")
+    @classmethod
+    def _validate_clone_url(cls, v: str) -> str:
+        check_repo_url_syntax(v)
+        return v
 
     @model_validator(mode="after")
     def _validate_credential_source(self):

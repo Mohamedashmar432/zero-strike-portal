@@ -57,6 +57,17 @@ class WorkspaceSettings(Document):
     # None = keep forever (today's behaviour).
     compliance_evidence_retention_days: int | None = None
 
+    # --- signup approval -----------------------------------------------------
+    # When on, a new registration is `pending` until an admin approves it. Only enforced while
+    # an approved admin exists (auth_service.register), so the very first account can still
+    # be created and promoted.
+    signup_requires_approval: bool = False
+    # Admins who receive the "new signup request" email. Empty = every active admin.
+    signup_notify_admin_ids: list[str] = Field(default_factory=list)
+    # Admin overrides of the signup emails: {template_key: {"subject": ..., "body": ...}}.
+    # A missing key means the built-in default (core.email_templates).
+    email_templates: dict[str, dict[str, str]] = Field(default_factory=dict)
+
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by: str | None = None
 

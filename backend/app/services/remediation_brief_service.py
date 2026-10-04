@@ -14,6 +14,7 @@ Two callers share render_proposal_section():
 """
 
 import difflib
+import re
 from datetime import datetime, timezone
 
 from app.models.ai_finding_insight import AIFindingInsight
@@ -52,6 +53,19 @@ def unified_diff(original: str | None, patched: str | None, file_path: str | Non
         original.splitlines(), patched.splitlines(), fromfile=f"a/{fp}", tofile=f"b/{fp}", lineterm=""
     )
     return "\n".join(diff) or None
+
+
+def _inline_code(text: str) -> str:
+    """Inline code span that survives backticks in `text` (repo-controlled paths)."""
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    tick = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{tick}{pad}{text}{pad}{tick}"
+
+
+def _escape_md(text: str) -> str:
+    """Backslash-escape Markdown link/image/HTML/heading syntax in scanner-supplied text."""
+    return re.sub(r"([\\\[\]()!<>*_#`])", r"\\\1", text)
 
 
 def _fence(text: str | None, lang: str = "") -> str:
@@ -148,7 +162,7 @@ def render_proposal_section(
     severity = ((finding.severity if finding else None) or "unknown").lower()
     file = (finding.location.file if finding else proposal.file_path) or "unknown file"
     line = finding.location.start_line if finding and finding.location else None
-    where = f"`{file}`" + (f" line {line}" if line else "")
+    where = _inline_code(file) + (f" line {line}" if line else "")
 
     lines = [f"{h} {severity.upper()} — {rule}", "", f"**Location:** {where}"]
 
@@ -159,11 +173,11 @@ def render_proposal_section(
         if finding.owasp:
             meta.append("OWASP: " + ", ".join(finding.owasp))
         if finding.fingerprint:
-            meta.append(f"Fingerprint: `{finding.fingerprint}`")
+            meta.append(f"Fingerprint: {_inline_code(finding.fingerprint)}")
         if meta:
             lines += ["", " · ".join(meta)]
         if finding.message:
-            lines += ["", f"**Scanner:** {finding.message}"]
+            lines += ["", f"**Scanner:** {_escape_md(finding.message)}"]
         if finding.evidence and finding.evidence[0].snippet:
             lines += ["", "**Flagged code**", "", _fence(finding.evidence[0].snippet, finding.language or "")]
 
@@ -262,7 +276,7 @@ async def render_scan_brief(scan_id: str, *, generated_at: datetime | None = Non
     head = [
         f"# Remediation brief — {project.name if project else 'Unknown project'}",
         "",
-        f"_Generated {_iso(generated_at or datetime.now(timezone.utc))} from ZeroStrike scan `{scan_id}`._",
+        f"_Generated {_iso(generated_at or datetime.now(timezone.utc))} from thinkShield scan `{scan_id}`._",
         "",
         "## Scan",
         "",

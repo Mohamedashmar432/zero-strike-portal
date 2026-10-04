@@ -10,7 +10,9 @@ so that ceiling is an accepted, documented tradeoff rather than a gap.
 import time
 from collections.abc import Callable
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
+
+from app.core.config import settings
 
 
 class RateLimiter:
@@ -35,6 +37,24 @@ class RateLimiter:
 
 
 limiter = RateLimiter()
+
+
+def client_ip(request: Request) -> str:
+    """The caller's IP, trusting only the proxies we operate.
+
+    Each trusted proxy appends the address it saw to X-Forwarded-For, so the entry
+    `trusted_proxy_hops` from the RIGHT is the one our outermost proxy observed. Entries to
+    its left are client-supplied and must never be trusted. With 0 hops (or a header too
+    short to satisfy the configured hops) the socket peer is used.
+    """
+    peer = request.client.host if request.client else "unknown"
+    hops = settings.trusted_proxy_hops
+    if hops <= 0:
+        return peer
+    entries = [e.strip() for e in request.headers.get("x-forwarded-for", "").split(",") if e.strip()]
+    if len(entries) < hops:
+        return peer
+    return entries[-hops]
 
 
 def enforce(key: str, max_attempts: int, window_seconds: int) -> None:

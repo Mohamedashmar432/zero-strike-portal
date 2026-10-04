@@ -6,6 +6,8 @@ export type User = {
   name: string;
   role: "admin" | "user";
   is_active: boolean;
+  approval_status: "approved" | "pending" | "rejected";
+  rejection_reason?: string | null;
 };
 
 export type TokenPair = {

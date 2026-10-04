@@ -56,13 +56,17 @@ def test_latest_resolves_to_most_recent_upload(client):
     assert dl.content == b"new-bytes"
 
 
-def test_reupload_same_version_os_arch_replaces(client):
+def test_reupload_same_bytes_is_idempotent_and_different_bytes_is_409(client):
     headers = _admin_headers(client, email="dlAdmin3@zerostrike.dev")
-    _publish(client, headers, "v0.24.0", "windows", "amd64", b"first-build")
-    _publish(client, headers, "v0.24.0", "windows", "amd64", b"second-build")
+    assert _publish(client, headers, "v0.24.0", "windows", "amd64", b"first-build").status_code == 200
+    # Pipeline retry with identical bytes succeeds.
+    assert _publish(client, headers, "v0.24.0", "windows", "amd64", b"first-build").status_code == 200
+    # A published version is immutable: different bytes are refused.
+    r = _publish(client, headers, "v0.24.0", "windows", "amd64", b"second-build")
+    assert r.status_code == 409
 
     dl = client.get("/api/v1/downloads/zerostrike/v0.24.0/windows-amd64")
-    assert dl.content == b"second-build"
+    assert dl.content == b"first-build"
 
 
 def test_checksums_txt_lists_all_arches_for_version(client):

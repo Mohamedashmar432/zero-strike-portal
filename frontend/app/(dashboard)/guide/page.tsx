@@ -176,7 +176,7 @@ export default function GuidePage() {
       <PageHeader
         eyebrow="DOCS / DEVELOPER GUIDE"
         title="Developer Guide"
-        description="Everything a developer does in ZeroStrike, in the order you actually do it: onboard a project, get a scan running, read findings, switch on AI analysis, ship an Auto-Fix PR, run a compliance audit."
+        description="Everything a developer does in thinkShield, in the order you actually do it: onboard a project, get a scan running, read findings, switch on AI analysis, ship an Auto-Fix PR, run a compliance audit."
       />
 
       <div className="grid gap-8 lg:grid-cols-[210px_minmax(0,1fr)]">
@@ -202,7 +202,7 @@ export default function GuidePage() {
             id="orientation"
             title="How it fits together"
             icon={Workflow}
-            lede="ZeroStrike is a SAST scanner plus a portal that stores and acts on what it finds. The scanner is a single Go binary; the portal is where scans, findings, fixes and audits live. Everything below hangs off one pipeline."
+            lede="thinkShield is a SAST scanner plus a portal that stores and acts on what it finds. The scanner is a single Go binary; the portal is where scans, findings, fixes and audits live. Everything below hangs off one pipeline."
           >
             <Screen label="the pipeline">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2 font-mono text-[12px] text-muted-foreground">
@@ -340,17 +340,17 @@ export default function GuidePage() {
                   {
                     icon: Terminal,
                     label: "Local",
-                    body: "Run the ZeroStrike CLI on your machine and upload results with a project token.",
+                    body: "Run the thinkShield CLI on your machine and upload results with a project token.",
                   },
                   {
                     icon: Cloud,
                     label: "Cloud",
-                    body: "Give ZeroStrike a repo URL and it clones + scans it server-side.",
+                    body: "Give thinkShield a repo URL and it clones + scans it server-side.",
                   },
                   {
                     icon: GitBranch,
                     label: "CI/CD",
-                    body: "Add ZeroStrike to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).",
+                    body: "Add thinkShield to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).",
                   },
                 ].map((t) => (
                   <div key={t.label} className="space-y-2 rounded-sm border border-border p-3">

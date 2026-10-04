@@ -24,6 +24,7 @@ from app.models.finding import (
 from app.models.project import Project
 from app.models.report import DiagnosticEmbedded, Report, ScanStatsEmbedded
 from app.models.scan import Scan
+from app.services.secret_redaction import redact
 from app.schemas.report import (
     GoDiagnosticIn,
     GoFindingIn,
@@ -132,7 +133,10 @@ def _map_finding(
         location=_location(f.location, root_path),
         language=f.language or None,
         evidence=[
-            EvidenceEmbedded(snippet=e.snippet, start_line=e.start_line, end_line=e.end_line)
+            # SAST rules (e.g. hardcoded credential, CWE-798) echo the flagged source line, which
+            # can hold a literal secret; stored findings reach every project member and exports.
+            EvidenceEmbedded(snippet=redact(e.snippet) if e.snippet else e.snippet,
+                             start_line=e.start_line, end_line=e.end_line)
             for e in f.evidence
         ],
         cwe=f.cwe,

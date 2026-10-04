@@ -97,7 +97,7 @@ finding considered:
 
 with `included` / `skipped — <reason>` per row, so a reviewer can see what was left out
 without leaving the PR. The commit message lists each rule fixed under the existing
-`zero-strike/security fix:` convention.
+`thinkshield/security fix:` convention.
 
 Audit rows stay per proposal (`AI Fix Validation Passed`, `AI Fix Branch Pushed`,
 `AI Fix PR Opened`) so the existing audit-log surfaces and per-finding history keep

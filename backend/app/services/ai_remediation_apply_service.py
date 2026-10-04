@@ -412,21 +412,21 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
                 raise _ManualReview(f"Could not stage the patch: {aerr[:200]}")
 
         rules = [it.finding.rule_name or "security finding" for it in survivors]
-        # Commit/PR use the "zero-strike/security fix: <name>" convention so teammates can spot
-        # ZeroStrike-authored security fixes at a glance in git history / the PR list.
+        # Commit/PR use the "thinkshield/security fix: <name>" convention so teammates can spot
+        # thinkShield-authored security fixes at a glance in git history / the PR list.
         if len(survivors) == 1:
-            title = f"zero-strike/security fix: {rules[0]}"
+            title = f"thinkshield/security fix: {rules[0]}"
             commit_msg = (
                 f"{title}\n\n"
-                f"Fixes {rules[0]} in {first.proposal.file_path}. ZeroStrike AI Auto-Fix (human-approved). "
+                f"Fixes {rules[0]} in {first.proposal.file_path}. thinkShield AI Auto-Fix (human-approved). "
                 f"{first.proposal.explanation or ''}"
             ).strip()
         else:
-            title = f"zero-strike/security fix: {len(survivors)} findings"
+            title = f"thinkshield/security fix: {len(survivors)} findings"
             body_lines = "\n".join(f"- {r} ({it.proposal.file_path})" for r, it in zip(rules, survivors))
-            commit_msg = f"{title}\n\n{body_lines}\n\nZeroStrike AI Auto-Fix (human-approved)."
+            commit_msg = f"{title}\n\n{body_lines}\n\nthinkShield AI Auto-Fix (human-approved)."
         rc, _o, cerr = await git_workspace.git(
-            ["-c", "user.name=ZeroStrike Bot", "-c", "user.email=noreply@zerostrike.dev", "commit", "-m", commit_msg],
+            ["-c", "user.name=thinkShield Bot", "-c", "user.email=noreply@zerostrike.dev", "commit", "-m", commit_msg],
             workdir,
         )
         if rc != 0:

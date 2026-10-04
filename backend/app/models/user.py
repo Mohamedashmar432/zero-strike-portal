@@ -22,6 +22,12 @@ class User(Document):
     name: str
     role: Literal["admin", "user"] = "user"
     is_active: bool = True
+    # Signup gate, separate from `is_active` on purpose: "disabled" is an admin switching a
+    # live account off, "pending"/"rejected" is someone who was never let in. One flag for both
+    # would let the Enable toggle silently approve a signup. Existing documents have no value
+    # and read back as "approved", so turning the gate on never locks anyone out.
+    approval_status: Literal["approved", "pending", "rejected"] = "approved"
+    rejection_reason: str | None = None
     refresh_tokens: list[RefreshTokenRecord] = []
     # Event keys (app.core.notification_events) this user wants delivered each way.
     # `None` means "never set a preference" and resolves to the catalog defaults at read

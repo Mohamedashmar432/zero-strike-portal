@@ -109,7 +109,7 @@ async def _prune_old_versions(os_: str, arch: str) -> None:
 async def publish(
     *, version: str, os_: str, arch: str, source: SupportsAsyncRead, uploaded_by: str
 ) -> ScannerBinary:
-    """Stream `source` into GridFS and upsert its ScannerBinary metadata (re-uploads replace).
+    """Stream `source` into GridFS and insert its ScannerBinary metadata (identical re-upload is a no-op; different bytes -> 409).
 
     `source` is anything with an async `read(size)` — in practice Starlette's `UploadFile`.
     """
@@ -129,15 +129,23 @@ async def publish(
         await grid_in.close()
         stored = True
 
-        # Replace the old version only once the new bytes are safely in GridFS. The release
-        # pipeline now retries 5xx, and a retry that deleted first would leave the version
-        # with no binary at all if the second attempt also died mid-upload.
+        # A published (version, os, arch) is immutable: the same bytes again is a pipeline
+        # retry (idempotent success), different bytes is refused so a leaked or compromised
+        # admin credential can't silently swap a binary CI runners already trust by version.
+        # The hash is only known after streaming, so the new GridFS file is dropped either way.
         existing = await ScannerBinary.find_one(
             ScannerBinary.version == version, ScannerBinary.os == os_, ScannerBinary.arch == arch
         )
         if existing:
-            await _bucket().delete(existing.gridfs_file_id)
-            await existing.delete()
+            await _bucket().delete(grid_in._id)
+            stored = False
+            if existing.sha256 == digest.hexdigest():
+                return existing
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"{os_}-{arch}@{version} is already published with different content; "
+                "publish a new version",
+            )
 
         doc = ScannerBinary(
             version=version,
@@ -151,6 +159,8 @@ async def publish(
             uploaded_by=uploaded_by,
         )
         await doc.insert()
+    except HTTPException:
+        raise
     except Exception as exc:
         # Don't leave half-written chunks behind: on an M0 cluster orphaned GridFS files
         # are indistinguishable from real ones and eat the 512MB cap silently.
