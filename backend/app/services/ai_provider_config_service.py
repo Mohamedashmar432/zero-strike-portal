@@ -391,11 +391,13 @@ async def get_project_usage(project_id: str) -> dict:
     rows = await cursor.to_list(length=1)
     agg = rows[0] if rows else {}
 
-    active = await resolve_active_config(project_id)
+    # The head of the failover chain is what would actually serve a call (ready configs only).
+    chain = await resolve_failover_configs(project_id)
+    serving = chain[0] if chain else None
     return {
-        "enabled": active is not None and await is_ready(active),
-        "active_provider": active.provider if active else None,
-        "active_model": active.model_name if active else None,
+        "enabled": serving is not None,
+        "active_provider": serving.provider if serving else None,
+        "active_model": serving.model_name if serving else None,
         "total_requests": agg.get("total_requests", 0),
         "total_prompt_tokens": agg.get("total_prompt_tokens", 0),
         "total_completion_tokens": agg.get("total_completion_tokens", 0),

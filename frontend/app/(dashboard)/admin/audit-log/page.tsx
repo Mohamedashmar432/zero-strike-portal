@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  auditDetail,
   formatAuditAction,
   listAuditLogs,
   type AuditCategory,
@@ -180,6 +181,11 @@ export default function AdminAuditLogPage() {
                 </TableCell>
                 <TableCell className="font-medium text-foreground">
                   {formatAuditAction(log.action)}
+                  {auditDetail(log) && (
+                    <span className="block font-mono text-[10px] font-normal text-muted-foreground">
+                      {auditDetail(log)}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <span

@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { roleLabel } from "@/lib/role-labels";
 import type { Page } from "./users";
 
 /** privilege = access changed · project = work inside a project · admin = portal-wide. */
@@ -59,4 +60,18 @@ export function formatAuditAction(action: string): string {
     .split(/[._]/)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+/**
+ * The one-line "what exactly changed" under an action: the affected account, plus the role
+ * move for a role change. Reads metadata the backend already stores, so older rows without it
+ * simply have no detail line.
+ */
+export function auditDetail(log: Pick<AuditLogEntry, "metadata">): string | null {
+  const meta = log.metadata ?? {};
+  const email = typeof meta.email === "string" ? meta.email : null;
+  const from = typeof meta.from_role === "string" ? meta.from_role : null;
+  const to = typeof meta.to_role === "string" ? meta.to_role : null;
+  if (email && from && to) return `${email}: ${roleLabel(from)} → ${roleLabel(to)}`;
+  return email;
 }

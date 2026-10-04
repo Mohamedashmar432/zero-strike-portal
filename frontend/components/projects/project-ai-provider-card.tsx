@@ -18,6 +18,7 @@ import {
   type AiProviderConfig,
 } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,6 +75,9 @@ export function ProjectAiProviderCard({
 
   const [form, setForm] = useState(BLANK);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Kept after close so the dialog text doesn't blank while it animates out.
+  const [removeTarget, setRemoveTarget] = useState<AiProviderConfig | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.projects.aiProviders(projectId) });
@@ -104,7 +108,7 @@ export function ProjectAiProviderCard({
       invalidate();
       setForm(BLANK);
       setEditingId(null);
-      toast.success(editingId ? "Provider updated" : "Provider added");
+      toast.success(editingId ? "AI provider updated" : "AI provider added");
     },
     onError: fail("Failed to save the provider"),
   });
@@ -122,7 +126,7 @@ export function ProjectAiProviderCard({
     mutationFn: (id: string) => deleteProjectAiProvider(projectId, id),
     onSuccess: () => {
       invalidate();
-      toast.success("Provider removed");
+      toast.success("AI provider removed");
     },
     onError: fail("Failed to remove the provider"),
   });
@@ -220,7 +224,10 @@ export function ProjectAiProviderCard({
                       size="sm"
                       variant="ghost"
                       className="text-destructive"
-                      onClick={() => remove.mutate(config.id)}
+                      onClick={() => {
+                        setRemoveTarget(config);
+                        setRemoveOpen(true);
+                      }}
                       disabled={remove.isPending}
                     >
                       Remove
@@ -254,7 +261,9 @@ export function ProjectAiProviderCard({
                   onValueChange={(v) => v && setForm({ ...form, provider: v as AiProvider })}
                 >
                   <SelectTrigger id="byok-provider">
-                    <SelectValue />
+                    <SelectValue>
+                      {PROVIDERS.find((p) => p.value === form.provider)?.label}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PROVIDERS.map((p) => (
@@ -330,6 +339,22 @@ export function ProjectAiProviderCard({
           </div>
         )}
       </CardContent>
+      <ConfirmDialog
+        open={removeOpen}
+        onOpenChange={setRemoveOpen}
+        title="Remove this project's AI key?"
+        description={`"${removeTarget?.name ?? ""}" will be removed. ${
+          removeTarget?.is_active
+            ? "This project will have no AI provider. AI analysis, auto-fix and compliance narratives stop until you add another key. It does not fall back to the portal's provider."
+            : ""
+        }`.trim()}
+        confirmLabel="Remove key"
+        pendingLabel="Removing…"
+        pending={remove.isPending}
+        onConfirm={() =>
+          removeTarget && remove.mutate(removeTarget.id, { onSettled: () => setRemoveOpen(false) })
+        }
+      />
     </Card>
   );
 }

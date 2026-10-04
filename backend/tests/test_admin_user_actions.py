@@ -69,5 +69,14 @@ def test_role_change_and_delete_are_audited(client):
 
     logs = client.get("/api/v1/audit-logs", headers=admin_headers).json()["items"]
     actions_for_target = [log["action"] for log in logs if log["target_id"] == other_id]
-    assert "User Updated" in actions_for_target
+    assert "User Role Changed" in actions_for_target
+    assert "User Updated" not in actions_for_target
     assert "User Deleted" in actions_for_target
+    changed = next(
+        log for log in logs if log["target_id"] == other_id and log["action"] == "User Role Changed"
+    )
+    assert changed["metadata"] == {
+        "email": "selfmod-other5@zerostrike.dev",
+        "from_role": "user",
+        "to_role": "admin",
+    }

@@ -30,7 +30,8 @@ def _create_project(client, headers, name="Notify Demo"):
 # --- preferences -------------------------------------------------------------
 
 
-def test_preferences_default_to_the_catalog_until_a_user_sets_them(client):
+def test_preferences_default_to_the_catalog_until_a_user_sets_them(client, monkeypatch):
+    monkeypatch.setattr("app.routers.notifications.settings.smtp_host", "")
     h = _headers(register_and_login(client, email="nt-defaults@zs.dev"))
     body = client.get(PREFS_URL, headers=h).json()
     # Scoped to what this (non-admin) user can actually receive.
@@ -214,3 +215,31 @@ def test_mark_all_read_clears_every_unread(client):
 
     body = client.post("/api/v1/notifications/read", json={}, headers=admin).json()
     assert body["unread_count"] == 0
+
+
+# --- email failure alert -----------------------------------------------------
+
+
+def test_email_failure_alert_is_throttled(client, monkeypatch):
+    admin = _admin_headers(client, email="nt-emailfail@zs.dev")
+    monkeypatch.setattr(notification_service, "_last_email_failure_alert", None)
+
+    async def run():
+        await notification_service.report_email_failure("password reset")
+        await notification_service.report_email_failure("password reset")
+
+    asyncio.run(run())
+    rows = client.get(URL, headers=admin).json()
+    alerts = [n for n in rows["items"] if n["event"] == "email.delivery_failed"]
+    assert len(alerts) == 1
+    assert "@" not in alerts[0]["body"]
+
+
+def test_report_email_failure_never_raises(client, monkeypatch):
+    monkeypatch.setattr(notification_service, "_last_email_failure_alert", None)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("mongo is on fire")
+
+    monkeypatch.setattr(notification_service, "notify", boom)
+    asyncio.run(notification_service.report_email_failure("signup decision"))

@@ -6,9 +6,13 @@ of via a support ticket.
 
 from datetime import datetime, timedelta, timezone
 
+from beanie import PydanticObjectId
+from beanie.operators import In
+
 from app.core.config import settings
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
+from app.models.user import User
 from app.schemas.scanner_status import (
     BinaryChecklistItem,
     FailureItem,
@@ -30,13 +34,23 @@ EXPECTED_BINARIES = [
 
 
 async def binary_checklist() -> list[BinaryChecklistItem]:
-    items = []
+    docs = {}
     for os_, arch in EXPECTED_BINARIES:
-        doc = (
+        docs[(os_, arch)] = (
             await ScannerBinary.find(ScannerBinary.os == os_, ScannerBinary.arch == arch)
             .sort("-uploaded_at")
             .first_or_none()
         )
+    # Name the uploader by email rather than a raw ObjectId (same batch lookup as audit_logs).
+    ids = [
+        PydanticObjectId(d.uploaded_by)
+        for d in docs.values()
+        if d and PydanticObjectId.is_valid(d.uploaded_by)
+    ]
+    emails = {str(u.id): u.email for u in await User.find(In(User.id, ids)).to_list()} if ids else {}
+
+    items = []
+    for (os_, arch), doc in docs.items():
         if doc:
             items.append(
                 BinaryChecklistItem(
@@ -46,6 +60,7 @@ async def binary_checklist() -> list[BinaryChecklistItem]:
                     version=doc.version,
                     uploaded_at=doc.uploaded_at,
                     uploaded_by=doc.uploaded_by,
+                    uploaded_by_email=emails.get(doc.uploaded_by),
                 )
             )
         else:

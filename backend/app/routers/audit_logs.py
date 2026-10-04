@@ -17,17 +17,18 @@ router = APIRouter(prefix="/audit-logs", tags=["audit-logs"], dependencies=[Depe
 def _to_response(
     log: AuditLog, actors: dict[str, str], projects: dict[str, str]
 ) -> AuditLogResponse:
+    project_id = audit_service.effective_project_id(log)
     return AuditLogResponse(
         id=str(log.id),
         actor_type=log.actor_type,
         actor_user_id=log.actor_user_id,
         actor_email=actors.get(log.actor_user_id or ""),
         action=log.action,
-        category=audit_service.classify(log.action, log.project_id),
+        category=audit_service.classify(log.action, audit_service.effective_project_id(log)),
         target_type=log.target_type,
         target_id=log.target_id,
-        project_id=log.project_id,
-        project_name=projects.get(log.project_id or ""),
+        project_id=project_id,
+        project_name=projects.get(project_id or ""),
         metadata=log.metadata,
         ip_address=log.ip_address,
         created_at=log.created_at,
@@ -66,12 +67,12 @@ async def list_audit_logs(
 
     counts = AuditLogCounts(
         total=len(window),
-        admin=sum(1 for log in window if audit_service.classify(log.action, log.project_id) == "admin"),
+        admin=sum(1 for log in window if audit_service.classify(log.action, audit_service.effective_project_id(log)) == "admin"),
         project=sum(
-            1 for log in window if audit_service.classify(log.action, log.project_id) == "project"
+            1 for log in window if audit_service.classify(log.action, audit_service.effective_project_id(log)) == "project"
         ),
         privilege=sum(
-            1 for log in window if audit_service.classify(log.action, log.project_id) == "privilege"
+            1 for log in window if audit_service.classify(log.action, audit_service.effective_project_id(log)) == "privilege"
         ),
         failed=sum(1 for log in window if audit_service.is_failure(log.action)),
     )
@@ -80,14 +81,14 @@ async def list_audit_logs(
         matching = [log for log in window if audit_service.is_failure(log.action)]
     elif category in audit_service.CATEGORIES:
         matching = [
-            log for log in window if audit_service.classify(log.action, log.project_id) == category
+            log for log in window if audit_service.classify(log.action, audit_service.effective_project_id(log)) == category
         ]
     else:
         matching = window
 
     items = matching[(page - 1) * page_size : page * page_size]
     actors = await _label_map(User, {log.actor_user_id for log in items if log.actor_user_id}, "email")
-    projects = await _label_map(Project, {log.project_id for log in items if log.project_id}, "name")
+    projects = await _label_map(Project, {pid for log in items if (pid := audit_service.effective_project_id(log))}, "name")
 
     return AuditLogPage(
         items=[_to_response(log, actors, projects) for log in items],

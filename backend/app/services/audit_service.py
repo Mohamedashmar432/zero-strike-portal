@@ -1,3 +1,4 @@
+from app.core import request_context
 from app.models.audit_log import AuditLog
 
 CATEGORIES = ("privilege", "project", "admin")
@@ -36,6 +37,12 @@ def classify(action: str, project_id: str | None) -> str:
     return "project" if project_id else "admin"
 
 
+def effective_project_id(log: AuditLog) -> str | None:
+    """The row's project, falling back to metadata for rows written before callers passed
+    `project_id` as a field."""
+    return log.project_id or (log.metadata or {}).get("project_id")
+
+
 def is_failure(action: str) -> bool:
     """Whether the action records something that did not succeed. Cross-cutting — a failure
     is still one of the three categories."""
@@ -54,6 +61,10 @@ async def record(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> None:
+    if actor_type != "system":
+        ctx_ip, ctx_agent = request_context.current()
+        ip_address = ip_address or ctx_ip
+        user_agent = user_agent or ctx_agent
     await AuditLog(
         actor_type=actor_type,
         actor_user_id=actor_user_id,

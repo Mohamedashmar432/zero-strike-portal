@@ -7,7 +7,7 @@ from pymongo import IndexModel
 
 
 class AuditLog(Document):
-    actor_type: Literal["user", "api_key", "system"]
+    actor_type: Literal["user", "api_key", "system", "anonymous"]
     actor_user_id: str | None = None
     action: str
     target_type: str | None = None

@@ -235,6 +235,7 @@ describe("AiProviderSettingsPage", () => {
         })
       );
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(toast.success).toHaveBeenCalledWith("AI provider added");
     });
   });
 
@@ -329,18 +330,35 @@ describe("AiProviderSettingsPage", () => {
     });
   });
 
-  test("Delete calls deleteAiProvider immediately, with no confirmation UI rendered first", async () => {
+  test("Delete asks for confirmation and deletes only after confirming", async () => {
     mockUseHasRole.mockReturnValue(true);
-    const provider = makeProvider();
-    vi.mocked(listAiProviders).mockResolvedValue([provider]);
+    vi.mocked(listAiProviders).mockResolvedValue([makeProvider()]);
     vi.mocked(deleteAiProvider).mockResolvedValue(undefined);
     renderWithClient(<AiProviderSettingsPage />);
     await screen.findByText("Prod Anthropic");
 
-    expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Delete AI provider?")).toBeTruthy();
+    expect(within(dialog).getByText(/Prod Anthropic/)).toBeTruthy();
+    expect(deleteAiProvider).not.toHaveBeenCalled();
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete provider" }));
     await waitFor(() => expect(deleteAiProvider).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("AI provider deleted"));
+  });
+
+  test("cancelling the delete confirmation deletes nothing", async () => {
+    mockUseHasRole.mockReturnValue(true);
+    vi.mocked(listAiProviders).mockResolvedValue([makeProvider()]);
+    renderWithClient(<AiProviderSettingsPage />);
+    await screen.findByText("Prod Anthropic");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deleteAiProvider).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ export default function ScannerStatusPage() {
     <div className="space-y-6">
       <PageHeader
         title="Scanner Infrastructure"
-        description="Published ZeroStrike scanner binaries, cloud scan queue telemetry, and failure logs."
+        description="Published thinkShield scanner binaries, cloud scan queue telemetry, and failure logs."
       />
 
       {data && !data.engine_available && (
@@ -139,7 +139,7 @@ export default function ScannerStatusPage() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{b.version ?? "—"}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(b.uploaded_at)}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{b.uploaded_by ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{b.uploaded_by_email ?? (b.uploaded_by ? "Deleted user" : "—")}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

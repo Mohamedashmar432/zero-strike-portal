@@ -12,7 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/api/project-repos";
-import { getProject, getProjectScanActivity } from "@/lib/api/projects";
+import { getProject, getProjectScanActivity, hasCompletedScan } from "@/lib/api/projects";
 import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 import { createCloudScan, listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
@@ -128,7 +128,7 @@ function OverviewTab({ projectId }: { projectId: string }) {
 
   // Risk + overall findings reflect CURRENT posture (latest scan per repo), not all-time.
   const currentCounts = activity?.current_findings ?? project.findings_by_severity ?? EMPTY_SEVERITY_COUNTS;
-  const risk = projectRiskStatus(currentCounts);
+  const risk = projectRiskStatus(currentCounts, hasCompletedScan(activity) ? undefined : "none");
   const sources = [...new Set((repos ?? []).map((r) => providerLabel(r.provider)))];
   const connectedCount = activity?.repos.filter((g) => g.repo_id).length ?? repos?.length ?? 0;
 
@@ -142,7 +142,11 @@ function OverviewTab({ projectId }: { projectId: string }) {
         <StatCard
           label="Security Risk Level"
           value={<span className={cn("rounded-md px-2.5 py-0.5 text-base font-semibold", risk.className)}>{risk.label}</span>}
-          caption={risk.label === "At Risk" ? "Critical vulnerabilities present" : "No critical blockers"}
+          caption={
+            risk.label === "At Risk" ? "Critical vulnerabilities present"
+            : risk.label === "Unknown" ? "No completed scan yet"
+            : "No critical blockers"
+          }
         />
         <StatCard label="Total Scan Executions" value={project.scan_count} caption="Across all branches & commits" />
         <StatCard
@@ -728,7 +732,7 @@ function ApiKeysTab({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Generate a project token here, then pass it to the ZeroStrike SAST scanner CLI with{" "}
+        Generate a project token here, then pass it to the thinkShield SAST scanner CLI with{" "}
         <code>--token</code>. The token alone identifies this project — no project ID needed.
       </p>
       {revealedToken && (
@@ -906,7 +910,7 @@ export default function ProjectDetailPage() {
       low: 0,
       info: 0,
     };
-  const risk = projectRiskStatus(currentCounts);
+  const risk = projectRiskStatus(currentCounts, hasCompletedScan(activity) ? undefined : "none");
 
   return (
     <div className="space-y-4">
@@ -954,7 +958,7 @@ export default function ProjectDetailPage() {
                 )}
               </div>
               <p className="text-xs text-muted-foreground line-clamp-1">
-                {project.description || "ZeroStrike DevSecOps & Security Operations Hub."}
+                {project.description || "thinkShield DevSecOps & Security Operations Hub."}
               </p>
             </div>
           </div>

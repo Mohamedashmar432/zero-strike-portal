@@ -8,6 +8,8 @@ privilege event landing in "project" (or vice versa) is a real regression.
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from app.core import request_context
+from app.core.config import settings
 from app.models.audit_log import AuditLog
 from app.services import audit_service
 from tests.test_users import _admin_headers
@@ -124,3 +126,63 @@ def test_audit_log_is_admin_only(client):
     tokens = register_and_login(client, email="audit-nonadmin@zs.dev")
     r = client.get(URL, headers={"Authorization": f"Bearer {tokens['access_token']}"})
     assert r.status_code == 403
+
+
+def test_legacy_rows_scope_from_metadata_project_id(client):
+    admin = _admin_headers(client, email="audit-legacy@zs.dev")
+    project = client.post("/api/v1/projects", json={"name": "Legacy Scope"}, headers=admin).json()
+
+    async def seed():
+        # Written before callers passed project_id as a field: only metadata names the project.
+        await AuditLog(
+            actor_type="user",
+            action="Project AI Provider Added",
+            metadata={"project_id": project["id"]},
+        ).insert()
+
+    asyncio.run(seed())
+    items = client.get("/api/v1/audit-logs", headers=admin).json()["items"]
+    row = next(i for i in items if i["action"] == "Project AI Provider Added")
+    assert row["project_id"] == project["id"]
+    assert row["project_name"] == "Legacy Scope"
+    assert row["category"] == "project"
+
+
+def test_request_driven_rows_carry_the_client_ip(client, monkeypatch):
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 1)
+    admin = _admin_headers(client, email="audit-ip@zs.dev")
+    client.post(
+        "/api/v1/projects",
+        json={"name": "IP Demo"},
+        headers={**admin, "X-Forwarded-For": "203.0.113.7", "User-Agent": "qa-agent/1.0"},
+    )
+
+    async def rows():
+        return await AuditLog.find(AuditLog.ip_address == "203.0.113.7").to_list()
+
+    found = asyncio.run(rows())
+    assert found
+    assert all(r.user_agent == "qa-agent/1.0" for r in found)
+
+
+class _FakeRequest:
+    client = type("C", (), {"host": "10.0.0.1"})()
+    headers = {"x-forwarded-for": "203.0.113.7", "user-agent": "qa-agent/1.0"}
+
+
+def test_rows_written_from_a_spawned_task_do_not_inherit_the_request_ip(client, monkeypatch):
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 1)
+
+    async def record_in_spawned_task():
+        await audit_service.record("Background Thing", actor_type="user")
+        return request_context.current(), await AuditLog.find_one(AuditLog.action == "Background Thing")
+
+    async def scenario():
+        await request_context.bind_request_context(_FakeRequest())
+        assert request_context.current() == ("203.0.113.7", "qa-agent/1.0")
+        # create_task copies the context, but the owning task differs, so nothing is inherited.
+        return await asyncio.create_task(record_in_spawned_task())
+
+    ctx, row = asyncio.run(scenario())
+    assert ctx == (None, None)
+    assert row.ip_address is None

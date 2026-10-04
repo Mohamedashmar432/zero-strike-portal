@@ -32,10 +32,11 @@ import { ProjectRepoBreakdown } from "@/components/projects/project-repo-breakdo
 import { SeverityCountPills } from "@/components/severity/severity-count-pills";
 import { SeveritySpectrum } from "@/components/severity/severity-spectrum";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listProjectAudits } from "@/lib/api/compliance";
+import { listProjectAutoFix, type ProjectAutoFixScanItem } from "@/lib/api/auto-fix";
+import { listFrameworks, listProjectAudits } from "@/lib/api/compliance";
 import { queryKeys } from "@/lib/api/query-keys";
 import { cn, parseApiDate } from "@/lib/utils";
-import type { Project, ProjectScanActivity } from "@/lib/api/projects";
+import { hasCompletedScan, type Project, type ProjectScanActivity } from "@/lib/api/projects";
 import type { ProjectRepo } from "@/lib/api/project-repos";
 import type { ProjectAiUsage } from "@/lib/api/ai";
 import type { SeverityCounts } from "@/lib/api/dashboard";
@@ -72,6 +73,22 @@ const COMPLIANCE_TONE = {
   },
 } as const;
 
+/** Proposal totals across every scan of the project (the Auto-Fix tab's own list). */
+export function proposalCounts(items: ProjectAutoFixScanItem[]) {
+  return {
+    awaitingReview: items.reduce((n, i) => n + i.summary.proposed, 0),
+    prsOpened: items.reduce((n, i) => n + i.summary.pr_created, 0),
+  };
+}
+
+/** What would serve an AI call for this project, or null when nothing would. */
+export function providerLabel(aiUsage?: ProjectAiUsage): string | null {
+  if (!aiUsage?.active_provider) return null;
+  return aiUsage.active_model
+    ? `${aiUsage.active_provider} · ${aiUsage.active_model}`
+    : aiUsage.active_provider;
+}
+
 interface ProjectOverviewHubProps {
   project: Project;
   activity?: ProjectScanActivity;
@@ -94,6 +111,21 @@ export function ProjectOverviewHub({
     queryFn: () => listProjectAudits(project.id, 1, 1),
   });
   const latestAudit = audits?.items?.[0];
+
+  // Shares its cache entry with the Auto-Fix tab.
+  const { data: autoFix, isLoading: autoFixLoading } = useQuery({
+    queryKey: queryKeys.ai.autofix.projectList(project.id),
+    queryFn: () => listProjectAutoFix(project.id),
+  });
+  const proposals = proposalCounts(autoFix?.items ?? []);
+
+  // The catalog only returns the runnable frameworks, so this never promises one we can't run.
+  const { data: frameworks } = useQuery({
+    queryKey: queryKeys.compliance.frameworks(),
+    queryFn: listFrameworks,
+  });
+  const frameworkTitles = frameworks?.items.map((f) => f.title);
+  const provider = providerLabel(aiUsage);
 
   // Only reflects the latest scan report findings
   const latestCounts: SeverityCounts =
@@ -128,16 +160,21 @@ export function ProjectOverviewHub({
       latestCounts.low * 1
   );
 
+  const scanned = hasCompletedScan(activity);
+
   const atRiskRepos = project.risk_repo_count ?? 0;
   const totalRepos = project.total_repo_count ?? repos.length;
 
   const metrics = [
     {
       label: "Health Score",
-      value: `${healthScore}`,
-      hint: "Heuristic from severity counts. Not an audit result.",
-      tone:
-        healthScore > 80 ? ("signal" as const)
+      value: scanned ? `${healthScore}` : "—",
+      hint: scanned
+        ? "Heuristic from severity counts. Not an audit result."
+        : "Shown after the first completed scan.",
+      tone: !scanned
+        ? ("default" as const)
+        : healthScore > 80 ? ("signal" as const)
         : healthScore > 50 ? ("medium" as const)
         : ("critical" as const),
     },
@@ -397,7 +434,9 @@ export function ProjectOverviewHub({
             <EmptyState
               icon={ShieldCheck}
               title="No compliance audit yet"
-              description="Run an audit to score this project against SOC 2, ISO 27001, PCI-DSS, HIPAA or NIST 800-53. Results are computed from scanner findings, never estimated."
+              description={`Run an audit to check this project against ${
+                frameworkTitles?.length ? frameworkTitles.join(" and ") : "the supported frameworks"
+              }. Results are computed from scanner findings, never estimated.`}
               className="m-0"
               action={
                 <Button variant="outline" size="sm" onClick={() => onNavigateTab("compliance")}>
@@ -482,21 +521,35 @@ export function ProjectOverviewHub({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
               <span className="text-[11px] font-mono text-muted-foreground">AI Fix Proposals</span>
-              <p className="font-mono text-lg font-bold text-ai mt-0.5">3 Ready to Merge</p>
+              {autoFixLoading ? (
+                <Skeleton className="mt-1.5 h-6 w-28" />
+              ) : proposals.awaitingReview === 0 && proposals.prsOpened === 0 ? (
+                <p className="font-mono text-lg font-bold text-muted-foreground mt-0.5">None yet</p>
+              ) : (
+                <>
+                  <p className="font-mono text-lg font-bold text-ai mt-0.5">
+                    {proposals.awaitingReview} awaiting review
+                  </p>
+                  {proposals.prsOpened > 0 && (
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      {proposals.prsOpened} PRs opened
+                    </p>
+                  )}
+                </>
+              )}
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
               <span className="text-[11px] font-mono text-muted-foreground">Model & Provider</span>
               <p className="font-mono text-xs font-semibold text-foreground mt-1">
-                {aiUsage?.active_provider || aiUsage?.active_model || "Claude 3.5 Sonnet"}
+                {provider ?? "No AI provider available for this project"}
               </p>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
               <span className="text-[11px] font-mono text-muted-foreground">Token Consumption</span>
               <p className="font-mono text-xs font-bold text-foreground mt-1">
                 {aiUsage
-                  ? (aiUsage.total_prompt_tokens + aiUsage.total_completion_tokens).toLocaleString()
-                  : "24,810"}{" "}
-                Tokens
+                  ? `${(aiUsage.total_prompt_tokens + aiUsage.total_completion_tokens).toLocaleString()} Tokens`
+                  : "—"}
               </p>
             </div>
           </div>

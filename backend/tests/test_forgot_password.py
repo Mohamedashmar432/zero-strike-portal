@@ -140,3 +140,83 @@ def test_reset_password_records_audit_log(client, monkeypatch):
 
     logs = asyncio.run(fetch_logs())
     assert len(logs) == 1
+
+
+def test_forgot_password_is_audited_without_storing_the_email(client, monkeypatch):
+    _capture_send(monkeypatch, {})
+    register_and_login(client, email="forgot-audit@zerostrike.dev", password="oldpassword1")
+
+    client.post("/api/v1/auth/forgot-password", json={"email": "forgot-audit@zerostrike.dev"})
+    client.post("/api/v1/auth/forgot-password", json={"email": "nobody-audit@zerostrike.dev"})
+
+    logs = asyncio.run(AuditLog.find().to_list())
+    known = [r for r in logs if r.action == "Password Reset Requested"]
+    unknown = [r for r in logs if r.action == "Password Reset Requested For Unknown Account"]
+    assert len(known) == 1 and known[0].target_type == "user" and known[0].actor_user_id
+    assert len(unknown) == 1 and unknown[0].actor_type == "anonymous"
+    reset_rows = [r.model_dump() for r in logs if r.action.startswith("Password Reset")]
+    assert "zerostrike.dev" not in str(reset_rows)
+
+
+def test_reset_email_failure_keeps_the_response_and_alerts_admins(client, monkeypatch):
+    from app.services import notification_service
+    from tests.test_users import _admin_headers
+
+    monkeypatch.setattr(notification_service, "_last_email_failure_alert", None)
+    admin = _admin_headers(client, email="forgot-fail-admin@zerostrike.dev")
+    register_and_login(client, email="forgot-fail@zerostrike.dev", password="oldpassword1")
+
+    def broken(*args, **kwargs):
+        raise ConnectionRefusedError("smtp down")
+
+    monkeypatch.setattr(email_service, "send_password_reset_email", broken)
+    r = client.post("/api/v1/auth/forgot-password", json={"email": "forgot-fail@zerostrike.dev"})
+
+    assert r.status_code == 200
+    assert r.json()["message"] == "If that email is registered, a reset link has been sent."
+    failed = asyncio.run(AuditLog.find(AuditLog.action == "Password Reset Email Failed").to_list())
+    assert len(failed) == 1
+    assert failed[0].actor_type == "system"
+    assert failed[0].metadata == {"error": "ConnectionRefusedError"}
+    notes = client.get("/api/v1/notifications", headers=admin).json()["items"]
+    assert any(n["event"] == "email.delivery_failed" for n in notes)
+
+
+def test_known_email_send_is_deferred_until_after_response(client, monkeypatch):
+    from fastapi import BackgroundTasks
+
+    from app.services import auth_service
+
+    captured = {}
+    _capture_send(monkeypatch, captured)
+    register_and_login(client, email="forgot-defer@zerostrike.dev", password="oldpassword1")
+
+    async def run():
+        bg = BackgroundTasks()
+        await auth_service.request_password_reset("forgot-defer@zerostrike.dev", bg)
+        before = dict(captured)
+        scheduled = len(bg.tasks)
+        await bg()
+        return before, scheduled
+
+    before, scheduled = asyncio.run(run())
+    assert before == {}
+    assert scheduled == 1
+    assert captured["to_address"] == "forgot-defer@zerostrike.dev"
+
+
+def test_unknown_email_schedules_nothing(client, monkeypatch):
+    from fastapi import BackgroundTasks
+
+    from app.services import auth_service
+
+    captured = {}
+    _capture_send(monkeypatch, captured)
+
+    async def run():
+        bg = BackgroundTasks()
+        await auth_service.request_password_reset("nobody-defer@zerostrike.dev", bg)
+        return len(bg.tasks)
+
+    assert asyncio.run(run()) == 0
+    assert captured == {}

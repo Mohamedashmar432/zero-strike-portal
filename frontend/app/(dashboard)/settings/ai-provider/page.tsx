@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { RequireRole } from "@/components/auth/require-role";
 import { DataTableCard } from "@/components/common/data-table-card";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,9 +140,9 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.providers.all() });
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.status() });
-      toast.success("Provider added");
       reset();
       onClose();
+      toast.success("AI provider added");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to add provider"),
   });
@@ -151,9 +152,9 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.providers.all() });
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.status() });
-      toast.success("Provider updated");
       reset();
       onClose();
+      toast.success("AI provider updated");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update provider"),
   });
@@ -218,7 +219,7 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
                 }}
               >
                 <SelectTrigger id="ai-provider-select" className="w-full">
-                  <SelectValue />
+                  <SelectValue>{PROVIDER_LABELS[provider]}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {PROVIDERS.map((p) => (
@@ -289,6 +290,9 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
 function AiProvidersPanel() {
   const queryClient = useQueryClient();
   const [dialogTarget, setDialogTarget] = useState<DialogTarget | null>(null);
+  // Kept after close so the dialog text doesn't blank while it animates out.
+  const [deleteTarget, setDeleteTarget] = useState<AiProviderConfig | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.ai.providers.all(),
@@ -320,7 +324,7 @@ function AiProvidersPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.providers.all() });
       queryClient.invalidateQueries({ queryKey: queryKeys.ai.status() });
-      toast.success("Provider deleted");
+      toast.success("AI provider deleted");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete provider"),
   });
@@ -437,7 +441,10 @@ function AiProvidersPanel() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => remove.mutate(p.id)}
+                      onClick={() => {
+                        setDeleteTarget(p);
+                        setDeleteOpen(true);
+                      }}
                       disabled={remove.isPending && remove.variables === p.id}
                     >
                       Delete
@@ -450,6 +457,22 @@ function AiProvidersPanel() {
         </Table>
       </DataTableCard>
       <AiProviderDialog target={dialogTarget} onClose={() => setDialogTarget(null)} />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete AI provider?"
+        description={`"${deleteTarget?.name ?? ""}" and its saved API key will be removed. ${
+          deleteTarget?.is_active
+            ? "It is the active provider, so AI features stop until another one is activated. "
+            : ""
+        }This cannot be undone.`}
+        confirmLabel="Delete provider"
+        pendingLabel="Deleting…"
+        pending={remove.isPending}
+        onConfirm={() =>
+          deleteTarget && remove.mutate(deleteTarget.id, { onSettled: () => setDeleteOpen(false) })
+        }
+      />
     </div>
   );
 }

@@ -70,6 +70,12 @@ export type ProjectScanActivity = {
   current_findings_total: number;
 };
 
+// True once any repo has a completed scan. Deliberately not `project.last_scan_at`, which
+// is set by scans that failed or never finished.
+export function hasCompletedScan(a?: ProjectScanActivity): boolean {
+  return !!a?.repos.some((g) => g.scans.some((s) => s.status === "completed"));
+}
+
 export function listProjects(page = 1, pageSize = 20) {
   return apiFetch<Page<Project>>(`/projects?page=${page}&page_size=${pageSize}`);
 }

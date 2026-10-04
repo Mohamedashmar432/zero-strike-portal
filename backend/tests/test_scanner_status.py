@@ -92,3 +92,13 @@ def test_stuck_running_scan_is_flagged(client):
     running_scans = r.json()["queue"]["running_scans"]
     assert len(running_scans) == 1
     assert running_scans[0]["stuck"] is True
+
+
+def test_binary_checklist_names_the_uploader_by_email(client):
+    headers = _admin_headers(client, email="statusadmin-uploader@zerostrike.dev")
+    _publish(client, headers, "v0.24.0", "linux", "amd64")
+
+    body = client.get("/api/v1/admin/scanner-status", headers=headers).json()
+    by_combo = {(b["os"], b["arch"]): b for b in body["binaries"]}
+    assert by_combo[("linux", "amd64")]["uploaded_by_email"] == "statusadmin-uploader@zerostrike.dev"
+    assert by_combo[("linux", "arm64")]["uploaded_by_email"] is None

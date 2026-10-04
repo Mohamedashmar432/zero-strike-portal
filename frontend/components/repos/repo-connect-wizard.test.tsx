@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { BRANCH_RENDER_LIMIT, matchBranches, wizardStep } from "./repo-connect-wizard";
+import { BRANCH_RENDER_LIMIT, matchBranches, wizardStep, wizardTitle } from "./repo-connect-wizard";
 
 // A repo like flutter/flutter has ~900 branches. The picker renders only BRANCH_RENDER_LIMIT of
 // them, so search has to run over the whole list — filtering the rendered slice instead would
@@ -87,5 +87,17 @@ describe("wizardStep", () => {
     expect(at({ effectiveMode: "token" }).step).toBe(3);
     expect(at({ effectiveMode: "token", selectedRepo: true }).step).toBe(4);
     expect(at({ effectiveMode: "token", selectedRepo: true, selectedBranch: true }).step).toBe(5);
+  });
+});
+
+describe("wizardTitle", () => {
+  test("embedded wizard titles itself as the second phase, not a fresh step 1", () => {
+    const title = wizardTitle(1, 3, "Step 2 of 2 — Connect a repository");
+    expect(title).toBe("Step 2 of 2 — Connect a repository · part 1 of 3");
+    expect(title).not.toMatch(/^Step 1 of/);
+  });
+
+  test("standalone wizard keeps the plain counter", () => {
+    expect(wizardTitle(2, 4)).toBe("Step 2 of 4");
   });
 });

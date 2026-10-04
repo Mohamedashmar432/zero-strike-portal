@@ -12,6 +12,7 @@ class BinaryChecklistItem(BaseModel):
     version: str | None = None
     uploaded_at: datetime | None = None
     uploaded_by: str | None = None
+    uploaded_by_email: str | None = None
 
 
 class RunningScanItem(BaseModel):

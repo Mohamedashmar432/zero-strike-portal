@@ -76,6 +76,11 @@ export function wizardStep(s: {
   return { step: stages.indexOf(current) + 1, total: stages.length };
 }
 
+/** Embedded in a larger flow, the wizard is a phase of it, not a fresh "Step 1 of N". */
+export function wizardTitle(step: number, total: number, phaseLabel?: string) {
+  return phaseLabel ? `${phaseLabel} · part ${step} of ${total}` : `Step ${step} of ${total}`;
+}
+
 // Shared by /projects/[projectId]/repos/new (standalone) and /projects/new (embedded
 // right after project creation) — same provider -> repo -> branch -> label flow either way.
 export function RepoConnectWizard({
@@ -84,6 +89,7 @@ export function RepoConnectWizard({
   cancelHref,
   cancelLabel = "Cancel",
   onCancel,
+  phaseLabel,
 }: {
   projectId: string;
   onConnected: (repo: ProjectRepo) => void;
@@ -92,6 +98,8 @@ export function RepoConnectWizard({
   cancelHref?: string;
   cancelLabel?: string;
   onCancel?: () => void;
+  // Set when embedded in a parent flow so the title names the parent's phase.
+  phaseLabel?: string;
 }) {
   const queryClient = useQueryClient();
 
@@ -245,7 +253,7 @@ export function RepoConnectWizard({
     <Card className="mx-auto max-w-xl">
       <CardHeader>
         <CardTitle className="text-sm font-medium text-muted-foreground">
-          Step {step} of {total}
+          {wizardTitle(step, total, phaseLabel)}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">

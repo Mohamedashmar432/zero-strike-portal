@@ -86,6 +86,7 @@ export default function NewProjectPage() {
             projectId={created.id}
             cancelHref={`/projects/${created.id}`}
             cancelLabel="Skip for now"
+            phaseLabel="Step 2 of 2 — Connect a repository"
             onConnected={() => router.push(`/projects/${created.id}?tab=repos`)}
           />
         </div>

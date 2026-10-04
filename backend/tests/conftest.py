@@ -1,5 +1,16 @@
-import pytest
-from fastapi.testclient import TestClient
+# ruff: noqa: E402
+import os
+
+# Tests must never reach a real mail relay or Key Vault, whatever the developer's local .env
+# says. Real env vars outrank .env in pydantic-settings, so blank them before the app imports.
+# Tests that exercise email set `settings.smtp_host` themselves via monkeypatch.
+for _name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "AZURE_KEY_VAULT_URL"):
+    os.environ[_name] = ""
+# mongomock resolves an mongodb+srv:// URI over real DNS (slow/flaky offline), so give it a plain one.
+os.environ["MONGODB_URI"] = "mongodb://localhost:27017"
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 from mongomock_motor import AsyncMongoMockClient, enabled_gridfs_integration
 
 import app.core.rate_limit as rate_limit_module

@@ -1,8 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
@@ -17,10 +19,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { deleteUser, listUsers, updateUser } from "@/lib/api/users";
+import { approveUser, deleteUser, listUsers, rejectUser, updateUser } from "@/lib/api/users";
 import { roleLabel } from "@/lib/role-labels";
 import { getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
@@ -31,24 +34,24 @@ function UserRowActions({
   targetUser,
   isSelf,
   onRequestDelete,
+  onRequestDecline,
+  onRequestRoleChange,
 }: {
   targetUser: User;
   isSelf: boolean;
   onRequestDelete: (user: User) => void;
+  onRequestDecline: (user: User) => void;
+  onRequestRoleChange: (user: User) => void;
 }) {
   const queryClient = useQueryClient();
 
-  const toggleRole = useMutation({
-    mutationFn: () => updateUser(targetUser.id, { role: targetUser.role === "admin" ? "user" : "admin" }),
+  const approve = useMutation({
+    mutationFn: () => approveUser(targetUser.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
-      toast.success(
-        targetUser.role === "admin"
-          ? `User demoted to ${roleLabel("user")}`
-          : `User promoted to ${roleLabel("admin")}`
-      );
+      toast.success(`Approved ${targetUser.email}. They have been emailed.`);
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update role"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to approve"),
   });
 
   const toggleActive = useMutation({
@@ -60,13 +63,30 @@ function UserRowActions({
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update user"),
   });
 
+  if (targetUser.approval_status !== "approved") {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate()}>
+          {approve.isPending ? "Approving…" : "Approve"}
+        </Button>
+        {targetUser.approval_status === "pending" && (
+          <Button variant="outline" size="sm" onClick={() => onRequestDecline(targetUser)}>
+            Decline
+          </Button>
+        )}
+        <Button variant="destructive" size="sm" onClick={() => onRequestDelete(targetUser)}>
+          Delete
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap gap-2">
       <Button
         variant="outline"
         size="sm"
-        disabled={isSelf || toggleRole.isPending}
-        onClick={() => toggleRole.mutate()}
+        disabled={isSelf}
+        onClick={() => onRequestRoleChange(targetUser)}
       >
         {targetUser.role === "admin" ? `Demote to ${roleLabel("user")}` : `Promote to ${roleLabel("admin")}`}
       </Button>
@@ -85,20 +105,60 @@ function UserRowActions({
   );
 }
 
+function statusLabel(u: User) {
+  if (u.approval_status === "pending") return "Awaiting approval";
+  if (u.approval_status === "rejected") return "Declined";
+  return u.is_active ? "Active" : "Disabled";
+}
+
 export default function AdminUsersPage() {
+  // useSearchParams needs a Suspense boundary or the route cannot be prerendered.
+  return (
+    <Suspense fallback={null}>
+      <AdminUsers />
+    </Suspense>
+  );
+}
+
+function AdminUsers() {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  // ?status=pending is where the "new signup request" email and notification link to.
+  const pendingOnly = useSearchParams().get("status") === "pending";
   const [page, setPage] = useState(1);
+  const [declineTarget, setDeclineTarget] = useState<User | null>(null);
+  const [declineReason, setDeclineReason] = useState("");
   // Two separate pieces of state rather than one `deleteTarget: User | null`:
   // deleteTargetId controls the dialog's open state and is nulled on success/cancel,
   // but deleteTargetEmail is intentionally left stale so the ~100ms dialog exit
   // animation doesn't render "undefined" while the content is still mounted.
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteTargetEmail, setDeleteTargetEmail] = useState<string | null>(null);
+  // roleTarget keeps the dialog text through the exit animation; roleOpen drives visibility.
+  const [roleTarget, setRoleTarget] = useState<User | null>(null);
+  const [roleOpen, setRoleOpen] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["admin", "users", page],
-    queryFn: () => listUsers(page, PAGE_SIZE),
+    queryKey: ["admin", "users", page, pendingOnly],
+    queryFn: () => listUsers(page, PAGE_SIZE, pendingOnly ? "pending" : undefined),
+  });
+
+  // Always fetched, so the tab shows a live count even while looking at All users.
+  const pendingCount = useQuery({
+    queryKey: ["admin", "users", "pending-count"],
+    queryFn: () => listUsers(1, 1, "pending"),
+  }).data?.total;
+
+  const declineMutation = useMutation({
+    mutationFn: () => rejectUser(declineTarget!.id, declineReason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      toast.success("Request declined. The applicant has been emailed.");
+      setDeclineTarget(null);
+      setDeclineReason("");
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to decline"),
   });
 
   const deleteMutation = useMutation({
@@ -110,6 +170,20 @@ export default function AdminUsersPage() {
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to delete user"),
   });
+
+  const roleMutation = useMutation({
+    mutationFn: (u: User) => updateUser(u.id, { role: u.role === "admin" ? "user" : "admin" }),
+    onSuccess: (_, u) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      toast.success(
+        u.role === "admin" ? `User demoted to ${roleLabel("user")}` : `User promoted to ${roleLabel("admin")}`
+      );
+      setRoleOpen(false);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update role"),
+  });
+
+  const promoting = roleTarget?.role !== "admin";
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
@@ -134,12 +208,34 @@ export default function AdminUsersPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Users" description="Manage portal accounts, roles, and access." />
+      <div className="flex gap-2">
+        <Button
+          variant={pendingOnly ? "outline" : "default"}
+          size="sm"
+          onClick={() => {
+            setPage(1);
+            router.push("/admin/users");
+          }}
+        >
+          All users
+        </Button>
+        <Button
+          variant={pendingOnly ? "default" : "outline"}
+          size="sm"
+          onClick={() => {
+            setPage(1);
+            router.push("/admin/users?status=pending");
+          }}
+        >
+          Pending approval{pendingCount ? ` (${pendingCount})` : ""}
+        </Button>
+      </div>
       <DataTableCard
         isLoading={isLoading}
         isError={isError}
         errorMessage="Failed to load users."
         isEmpty={!!data && data.items.length === 0}
-        emptyState={<EmptyState title="No users found" />}
+        emptyState={<EmptyState title={pendingOnly ? "No requests are waiting" : "No users found"} />}
       >
         <Table>
           <TableHeader>
@@ -171,9 +267,18 @@ export default function AdminUsersPage() {
                   <TableCell>
                     <Badge variant="secondary">{roleLabel(u.role)}</Badge>
                   </TableCell>
-                  <TableCell>{u.is_active ? "Active" : "Disabled"}</TableCell>
+                  <TableCell>{statusLabel(u)}</TableCell>
                   <TableCell>
-                    <UserRowActions targetUser={u} isSelf={isSelf} onRequestDelete={requestDelete} />
+                    <UserRowActions
+                      targetUser={u}
+                      isSelf={isSelf}
+                      onRequestDelete={requestDelete}
+                      onRequestDecline={setDeclineTarget}
+                      onRequestRoleChange={(user) => {
+                        setRoleTarget(user);
+                        setRoleOpen(true);
+                      }}
+                    />
                   </TableCell>
                 </TableRow>
               );
@@ -206,6 +311,55 @@ export default function AdminUsersPage() {
           </div>
         </div>
       )}
+      <Dialog open={declineTarget !== null} onOpenChange={(open) => !open && setDeclineTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Decline access request</DialogTitle>
+            <DialogDescription>
+              {declineTarget?.email} will be emailed and will not be able to sign in. The reason is
+              optional and is included in that email.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            aria-label="Reason (optional)"
+            placeholder="Reason (optional)"
+            maxLength={500}
+            value={declineReason}
+            onChange={(e) => setDeclineReason(e.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeclineTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={declineMutation.isPending}
+              onClick={() => declineMutation.mutate()}
+            >
+              {declineMutation.isPending ? "Declining…" : "Decline request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={roleOpen}
+        onOpenChange={setRoleOpen}
+        title={
+          promoting
+            ? `Make ${roleTarget?.email ?? ""} an administrator?`
+            : `Remove administrator access from ${roleTarget?.email ?? ""}?`
+        }
+        description={
+          promoting
+            ? "Administrators can manage every user, AI provider and workspace setting."
+            : "They lose access to the admin pages and workspace settings."
+        }
+        confirmLabel={promoting ? `Promote to ${roleLabel("admin")}` : `Demote to ${roleLabel("user")}`}
+        pendingLabel="Saving…"
+        pending={roleMutation.isPending}
+        destructive={!promoting}
+        onConfirm={() => roleTarget && roleMutation.mutate(roleTarget)}
+      />
       <Dialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
         <DialogContent>
           <DialogHeader>

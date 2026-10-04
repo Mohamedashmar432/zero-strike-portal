@@ -178,3 +178,65 @@ def test_activating_a_project_provider_leaves_the_portal_provider_active(client)
 
     still = client.get(f"/api/v1/ai/providers/{portal['id']}", headers=admin_headers).json()
     assert still["is_active"] is True
+
+
+def test_project_ai_usage_reports_the_provider_that_would_serve(client):
+    admin_headers = _admin_headers(client, email="byok-admin6@zerostrike.dev")
+    client.post(
+        "/api/v1/ai/providers",
+        json={"name": "Portal", "provider": "anthropic", "model_name": "claude-x", "api_key": "sk-p"},
+        headers=admin_headers,
+    )
+    owner = register_and_login(client, email="byok-owner6@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    usage_url = f"/api/v1/projects/{project['id']}/ai-usage"
+
+    # BYOK off -> the portal provider serves.
+    body = client.get(usage_url, headers=_headers(owner)).json()
+    assert (body["enabled"], body["active_provider"], body["active_model"]) == (
+        True,
+        "anthropic",
+        "claude-x",
+    )
+
+    # BYOK on, no project key -> nothing serves (never the portal's).
+    _enable_byok(client, admin_headers)
+    body = client.get(usage_url, headers=_headers(owner)).json()
+    assert body["enabled"] is False
+    assert body["active_provider"] is None
+
+    # BYOK on + project key -> the project's provider.
+    client.post(
+        f"/api/v1/projects/{project['id']}/ai-provider",
+        json=_provider_body(model="gpt-4o"),
+        headers=_headers(owner),
+    )
+    body = client.get(usage_url, headers=_headers(owner)).json()
+    assert (body["enabled"], body["active_provider"], body["active_model"]) == (
+        True,
+        "openai",
+        "gpt-4o",
+    )
+
+
+def test_project_provider_events_are_project_scoped(client):
+    admin_headers = _admin_headers(client, email="byok-scope-admin@zerostrike.dev")
+    _enable_byok(client, admin_headers)
+    owner = register_and_login(client, email="byok-scope-owner@zerostrike.dev")
+    project = _create_project(client, _headers(owner), name="Scoped")
+    base = f"/api/v1/projects/{project['id']}/ai-provider"
+
+    created = client.post(base, json=_provider_body(), headers=_headers(owner)).json()
+    client.put(
+        f"{base}/{created['id']}",
+        json={"name": "Renamed", "provider": "openai", "model_name": "gpt-4o"},
+        headers=_headers(owner),
+    )
+    client.post(f"{base}/{created['id']}/activate", headers=_headers(owner))
+    client.delete(f"{base}/{created['id']}", headers=_headers(owner))
+
+    logs = client.get("/api/v1/audit-logs", headers=admin_headers).json()["items"]
+    provider_rows = [log for log in logs if log["action"].startswith("Project AI Provider")]
+    assert len(provider_rows) == 4
+    assert all(log["project_id"] == project["id"] for log in provider_rows)
+    assert all(log["project_name"] == "Scoped" for log in provider_rows)
