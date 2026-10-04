@@ -89,6 +89,7 @@ EXPOSE 8000
 # (rotating it yields a fresh rate-limit bucket per request). So uvicorn is NOT told to trust
 # proxy headers; app.core.rate_limit.client_ip instead reads the entry TRUSTED_PROXY_HOPS from
 # the RIGHT of X-Forwarded-For -- the address our own outermost proxy appended. 1 = one proxy in
-# front (Railway's edge, or Caddy in deploy/). Set it to the real proxy count for other setups.
+# front (Azure Container Apps ingress, or Caddy in deploy/). Set it to the real proxy count for
+# other setups, e.g. 2 with Front Door or Application Gateway in front of ACA.
 ENV TRUSTED_PROXY_HOPS=1
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

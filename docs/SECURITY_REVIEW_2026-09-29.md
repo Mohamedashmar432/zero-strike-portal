@@ -202,8 +202,11 @@ and `frontend/app/(dashboard)/projects/[projectId]/scans/new/page.tsx`.
 
 ## Status and deferred work (29 September 2026)
 
-WP-A to WP-D are implemented but not yet committed. The full suite passes (845 tests), plus a browser
-pass covering the clone-URL 422, the login 429 and the password 422.
+WP-A to WP-D are implemented and were committed to `master` on 30 September 2026 as one commit,
+separated from the threat-model and signup-approval work they were developed alongside. On the
+development tree the full suite passed (845 tests), plus a browser pass covering the clone-URL 422,
+the login 429 and the password 422. The full backend suite was re-run on the release tree before the
+commit; the browser pass was not repeated there.
 
 One correction was made after review. The first version rejected any userinfo in the URL, which would
 have broken every Azure DevOps repo, because ADO's `remoteUrl` is `https://{org}@dev.azure.com/...`.
