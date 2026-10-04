@@ -28,6 +28,12 @@ function response(over: Partial<ScanRegressionResponse> = {}): ScanRegressionRes
     baseline_scan_id: "s0",
     has_baseline: true,
     is_latest_for_scope: true,
+    commit: null,
+    branch: null,
+    baseline_commit: null,
+    baseline_branch: null,
+    baseline_branch_mismatch: false,
+    scanner_version_changed: false,
     new: bucket(0),
     unchanged: bucket(0),
     reopened: bucket(0),
@@ -102,5 +108,23 @@ describe("ScanRegressionSection", () => {
     renderWithClient(<ScanRegressionSection projectId="p1" scanId="s1" />);
 
     await waitFor(() => expect(screen.getByText("400")).toBeTruthy());
+  });
+
+  test("states the commit range and the branch/scanner notices", async () => {
+    vi.mocked(getScanRegression).mockResolvedValue(
+      response({
+        commit: "bbbbbbb1234",
+        branch: "release",
+        baseline_commit: "aaaaaaa1234",
+        baseline_branch: "main",
+        baseline_branch_mismatch: true,
+        scanner_version_changed: true,
+      })
+    );
+    renderWithClient(<ScanRegressionSection projectId="p1" scanId="s1" />);
+    expect(await screen.findByText("main@aaaaaaa")).toBeTruthy();
+    expect(screen.getByText("release@bbbbbbb")).toBeTruthy();
+    expect(screen.getByText(/proves nothing was fixed/)).toBeTruthy();
+    expect(screen.getByText(/scanner version changed/)).toBeTruthy();
   });
 });

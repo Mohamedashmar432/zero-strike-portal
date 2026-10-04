@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegressionBadge } from "@/components/vulnerabilities/regression-badge";
+import { shortSha } from "@/lib/api/project-repos";
 import { getScanRegression, type RegressionState } from "@/lib/api/vulnerabilities";
 import { queryKeys } from "@/lib/api/query-keys";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,11 @@ import { cn } from "@/lib/utils";
  * here. Each bucket's `count` is the true total; the API returns only a capped preview of the
  * rows themselves, so every tile links into the work queue rather than pretending to list them.
  */
+
+function refLabel(branch: string | null, commit: string | null) {
+  const sha = shortSha(commit);
+  return branch ? `${branch}@${sha}` : sha;
+}
 
 const ORDER: RegressionState[] = ["new", "reopened", "fixed", "unchanged"];
 
@@ -60,13 +66,41 @@ export function ScanRegressionSection({ projectId, scanId }: { projectId: string
           <>
             <p className="text-xs text-muted-foreground">
               {data?.has_baseline ? (
-                <>Compared with the previous completed scan of this repository.</>
+                data.baseline_commit && data.commit ? (
+                  <>
+                    Compared <span className="font-mono">{refLabel(data.baseline_branch, data.baseline_commit)}</span>{" "}
+                    → <span className="font-mono">{refLabel(data.branch, data.commit)}</span>.
+                  </>
+                ) : (
+                  <>Compared with the previous completed scan of this repository.</>
+                )
               ) : (
                 // Saying "0 fixed" against no baseline would read as "nothing was fixed"
                 // rather than "there is nothing to compare against".
-                <>First comparable scan; no baseline exists.</>
+                data?.commit ? (
+                  <>
+                    Baseline established at <span className="font-mono">{refLabel(data.branch, data.commit)}</span>;
+                    nothing to compare against yet.
+                  </>
+                ) : (
+                  <>First comparable scan; no baseline exists.</>
+                )
               )}
             </p>
+
+            {data?.baseline_branch_mismatch && (
+              <p className="text-xs text-muted-foreground">
+                The previous scan ran on <span className="font-mono">{data.baseline_branch}</span>, not{" "}
+                <span className="font-mono">{data.branch}</span>. A different branch proves nothing was fixed,
+                so this scan only establishes a baseline for the new branch.
+              </p>
+            )}
+            {data?.scanner_version_changed && (
+              <p className="text-xs text-muted-foreground">
+                The scanner version changed since the previous scan, so some differences may come from
+                updated detection rules rather than code changes.
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {ORDER.map((state) => {

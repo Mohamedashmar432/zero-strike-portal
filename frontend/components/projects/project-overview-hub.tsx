@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listProjectAutoFix, type ProjectAutoFixScanItem } from "@/lib/api/auto-fix";
 import { listFrameworks, listProjectAudits } from "@/lib/api/compliance";
 import { queryKeys } from "@/lib/api/query-keys";
+import { getVulnerabilitySummary, type FixStatus } from "@/lib/api/vulnerabilities";
 import { cn, parseApiDate } from "@/lib/utils";
 import { hasCompletedScan, type Project, type ProjectScanActivity } from "@/lib/api/projects";
 import type { ProjectRepo } from "@/lib/api/project-repos";
@@ -127,6 +128,18 @@ export function ProjectOverviewHub({
   const frameworkTitles = frameworks?.items.map((f) => f.title);
   const provider = providerLabel(aiUsage);
 
+  // Lifecycle counts across every repo of the project. Not a severity view, so the tiles stay
+  // neutral and only link into the work queue pre-filtered by fix status.
+  const { data: lifecycle } = useQuery({
+    queryKey: queryKeys.projects.vulnerabilitySummary(project.id),
+    queryFn: () => getVulnerabilitySummary(project.id),
+  });
+  const lifecycleTiles: { key: FixStatus; label: string; value: number }[] = [
+    { key: "open", label: "Open", value: (lifecycle?.open ?? 0) + (lifecycle?.in_progress ?? 0) },
+    { key: "reopened", label: "Reopened", value: lifecycle?.reopened ?? 0 },
+    { key: "fixed", label: "Fixed", value: lifecycle?.fixed ?? 0 },
+  ];
+
   // Only reflects the latest scan report findings
   const latestCounts: SeverityCounts =
     activity?.current_findings ??
@@ -210,6 +223,35 @@ export function ProjectOverviewHub({
              audit result the product had not measured. Replaced with at-risk
              repos, which is real. */}
       <MetricStrip metrics={metrics} />
+
+      {lifecycle && (lifecycle.open + lifecycle.in_progress + lifecycle.reopened + lifecycle.fixed + lifecycle.dismissed > 0) && (
+        <Card className="border-border/80 bg-card/60">
+          <CardHeader className="p-4 pb-3">
+            <CardTitle className="text-sm font-normal text-muted-foreground">
+              Vulnerability lifecycle
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-3 gap-3 p-4 pt-0">
+            {lifecycleTiles.map((t) => (
+              <Link
+                key={t.key}
+                href={`/projects/${project.id}/vulnerabilities?fix_status=${t.key}`}
+                className="rounded-lg border border-border bg-card p-3 transition-colors hover:border-foreground/30"
+                title={
+                  t.key === "fixed"
+                    ? "No longer detected by the scanner. A rewritten vulnerable line can also read as fixed plus new."
+                    : undefined
+                }
+              >
+                <span className="legend text-muted-foreground">{t.label}</span>
+                <p className="readout mt-1 text-xl leading-none tabular-nums text-foreground">
+                  {t.value.toLocaleString()}
+                </p>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 2. SAST Code Scanner — Latest Scan Findings Across All Repositories */}
       <Card className="border-border/80 bg-card/60">

@@ -11,6 +11,8 @@ import { listScans } from "@/lib/api/scans";
 import type { Severity } from "@/lib/api/findings";
 import {
   listVulnerabilities,
+  UNLINKED_REPO_KEY,
+  type FixStatus,
   type RegressionState,
   type Vulnerability,
   type VulnerabilityStatus,
@@ -21,6 +23,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { FilterBar } from "@/components/common/filter-bar";
 import { RelativeTime } from "@/components/common/relative-time";
+import { CommitRef, FIX_STATUS_LABELS, FIXED_TOOLTIP } from "@/components/vulnerabilities/commit-ref";
 import { RegressionBadge } from "@/components/vulnerabilities/regression-badge";
 import { VulnerabilityStatusBadge } from "@/components/vulnerabilities/vulnerability-status-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -30,6 +33,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const STATUSES: VulnerabilityStatus[] = ["open", "in_progress", "resolved", "accepted_risk"];
 const REGRESSION_STATES: RegressionState[] = ["new", "reopened", "fixed", "unchanged"];
+const FIX_STATUSES: FixStatus[] = ["open", "reopened", "fixed", "dismissed"];
 const ALL = "__all__";
 const PAGE_SIZE = 25;
 
@@ -58,6 +62,8 @@ export default function VulnerabilitiesPage() {
   const status = (searchParams.get("status") as VulnerabilityStatus | null) ?? undefined;
   const severity = (searchParams.get("severity") as Severity | null) ?? undefined;
   const regressionState = (searchParams.get("regression") as RegressionState | null) ?? undefined;
+  const fixStatus = (searchParams.get("fix_status") as FixStatus | null) ?? undefined;
+  const repo = searchParams.get("repo") ?? undefined;
   const assigneeUserId = searchParams.get("assignee") ?? undefined;
   const search = searchParams.get("q") ?? "";
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
@@ -102,7 +108,7 @@ export default function VulnerabilitiesPage() {
   // update_vulnerability_assignment) -- a still-pending invite can't be selected.
   const assignableMembers = (members ?? []).filter((m) => m.user_id);
 
-  const filters = { status, severity, regressionState, assigneeUserId, search, page };
+  const filters = { status, severity, regressionState, fixStatus, repo, assigneeUserId, search, page };
   const {
     data: vulnerabilities,
     isLoading,
@@ -114,6 +120,8 @@ export default function VulnerabilitiesPage() {
         status,
         severity,
         regressionState,
+        fixStatus,
+        repo,
         assigneeUserId,
         search: search || undefined,
         page,
@@ -123,7 +131,7 @@ export default function VulnerabilitiesPage() {
   });
 
   const totalPages = vulnerabilities ? Math.max(1, Math.ceil(vulnerabilities.total / PAGE_SIZE)) : 1;
-  const hasFilters = !!(status || severity || regressionState || assigneeUserId || search);
+  const hasFilters = !!(status || severity || regressionState || fixStatus || repo || assigneeUserId || search);
   const noScansYet = (scans?.total ?? null) === 0;
   const isEmpty = !!vulnerabilities && vulnerabilities.items.length === 0;
 
@@ -188,6 +196,27 @@ export default function VulnerabilitiesPage() {
           },
           {
             type: "select",
+            value: fixStatus ?? ALL,
+            onChange: (v) => updateParams({ fix_status: v === ALL ? undefined : v }),
+            placeholder: "Fix status",
+            options: [
+              { value: ALL, label: "All fix statuses" },
+              ...FIX_STATUSES.map((s) => ({ value: s, label: FIX_STATUS_LABELS[s] })),
+            ],
+          },
+          {
+            type: "select",
+            value: repo ?? ALL,
+            onChange: (v) => updateParams({ repo: v === ALL ? undefined : v }),
+            placeholder: "Repository",
+            options: [
+              { value: ALL, label: "All repositories" },
+              ...(repos ?? []).map((r) => ({ value: r.id, label: r.label || r.repo_full_name })),
+              { value: UNLINKED_REPO_KEY, label: "Unlinked" },
+            ],
+          },
+          {
+            type: "select",
             value: assigneeUserId ?? ALL,
             onChange: (v) => updateParams({ assignee: v === ALL ? undefined : v }),
             placeholder: "Owner",
@@ -233,6 +262,8 @@ export default function VulnerabilitiesPage() {
               <TableHead>Status</TableHead>
               <TableHead>Regression</TableHead>
               <TableHead>Owner</TableHead>
+              <TableHead>Introduced</TableHead>
+              <TableHead>Fixed in</TableHead>
               <TableHead>First seen</TableHead>
               <TableHead>Last seen</TableHead>
               <TableHead />
@@ -273,6 +304,18 @@ export default function VulnerabilitiesPage() {
                   <RegressionBadge state={v.last_regression_state} />
                 </TableCell>
                 <TableCell className="text-xs">{v.assignee_email ?? "Unassigned"}</TableCell>
+                <TableCell>
+                  <CommitRef commit={v.first_seen_commit} branch={v.first_seen_branch} />
+                </TableCell>
+                <TableCell>
+                  {v.fix_status === "fixed" ? (
+                    <span title={FIXED_TOOLTIP}>
+                      <CommitRef commit={v.fixed_commit} branch={v.fixed_branch} />
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-xs">
                   <RelativeTime iso={v.first_seen_at} />
                 </TableCell>
