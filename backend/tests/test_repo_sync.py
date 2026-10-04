@@ -364,3 +364,122 @@ def test_create_scan_still_enqueues_a_cloud_scan(client, monkeypatch):
     assert scan.status == "queued"
     project = asyncio.run(Project.get(pid))
     assert project.scan_count == 1
+
+
+
+# --- phase 3: repo sync_state on the repos list ----------------------------------------------
+
+
+def _repos(client, headers, pid):
+    r = client.get(f"/api/v1/projects/{pid}/repos", headers=headers)
+    assert r.status_code == 200
+    return {x["id"]: x for x in r.json()}
+
+
+def _set_repo(rid, **fields):
+    async def go():
+        repo = await ProjectRepo.get(rid)
+        for k, v in fields.items():
+            setattr(repo, k, v)
+        await repo.save()
+
+    asyncio.run(go())
+
+
+def test_repo_with_no_completed_scan_is_never(client):
+    headers, pid, rid = _setup(client, "state-never@zerostrike.dev")
+    row = _repos(client, headers, pid)[rid]
+    assert row["sync_state"] == "never" and row["scanned_commit"] is None
+
+
+def test_scanned_repo_with_unchecked_remote_is_unknown(client):
+    headers, pid, rid = _setup(client, "state-unknown@zerostrike.dev")
+    _add_scan(pid, rid)
+    row = _repos(client, headers, pid)[rid]
+    assert row["sync_state"] == "unknown"
+    assert (row["scanned_commit"], row["scanned_branch"]) == (SHA_A, "main")
+
+
+def test_repo_state_up_to_date_vs_behind(client):
+    headers, pid, rid = _setup(client, "state-behind@zerostrike.dev")
+    _add_scan(pid, rid, commit=SHA_A)
+    _set_repo(rid, remote_head_sha=SHA_A, remote_head_checked_at=datetime.now(timezone.utc))
+    row = _repos(client, headers, pid)[rid]
+    assert row["sync_state"] == "up_to_date" and row["remote_head_sha"] == SHA_A
+    assert row["last_synced_at"] is not None
+
+    _set_repo(rid, remote_head_sha=SHA_B)
+    assert _repos(client, headers, pid)[rid]["sync_state"] == "behind"
+
+
+def test_repo_state_error_and_syncing_take_precedence(client):
+    headers, pid, rid = _setup(client, "state-prec@zerostrike.dev")
+    _add_scan(pid, rid)
+    _set_repo(rid, remote_head_sha=SHA_A, last_sync_error="repository not found")
+    row = _repos(client, headers, pid)[rid]
+    assert row["sync_state"] == "error" and row["last_sync_error"] == "repository not found"
+
+    scan_id = _add_scan(pid, rid, status="running")
+    row = _repos(client, headers, pid)[rid]
+    assert row["sync_state"] == "syncing" and row["active_scan_id"] == scan_id
+
+
+def test_repo_state_is_scoped_per_repo(client):
+    headers, pid, rid = _setup(client, "state-scope@zerostrike.dev")
+    other = client.post(
+        f"/api/v1/projects/{pid}/repos",
+        json={
+            "provider": "github",
+            "pat": "ghp_x",
+            "organization": "octocat",
+            "repo_full_name": "octocat/other",
+            "clone_url": "https://github.com/octocat/other.git",
+            "selected_branch": "main",
+        },
+        headers=headers,
+    ).json()
+    _add_scan(pid, rid)
+    rows = _repos(client, headers, pid)
+    assert rows[rid]["scanned_commit"] == SHA_A
+    assert rows[other["id"]]["sync_state"] == "never"
+
+
+def test_sync_response_repo_carries_state(client, monkeypatch):
+    _fake_head(monkeypatch)
+    headers, pid, rid = _setup(client, "state-resp@zerostrike.dev")
+    body = _sync(client, headers, pid, rid).json()
+    assert body["repo"]["sync_state"] == "syncing"  # the scan it just queued
+    assert body["repo"]["active_scan_id"] == body["scan_id"]
+
+
+# --- phase 3: sync scans notify with what changed ---------------------------------------------
+
+
+def test_sync_scan_completion_notification_reports_the_diff(client):
+    import json
+    from pathlib import Path
+
+    from app.models.notification import Notification
+    from app.schemas.report import GoReportIn
+    from app.services import report_ingestion_service as ingest_svc
+
+    headers, pid, rid = _setup(client, "state-notify@zerostrike.dev")
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "go_report_sample.json").read_text())
+
+    async def run_sync_scan(data):
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id=pid, scan_type="cloud", triggered_by="sync", status="running", project_repo_id=rid,
+            repo_url=URL, branch="main", created_at=now, updated_at=now,
+        )
+        await scan.insert()
+        await ingest_svc.ingest(scan, GoReportIn.model_validate(data), raw_json="{}")
+
+    asyncio.run(run_sync_scan({**fixture, "GitCommit": SHA_A, "Branch": "main"}))
+    fixed_all = {**fixture, "GitCommit": SHA_B, "Branch": "main", "Findings": []}
+    asyncio.run(run_sync_scan(fixed_all))
+
+    rows = asyncio.run(Notification.find(Notification.project_id == pid).sort("created_at").to_list())
+    bodies = [n.body for n in rows]
+    assert bodies[0].startswith(f"Baseline established at {SHA_A[:7]}")
+    assert bodies[1].startswith("4 fixed, 0 new, 0 reopened, 0 still open")

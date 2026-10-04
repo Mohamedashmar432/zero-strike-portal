@@ -262,6 +262,19 @@ async def _apply_finding_delta(
     await Project.get_pymongo_collection().update_one({"_id": oid}, {"$inc": inc})
 
 
+def _sync_summary(result, commit: str | None) -> str:
+    """Completion body for a Repo Sync scan: what changed, not just what is present."""
+    at = f" at {commit[:7]}" if commit else ""
+    if not result.had_baseline:
+        return f"Baseline established{at}. {result.new} finding(s) tracked."
+    if result.baseline_branch_mismatch:
+        return f"Branch changed since the previous scan, so nothing was marked fixed. {result.new} new{at}."
+    return (
+        f"{result.fixed} fixed, {result.new} new, {result.reopened} reopened, "
+        f"{result.unchanged} still open{at}."
+    )
+
+
 def _completion_summary(findings: list[Finding]) -> str:
     """One line of severity counts for the completion notification, worst-first."""
     counts: dict[str, int] = {}
@@ -341,6 +354,7 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     # completed whether or not its findings could be linked to cross-scan Vulnerability rows.
     # insert_many doesn't reliably populate ids on the local Finding objects across Beanie
     # versions, so re-query the ones just written to give reconciliation real ids to stamp.
+    reconciled = None
     try:
         from app.services import vulnerability_service
 
@@ -350,7 +364,9 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
             for d in report.diagnostics
             if d.severity == "error" and d.location and d.location.file
         }
-        await vulnerability_service.reconcile_scan(scan, inserted_findings, unanalyzed_files=unanalyzed)
+        reconciled = await vulnerability_service.reconcile_scan(
+            scan, inserted_findings, unanalyzed_files=unanalyzed
+        )
     except Exception:
         logger.exception("vulnerability reconciliation failed", scan_id=scan_id)
 
@@ -378,7 +394,11 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         "scan.completed",
         project_id=project_id,
         title=f"Scan completed — {len(findings)} finding(s)",
-        body=_completion_summary(findings),
+        body=(
+            _sync_summary(reconciled, scan.git_commit)
+            if reconciled is not None and scan.triggered_by == "sync"
+            else _completion_summary(findings)
+        ),
         link=f"/projects/{project_id}/scans/{scan_id}",
     )
 

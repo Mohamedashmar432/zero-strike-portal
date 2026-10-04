@@ -67,6 +67,14 @@ class ProjectRepoResponse(BaseModel):
     selected_branch: str
     label: str | None
     created_at: datetime
+    # Repo Sync state (docs/REPO_SYNC.md), derived on read in repo_sync_service.sync_overviews.
+    remote_head_sha: str | None = None
+    scanned_commit: str | None = None
+    scanned_branch: str | None = None
+    last_synced_at: datetime | None = None
+    active_scan_id: str | None = None
+    last_sync_error: str | None = None
+    sync_state: Literal["syncing", "up_to_date", "behind", "error", "never", "unknown"] = "unknown"
 
 
 class RepoSyncRequest(BaseModel):

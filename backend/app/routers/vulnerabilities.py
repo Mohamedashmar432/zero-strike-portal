@@ -7,6 +7,7 @@ touches reconcile_scan's own bookkeeping (first_seen_at, last_regression_*, curr
 
 import re
 from datetime import datetime, timezone
+from typing import Literal
 
 from beanie import PydanticObjectId
 from beanie.operators import In
@@ -26,11 +27,13 @@ from app.schemas.vulnerability import (
     VulnerabilityActivityEvent,
     VulnerabilityAssignmentUpdateRequest,
     VulnerabilityDetailResponse,
+    VulnerabilityCounts,
     VulnerabilityOut,
     VulnerabilityScanObservation,
     VulnerabilityStatusUpdateRequest,
+    VulnerabilitySummaryResponse,
 )
-from app.services import audit_service, project_repo_service, project_service
+from app.services import audit_service, project_repo_service, project_service, vulnerability_service
 from app.services import project_stats_service as stats_svc
 
 router = APIRouter(tags=["vulnerabilities"])
@@ -94,6 +97,15 @@ def _to_out(v: Vulnerability, emails: dict[str, str]) -> VulnerabilityOut:
         last_seen_at=v.last_seen_at,
         resolved_at=v.resolved_at,
         reopened_at=v.reopened_at,
+        fix_status=vulnerability_service.derive_fix_status(v.status, v.resolution_reason, v.reopened_at),
+        first_seen_commit=v.first_seen_commit,
+        first_seen_branch=v.first_seen_branch,
+        first_seen_scan_id=v.first_seen_scan_id,
+        last_seen_commit=v.last_seen_commit,
+        fixed_commit=v.fixed_commit,
+        fixed_branch=v.fixed_branch,
+        fixed_scan_id=v.fixed_scan_id,
+        reopened_commit=v.reopened_commit,
         last_regression_state=v.last_regression_state,
         last_regression_scan_id=v.last_regression_scan_id,
         created_at=v.created_at,
@@ -130,6 +142,7 @@ def _emails_for(rows: list[Vulnerability]) -> set[str]:
 async def list_vulnerabilities(
     project_id: str,
     status_filter: str | None = Query(None, alias="status"),
+    fix_status: Literal["open", "reopened", "fixed", "dismissed"] | None = Query(None),
     severity: str | None = Query(None),
     kind: str | None = Query(None),
     repo: str | None = Query(None, description="project_repo_id, or the unlinked-bucket key"),
@@ -147,6 +160,8 @@ async def list_vulnerabilities(
     criteria: list = [Vulnerability.project_id == project_id]
     if status_filter:
         criteria.append(Vulnerability.status == status_filter)
+    if fix_status:
+        criteria.append(vulnerability_service.fix_status_criteria(fix_status))
     if severity:
         criteria.append(Vulnerability.current_severity == severity)
     if kind:
@@ -183,6 +198,52 @@ async def list_vulnerabilities(
 
     emails = await _email_map(_emails_for(rows))
     return Page(items=[_to_out(v, emails) for v in rows], total=total, page=page, page_size=page_size)
+
+
+@router.get("/projects/{project_id}/vulnerabilities/summary", response_model=VulnerabilitySummaryResponse)
+async def get_vulnerability_summary(
+    project_id: str,
+    repo: str | None = Query(None, description="project_repo_id, or the unlinked-bucket key"),
+    user: User = Depends(get_current_user),
+):
+    """Counts by lifecycle bucket, overall and per repo. Registered before the `{vulnerability_id}`
+    route so "summary" is never parsed as an id."""
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+
+    match: dict = {"project_id": project_id}
+    if repo:
+        match["repo_scope_key"] = repo
+    groups = await Vulnerability.get_pymongo_collection().aggregate(
+        [
+            {"$match": match},
+            {
+                "$group": {
+                    "_id": {
+                        "repo": "$repo_scope_key",
+                        "status": "$status",
+                        "reason": "$resolution_reason",
+                        "reopened": {"$cond": [{"$ifNull": ["$reopened_at", False]}, True, False]},
+                    },
+                    "n": {"$sum": 1},
+                }
+            },
+        ]
+    ).to_list(length=None)
+
+    total = VulnerabilityCounts()
+    by_repo: dict[str, VulnerabilityCounts] = {}
+    for g in groups:
+        k = g["_id"]
+        if k["status"] == "in_progress":
+            bucket = "reopened" if k["reopened"] else "in_progress"
+        else:
+            bucket = vulnerability_service.derive_fix_status(
+                k["status"], k["reason"], datetime.now(timezone.utc) if k["reopened"] else None
+            )
+        for counts in (total, by_repo.setdefault(k["repo"], VulnerabilityCounts())):
+            setattr(counts, bucket, getattr(counts, bucket) + g["n"])
+    return VulnerabilitySummaryResponse(**total.model_dump(), by_repo=by_repo)
 
 
 @router.get(

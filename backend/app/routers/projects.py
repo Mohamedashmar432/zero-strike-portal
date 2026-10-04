@@ -78,8 +78,24 @@ def _to_project_response(
     )
 
 
-def _to_project_repo_response(repo: ProjectRepo) -> ProjectRepoResponse:
+def _to_project_repo_response(
+    repo: ProjectRepo, overview: repo_sync_service.SyncOverview | None = None
+) -> ProjectRepoResponse:
+    sync = (
+        {
+            "scanned_commit": overview.scanned_commit,
+            "scanned_branch": overview.scanned_branch,
+            "last_synced_at": overview.last_synced_at,
+            "active_scan_id": overview.active_scan_id,
+            "sync_state": overview.sync_state,
+        }
+        if overview
+        else {}
+    )
     return ProjectRepoResponse(
+        remote_head_sha=repo.remote_head_sha,
+        last_sync_error=repo.last_sync_error,
+        **sync,
         id=str(repo.id),
         project_id=repo.project_id,
         provider=repo.provider,
@@ -324,7 +340,8 @@ async def list_project_repos(project_id: str, user: User = Depends(get_current_u
     await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)
     repos = await project_repo_service.list_repos(project_id)
-    return [_to_project_repo_response(r) for r in repos]
+    overviews = await repo_sync_service.sync_overviews(project_id, repos)
+    return [_to_project_repo_response(r, overviews.get(str(r.id))) for r in repos]
 
 
 @router.post("/{project_id}/repos", response_model=ProjectRepoResponse, status_code=status.HTTP_201_CREATED)
@@ -408,7 +425,9 @@ async def sync_project_repo(
         outcome=result.outcome,
         scan_id=result.scan_id,
         remote_head_sha=result.remote_head_sha,
-        repo=_to_project_repo_response(result.repo),
+        repo=_to_project_repo_response(
+            result.repo, (await repo_sync_service.sync_overviews(project_id, [result.repo]))[repo_id]
+        ),
     )
 
 

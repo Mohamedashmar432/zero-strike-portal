@@ -7,6 +7,7 @@ reconcile_scan when that scan ingests, so a failed scan can never mark anything 
 """
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -51,6 +52,71 @@ async def latest_completed_scan(repo: ProjectRepo) -> Scan | None:
     completed = await Scan.find(Scan.project_id == repo.project_id, Scan.status == "completed").to_list()
     scoped = [s for s in completed if resolve(s) == str(repo.id)]
     return max(scoped, key=lambda s: s.created_at, default=None)
+
+
+@dataclass(frozen=True)
+class SyncOverview:
+    scanned_commit: str | None
+    scanned_branch: str | None
+    last_synced_at: datetime | None
+    active_scan_id: str | None
+    sync_state: str  # syncing | up_to_date | behind | error | never | unknown
+
+
+async def sync_overviews(project_id: str, repos: list[ProjectRepo]) -> dict[str, SyncOverview]:
+    """Per-repo sync state for a project, from one lightweight scan query (no findings, no tokens).
+
+    never      -- no completed scan of the repo yet
+    unknown    -- scanned, but the remote head or the scanned commit is not known to compare
+    behind     -- remote head differs from the scanned commit/branch
+    up_to_date -- remote head equals the scanned commit on the selected branch
+    error/syncing take precedence: the last head check failed / a scan is queued or running.
+    """
+    resolve = stats_svc.repo_key_resolver(repos)
+    rows = (
+        await Scan.get_pymongo_collection()
+        .find(
+            {"project_id": project_id, "status": {"$in": ["completed", "queued", "running"]}},
+            {"status": 1, "git_commit": 1, "branch": 1, "completed_at": 1, "created_at": 1,
+             "project_repo_id": 1, "repo_url": 1},
+        )
+        .sort("created_at", -1)
+        .to_list(length=None)
+    )
+    latest: dict[str, dict] = {}
+    active: dict[str, str] = {}
+    for row in rows:  # newest first
+        key = resolve(SimpleNamespace(project_repo_id=row.get("project_repo_id"), repo_url=row.get("repo_url")))
+        if row["status"] == "completed":
+            latest.setdefault(key, row)
+        else:
+            active.setdefault(key, str(row["_id"]))
+
+    out: dict[str, SyncOverview] = {}
+    for repo in repos:
+        key = str(repo.id)
+        last = latest.get(key)
+        commit, branch = (last.get("git_commit"), last.get("branch")) if last else (None, None)
+        if key in active:
+            state = "syncing"
+        elif repo.last_sync_error:
+            state = "error"
+        elif last is None:
+            state = "never"
+        elif not repo.remote_head_sha or not commit:
+            state = "unknown"
+        else:
+            state = "up_to_date" if commit == repo.remote_head_sha and branch == repo.selected_branch else "behind"
+        stamps = [t for t in (last.get("completed_at") if last else None,
+                              None if repo.last_sync_error else repo.remote_head_checked_at) if t]
+        out[key] = SyncOverview(
+            scanned_commit=commit,
+            scanned_branch=branch,
+            last_synced_at=max(stamps, key=lambda t: t.replace(tzinfo=None)) if stamps else None,
+            active_scan_id=active.get(key),
+            sync_state=state,
+        )
+    return out
 
 
 async def sync_repo(project: Project, repo: ProjectRepo, user: User, *, force: bool = False) -> SyncResult:

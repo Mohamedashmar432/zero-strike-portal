@@ -772,3 +772,73 @@ def test_legacy_comment_with_no_vulnerability_id_still_renders(client):
 
     comments = client.get(f"/api/v1/findings/{finding.id}/comments", headers=headers).json()["items"]
     assert any(c["body"] == "pre-fix legacy comment" for c in comments)
+
+
+
+# --- fix_status, commit fields and the summary (docs/REPO_SYNC.md) ------------------------
+
+
+def _patch_vuln(project_id, fingerprint, **fields):
+    async def _do():
+        v = await Vulnerability.find_one(
+            Vulnerability.project_id == project_id, Vulnerability.fingerprint == fingerprint
+        )
+        for k, val in fields.items():
+            setattr(v, k, val)
+        await v.save()
+
+    asyncio.run(_do())
+
+
+def test_fix_status_filter_summary_and_commit_fields(client):
+    owner = register_and_login(client, email="vuln-fixstatus@zs.dev")
+    headers = _headers(owner)
+    pid = _create_project(client, headers)["id"]
+    t0 = datetime.now(timezone.utc) - timedelta(hours=2)
+    names = ("open", "reopen", "fixed", "risk", "fp", "wip")
+    _seed_and_reconcile(pid, [{"fingerprint": f"fp-{n}"} for n in names], created_at=t0)
+    now = datetime.now(timezone.utc)
+    _patch_vuln(pid, "fp-reopen", reopened_at=now)
+    _patch_vuln(pid, "fp-fixed", status="resolved", resolution_reason="fixed", resolved_at=now,
+                fixed_commit="c2", fixed_branch="main", fixed_scan_id="s2")
+    _patch_vuln(pid, "fp-risk", status="accepted_risk")
+    _patch_vuln(pid, "fp-fp", status="resolved", resolution_reason="false_positive", resolved_at=now)
+    _patch_vuln(pid, "fp-wip", status="in_progress")
+    url = VULN_URL.format(project_id=pid)
+
+    def fps(q):
+        r = client.get(f"{url}?fix_status={q}", headers=headers)
+        assert r.status_code == 200
+        return sorted(i["fingerprint"] for i in r.json()["items"])
+
+    assert fps("open") == ["fp-open", "fp-wip"]
+    assert fps("reopened") == ["fp-reopen"]
+    assert fps("fixed") == ["fp-fixed"]
+    assert fps("dismissed") == ["fp-fp", "fp-risk"]
+    assert client.get(f"{url}?fix_status=bogus", headers=headers).status_code == 422
+
+    items = {i["fingerprint"]: i for i in client.get(url, headers=headers).json()["items"]}
+    assert items["fp-fixed"]["fix_status"] == "fixed"
+    assert items["fp-fixed"]["fixed_commit"] == "c2" and items["fp-fixed"]["fixed_scan_id"] == "s2"
+    assert items["fp-risk"]["fix_status"] == "dismissed"
+    assert "first_seen_commit" in items["fp-open"]
+
+    body = client.get(f"{url}/summary", headers=headers).json()
+    assert (body["open"], body["in_progress"], body["reopened"], body["fixed"], body["dismissed"]) == (1, 1, 1, 1, 2)
+    (only_scope,) = body["by_repo"].values()
+    assert only_scope["fixed"] == 1 and only_scope["dismissed"] == 2
+
+
+def test_summary_scopes_by_repo_and_requires_membership(client):
+    owner = register_and_login(client, email="vuln-summary@zs.dev")
+    headers = _headers(owner)
+    pid = _create_project(client, headers)["id"]
+    _seed_and_reconcile(pid, [{"fingerprint": "fp-a"}, {"fingerprint": "fp-b"}])
+    url = VULN_URL.format(project_id=pid)
+
+    body = client.get(f"{url}/summary?repo=no-such-scope", headers=headers).json()
+    assert body["open"] == 0 and body["by_repo"] == {}
+    assert client.get(f"{url}/summary", headers=headers).json()["open"] == 2
+
+    outsider = _headers(register_and_login(client, email="vuln-summary-out@zs.dev"))
+    assert client.get(f"{url}/summary", headers=outsider).status_code in (403, 404)
