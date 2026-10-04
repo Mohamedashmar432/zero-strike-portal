@@ -17,6 +17,7 @@ import base64
 import contextlib
 import ipaddress
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -283,6 +284,20 @@ async def _clone(
     await _do_clone()
 
 
+async def _stamp_head_commit(scan: Scan, workdir: str) -> None:
+    """Record the cloned HEAD on the scan when it has no commit yet, so lifecycle transitions can
+    say which commit they were observed in. Best-effort: a scan without a commit is still a scan."""
+    if scan.git_commit:
+        return
+    try:
+        rc, out, _err = await _run(["git", "-C", workdir, "rev-parse", "HEAD"], 30)
+    except CloudScanError:
+        return
+    sha = out.decode(errors="replace").strip()
+    if rc == 0 and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
+        scan.git_commit = sha
+
+
 # Vendored/generated content inflates parse + taint-analysis memory without adding real
 # findings (it's third-party or machine-generated, not code the user owns) -- excluded by
 # default on every cloud scan. --exclude-dir matches directory names anywhere in the tree.
@@ -439,6 +454,7 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
             pinned_ips = validate_repo_url(scan.repo_url)
             await _stage(scan, "cloning")
             await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme, pinned_ips)
+            await _stamp_head_commit(scan, workdir)
             await _stage(scan, "scanning")
             await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
     except Exception as e:

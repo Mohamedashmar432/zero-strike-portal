@@ -331,6 +331,12 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         json_uploaded_at=now,
     ).insert()
 
+    # Stamped before reconcile so lifecycle transitions record the commit/branch they were observed
+    # in; the report's own commit/branch win, a cloud scan's post-clone rev-parse is the fallback.
+    scan.scanner_version = report.scanner_version or scan.scanner_version
+    scan.git_commit = report.git_commit or scan.git_commit
+    scan.branch = report.branch or scan.branch
+
     # Reconciliation must never fail the ingest -- a scan that produced a valid report has
     # completed whether or not its findings could be linked to cross-scan Vulnerability rows.
     # insert_many doesn't reliably populate ids on the local Finding objects across Beanie
@@ -339,13 +345,15 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         from app.services import vulnerability_service
 
         inserted_findings = await Finding.find(Finding.scan_id == scan_id).to_list()
-        await vulnerability_service.reconcile_scan(scan, inserted_findings)
+        unanalyzed = {
+            normalize_finding_path(d.location.file, report.root_path)
+            for d in report.diagnostics
+            if d.severity == "error" and d.location and d.location.file
+        }
+        await vulnerability_service.reconcile_scan(scan, inserted_findings, unanalyzed_files=unanalyzed)
     except Exception:
         logger.exception("vulnerability reconciliation failed", scan_id=scan_id)
 
-    scan.scanner_version = report.scanner_version or scan.scanner_version
-    scan.git_commit = report.git_commit or scan.git_commit
-    scan.branch = report.branch or scan.branch
     scan.hostname = report.hostname or scan.hostname
     if scan.started_at is None:
         scan.started_at = report.started_at or now

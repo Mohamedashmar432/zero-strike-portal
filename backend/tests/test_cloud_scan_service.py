@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -126,7 +127,7 @@ def test_cloud_scan_transient_clone_error_retries_then_succeeds(client, monkeypa
     calls = {"clone": 0}
 
     def fake_run(cmd, **kwargs):
-        if cmd[0] == "git":
+        if cmd[0] == "git" and cmd[1] == "clone":
             calls["clone"] += 1
             if calls["clone"] < 2:
                 return _FakeCompleted(128, b"", b"fatal: Connection reset by peer")
@@ -510,5 +511,51 @@ def test_heartbeat_stops_with_the_work_it_describes(client, monkeypatch):
         after = (await Scan.get(scan.id)).updated_at
         await asyncio.sleep(0.05)
         assert (await Scan.get(scan.id)).updated_at == after
+
+    asyncio.run(run())
+
+
+def _fixture_without_commit() -> bytes:
+    # The report's own commit outranks the post-clone rev-parse, so drop it to isolate the fallback.
+    data = json.loads(_FIXTURE.read_bytes())
+    data.pop("GitCommit", None)
+    return json.dumps(data).encode()
+
+
+def test_cloud_scan_stamps_head_commit_after_clone(client, monkeypatch, tmp_path):
+    sha = "a" * 40
+    monkeypatch.setattr(css.settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(css, "validate_repo_url", lambda url: None)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git" and "rev-parse" in cmd:
+            return _FakeCompleted(0, (sha + "\n").encode(), b"")
+        if cmd[0] == "git":
+            return _FakeCompleted(0, b"", b"")
+        return _FakeCompleted(1, _fixture_without_commit(), b"")
+
+    monkeypatch.setattr(css.subprocess, "Popen", _as_popen(fake_run))
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "completed"
+        assert reloaded.git_commit == sha
+
+    asyncio.run(run())
+
+
+def test_cloud_scan_ignores_unusable_rev_parse_output(client, monkeypatch, tmp_path):
+    _patch_subprocess(monkeypatch, tmp_path, scan_stdout=_fixture_without_commit())  # empty rev-parse
+
+    async def run():
+        scan = _make_cloud_scan()
+        await scan.insert()
+        await css.run_cloud_scan(str(scan.id))
+        reloaded = await Scan.get(scan.id)
+        assert reloaded.status == "completed"
+        assert reloaded.git_commit is None
 
     asyncio.run(run())
