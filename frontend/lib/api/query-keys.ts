@@ -42,6 +42,8 @@ export const queryKeys = {
     policy: (projectId: string) => ["projects", projectId, "policy"] as const,
     vulnerabilities: (projectId: string, filters: Record<string, unknown>) =>
       ["projects", projectId, "vulnerabilities", filters] as const,
+    vulnerabilitySummary: (projectId: string, repo?: string) =>
+      ["projects", projectId, "vulnerabilities", "summary", repo ?? ""] as const,
     vulnerability: (projectId: string, vulnerabilityId: string) =>
       ["projects", projectId, "vulnerabilities", vulnerabilityId] as const,
   },

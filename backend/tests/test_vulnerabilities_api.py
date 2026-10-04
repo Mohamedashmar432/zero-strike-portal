@@ -37,7 +37,8 @@ def _invite(client, headers, project_id, email, role="collaborator"):
     assert r.status_code == 201
 
 
-def _seed_and_reconcile(project_id, specs, *, status="completed", created_at=None, project_repo_id=None):
+def _seed_and_reconcile(project_id, specs, *, status="completed", created_at=None, project_repo_id=None,
+                        git_commit=None, branch=None, scanner_version=None):
     """Insert a Scan + its Findings directly, then run the real reconcile_scan over them --
     exactly what report_ingestion_service.ingest() does after a real scan. Returns
     (scan_id, {fingerprint: Finding})."""
@@ -49,6 +50,9 @@ def _seed_and_reconcile(project_id, specs, *, status="completed", created_at=Non
             scan_type="cloud",
             status=status,
             project_repo_id=project_repo_id,
+            git_commit=git_commit,
+            branch=branch,
+            scanner_version=scanner_version,
             created_at=now,
             updated_at=now,
         )
@@ -548,6 +552,30 @@ def test_regression_endpoint_buckets_and_baseline(client):
     body = r.json()
     assert body["reopened"]["count"] == 1
     assert body["reopened"]["items"][0]["fingerprint"] == "fp-a"
+
+
+def test_regression_reports_commit_range_and_notices(client):
+    owner = register_and_login(client, email="vuln-regression-commits@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+    t0 = datetime.now(timezone.utc)
+    url = "/api/v1/projects/{p}/scans/{s}/regression"
+
+    s1, _ = _seed_and_reconcile(project["id"], [{"fingerprint": "fp-a"}], created_at=t0,
+                                git_commit="a" * 40, branch="main", scanner_version="1.0.0")
+    body = client.get(url.format(p=project["id"], s=s1), headers=headers).json()
+    assert body["commit"] == "a" * 40 and body["branch"] == "main"
+    assert body["baseline_commit"] is None and body["baseline_branch"] is None
+    assert body["baseline_branch_mismatch"] is False
+    assert body["scanner_version_changed"] is False
+
+    s2, _ = _seed_and_reconcile(project["id"], [{"fingerprint": "fp-a"}],
+                                created_at=t0 + timedelta(minutes=5),
+                                git_commit="b" * 40, branch="release", scanner_version="1.1.0")
+    body = client.get(url.format(p=project["id"], s=s2), headers=headers).json()
+    assert body["baseline_commit"] == "a" * 40 and body["baseline_branch"] == "main"
+    assert body["baseline_branch_mismatch"] is True
+    assert body["scanner_version_changed"] is True
 
 
 def test_regression_scan_not_in_project_is_404(client):

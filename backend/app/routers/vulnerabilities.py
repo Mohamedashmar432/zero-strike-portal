@@ -523,6 +523,19 @@ async def get_scan_regression(
         baseline_scan_id=str(baseline.id) if baseline else None,
         has_baseline=baseline is not None,
         is_latest_for_scope=is_latest,
+        commit=scan.git_commit,
+        branch=scan.branch,
+        baseline_commit=baseline.git_commit if baseline else None,
+        baseline_branch=baseline.branch if baseline else None,
+        baseline_branch_mismatch=bool(
+            baseline and baseline.branch and scan.branch and baseline.branch != scan.branch
+        ),
+        scanner_version_changed=bool(
+            baseline
+            and baseline.scanner_version
+            and scan.scanner_version
+            and baseline.scanner_version != scan.scanner_version
+        ),
         new=RegressionBucket(count=counts["new"], items=buckets["new"]),
         unchanged=RegressionBucket(count=counts["unchanged"], items=buckets["unchanged"]),
         reopened=RegressionBucket(count=counts["reopened"], items=buckets["reopened"]),

@@ -21,7 +21,7 @@ export type Scan = {
   id: string;
   project_id: string;
   scan_type: ScanType;
-  triggered_by: "cli" | "ci" | "cloud" | "manual";
+  triggered_by: "cli" | "ci" | "cloud" | "manual" | "sync";
   status: ScanStatus;
   api_key_id: string | null;
   scanner_version: string | null;

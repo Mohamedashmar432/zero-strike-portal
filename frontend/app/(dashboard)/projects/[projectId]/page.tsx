@@ -1,21 +1,30 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
-import { listProjectRepos, reauthProjectRepo, removeProjectRepo } from "@/lib/api/project-repos";
+import {
+  listProjectRepos,
+  reauthProjectRepo,
+  refetchWhileAnyRepoSyncing,
+  removeProjectRepo,
+  shortSha,
+  syncProjectRepo,
+  type ProjectRepo,
+} from "@/lib/api/project-repos";
+import { getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
 import { getProject, getProjectScanActivity, hasCompletedScan } from "@/lib/api/projects";
 import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
-import { createCloudScan, listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
+import { listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
 import {
   createApiKeySchema,
   inviteMemberSchema,
@@ -24,6 +33,7 @@ import {
 } from "@/lib/validation/project.schema";
 import { reauthRepoSchema, type ReauthRepoInput } from "@/lib/validation/repo-credential.schema";
 import { DataTableCard } from "@/components/common/data-table-card";
+import { RelativeTime } from "@/components/common/relative-time";
 import { EmptyState } from "@/components/common/empty-state";
 import { FilterBar } from "@/components/common/filter-bar";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
@@ -44,7 +54,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Activity, ChevronDown, Play, ShieldAlert, Swords } from "lucide-react";
+import { Activity, ChevronDown, Loader2, Play, RefreshCw, ShieldAlert, Swords } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -396,6 +406,16 @@ function MembersTab({ projectId, myRole }: { projectId: string; myRole: string |
   );
 }
 
+/** Everything a finished sync can change: repos, vulnerabilities (+ summary), stats and scans. */
+function invalidateSyncViews(queryClient: QueryClient, projectId: string) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+  queryClient.invalidateQueries({ queryKey: ["projects", projectId, "vulnerabilities"] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.projects.stats() });
+  queryClient.invalidateQueries({ queryKey: queryKeys.projects.scanActivity(projectId) });
+  queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats() });
+  queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
+}
+
 function ScansTab({ projectId }: { projectId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.projects.scans(projectId),
@@ -496,11 +516,24 @@ function ScansTab({ projectId }: { projectId: string }) {
               return (
                 <TableRow key={s.id}>
                   <TableCell>
-                    <ScanTypeBadge scanType={s.scan_type} />
+                    <div className="flex flex-col items-start gap-1">
+                      <ScanTypeBadge scanType={s.scan_type} />
+                      {s.triggered_by === "sync" && (
+                        <Badge variant="secondary" className="font-mono uppercase">
+                          Sync
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>{s.scan_label || "—"}</TableCell>
                   <TableCell className="max-w-48 truncate font-mono text-xs" title={repoLabel(s)}>
                     {repoLabel(s)}
+                    {s.git_commit && (
+                      <span className="block text-muted-foreground" title={s.git_commit}>
+                        {s.branch ? `${s.branch}@` : ""}
+                        {shortSha(s.git_commit)}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
@@ -592,12 +625,39 @@ function ReauthDialog({
 
 function RepositoriesTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const router = useRouter();
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
+    // Poll while any repo has a queued/running sync scan so the row leaves "Syncing" by itself.
+    refetchInterval: refetchWhileAnyRepoSyncing(),
   });
+  const { data: summary } = useQuery({
+    queryKey: queryKeys.projects.vulnerabilitySummary(projectId),
+    queryFn: () => getVulnerabilitySummary(projectId),
+  });
+
+  // A sync that finished since the last poll: refresh everything it touched and say so.
+  // Tracks the previous sync_state per repo so loading the page on an idle repo stays quiet.
+  const prevSync = useRef<Map<string, ProjectRepo["sync_state"]>>(new Map());
+  useEffect(() => {
+    if (!data) return;
+    let finished = false;
+    for (const r of data) {
+      if (prevSync.current.get(r.id) === "syncing" && r.sync_state !== "syncing") {
+        finished = true;
+        if (r.sync_state === "error") {
+          toast.error(
+            `Sync of ${r.label || r.repo_full_name} failed${r.last_sync_error ? `: ${r.last_sync_error}` : ""}`
+          );
+        } else {
+          toast.success(`Sync of ${r.label || r.repo_full_name} finished`);
+        }
+      }
+      prevSync.current.set(r.id, r.sync_state);
+    }
+    if (finished) invalidateSyncViews(queryClient, projectId);
+  }, [data, queryClient, projectId]);
 
   const remove = useMutation({
     mutationFn: (repoId: string) => removeProjectRepo(projectId, repoId),
@@ -608,14 +668,26 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to disconnect repository"),
   });
 
-  const scan = useMutation({
-    mutationFn: (repoId: string) => createCloudScan(projectId, { project_repo_id: repoId }),
-    onSuccess: (createdScan) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
-      toast.success("Scan started");
-      router.push(`/projects/${projectId}/scans/${createdScan.id}`);
+  const sync = useMutation({
+    mutationFn: ({ repoId, force }: { repoId: string; force?: boolean }) =>
+      syncProjectRepo(projectId, repoId, force ?? false),
+    onSuccess: (res, { repoId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      if (res.outcome === "up_to_date") {
+        toast.success(`Already up to date at ${shortSha(res.remote_head_sha)}`, {
+          action: { label: "Rescan anyway", onClick: () => sync.mutate({ repoId, force: true }) },
+        });
+      } else if (res.outcome === "already_syncing") {
+        toast.info("A sync is already running for this repository");
+      } else {
+        toast.success("Sync started");
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
+      }
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start scan"),
+    onError: (err) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      toast.error(err instanceof ApiError ? err.message : "Failed to sync repository");
+    },
   });
 
   return (
@@ -646,11 +718,18 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
               <TableHead>Repo</TableHead>
               <TableHead>Provider</TableHead>
               <TableHead>Branch</TableHead>
+              <TableHead>Head</TableHead>
+              <TableHead>Last synced</TableHead>
+              <TableHead>Open / Fixed</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.map((r) => (
+            {data?.map((r) => {
+              const counts = summary?.by_repo[r.id];
+              const syncing =
+                r.sync_state === "syncing" || (sync.isPending && sync.variables?.repoId === r.id);
+              return (
               <TableRow key={r.id}>
                 <TableCell className="font-mono text-xs">
                   {r.label ? `${r.label} — ${r.repo_full_name}` : r.repo_full_name}
@@ -661,14 +740,64 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
                   </Badge>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{r.selected_branch}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {r.sync_state === "behind" && r.scanned_commit ? (
+                    <span title="The remote branch has commits that were not scanned yet">
+                      {shortSha(r.scanned_commit)} → {shortSha(r.remote_head_sha)}
+                    </span>
+                  ) : r.scanned_commit ? (
+                    shortSha(r.scanned_commit)
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                  {r.sync_state === "behind" && (
+                    <Badge variant="secondary" className="ml-2 font-mono uppercase">
+                      Behind
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {r.last_synced_at ? (
+                    <RelativeTime iso={r.last_synced_at} />
+                  ) : (
+                    <span className="text-muted-foreground">Never</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {counts ? (
+                    <Link
+                      href={`/projects/${projectId}/vulnerabilities?repo=${r.id}`}
+                      className="font-mono underline-offset-4 hover:underline hover:text-primary"
+                    >
+                      {counts.open + counts.in_progress + counts.reopened} / {counts.fixed}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
                     <Button
                       size="sm"
-                      onClick={() => scan.mutate(r.id)}
-                      disabled={scan.isPending}
+                      onClick={() => sync.mutate({ repoId: r.id })}
+                      disabled={syncing}
+                      title={
+                        r.sync_state === "error" && r.last_sync_error
+                          ? r.last_sync_error
+                          : "Check the remote branch and scan it if there is anything new"
+                      }
                     >
-                      {scan.isPending && scan.variables === r.id ? "Starting…" : "Scan"}
+                      {syncing ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                          Syncing…
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="size-3.5" aria-hidden="true" />
+                          {r.sync_state === "error" ? "Retry" : "Sync"}
+                        </>
+                      )}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setReauthTargetId(r.id)}>
                       Re-authenticate
@@ -684,7 +813,8 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
                   </div>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </DataTableCard>

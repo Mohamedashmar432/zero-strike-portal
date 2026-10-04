@@ -9,6 +9,8 @@ import type { PriorityTier } from "@/lib/priority";
 export type VulnerabilityStatus = "open" | "in_progress" | "resolved" | "accepted_risk";
 export type ResolutionReason = "fixed" | "false_positive" | "duplicate" | "wont_fix" | "not_reproducible";
 export type RegressionState = "new" | "unchanged" | "reopened" | "fixed";
+// Derived server-side (never stored): open | reopened | fixed | dismissed.
+export type FixStatus = "open" | "reopened" | "fixed" | "dismissed";
 
 // project_stats_service._UNLINKED -- the sentinel repo_scope_key for scans matching no
 // connected repo. Vulnerability.repo_scope_key uses the same sentinel (see the model's
@@ -49,6 +51,17 @@ export type Vulnerability = {
   // What the most recent reconciliation did with this row -- advisory only, see the model.
   last_regression_state: RegressionState | null;
   last_regression_scan_id: string | null;
+
+  fix_status: FixStatus;
+  // Commit/branch each transition was observed in; null on legacy rows.
+  first_seen_commit: string | null;
+  first_seen_branch: string | null;
+  first_seen_scan_id: string | null;
+  last_seen_commit: string | null;
+  fixed_commit: string | null;
+  fixed_branch: string | null;
+  fixed_scan_id: string | null;
+  reopened_commit: string | null;
 
   created_at: string;
   updated_at: string;
@@ -94,6 +107,13 @@ export type ScanRegressionResponse = {
    * scans re-observe its findings — those zeros must not be rendered as "nothing changed".
    */
   is_latest_for_scope: boolean;
+  commit: string | null;
+  branch: string | null;
+  baseline_commit: string | null;
+  baseline_branch: string | null;
+  /** Baseline ran on another branch, so this scan marked nothing fixed. */
+  baseline_branch_mismatch: boolean;
+  scanner_version_changed: boolean;
   new: RegressionBucket;
   unchanged: RegressionBucket;
   reopened: RegressionBucket;
@@ -108,6 +128,7 @@ export type VulnerabilityListFilters = {
   repo?: string;
   assigneeUserId?: string;
   regressionState?: RegressionState;
+  fixStatus?: FixStatus;
   /** Matches rule name, message, or fingerprint. */
   search?: string;
   page?: number;
@@ -150,6 +171,7 @@ export function listVulnerabilities(projectId: string, filters: VulnerabilityLis
   if (filters.repo) params.set("repo", filters.repo);
   if (filters.assigneeUserId) params.set("assignee_user_id", filters.assigneeUserId);
   if (filters.regressionState) params.set("regression_state", filters.regressionState);
+  if (filters.fixStatus) params.set("fix_status", filters.fixStatus);
   if (filters.search) params.set("search", filters.search);
   params.set("page", String(filters.page ?? 1));
   params.set("page_size", String(filters.pageSize ?? 25));
@@ -190,4 +212,22 @@ export function updateVulnerabilityAssignment(
 
 export function getScanRegression(projectId: string, scanId: string) {
   return apiFetch<ScanRegressionResponse>(`/projects/${projectId}/scans/${scanId}/regression`);
+}
+
+export type VulnerabilityCounts = {
+  open: number;
+  in_progress: number;
+  reopened: number;
+  fixed: number;
+  dismissed: number;
+};
+
+export type VulnerabilitySummary = VulnerabilityCounts & {
+  /** Keyed by project_repo_id or UNLINKED_REPO_KEY. */
+  by_repo: Record<string, VulnerabilityCounts>;
+};
+
+export function getVulnerabilitySummary(projectId: string, repo?: string) {
+  const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+  return apiFetch<VulnerabilitySummary>(`/projects/${projectId}/vulnerabilities/summary${qs}`);
 }
