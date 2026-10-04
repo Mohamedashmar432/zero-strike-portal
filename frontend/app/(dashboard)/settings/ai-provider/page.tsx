@@ -10,6 +10,7 @@ import { RequireRole } from "@/components/auth/require-role";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
+import { KeyStorageBadge } from "@/components/common/key-storage-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -374,6 +375,7 @@ function AiProvidersPanel() {
                   <div className="space-y-1">
                     <Badge variant="secondary">{PROVIDER_LABELS[p.provider]}</Badge>
                     <p className="font-mono text-xs text-muted-foreground">{p.model_name ?? "—"}</p>
+                    <KeyStorageBadge storage={p.key_storage} secretName={p.key_vault_secret_name} />
                   </div>
                 </TableCell>
                 <TableCell>

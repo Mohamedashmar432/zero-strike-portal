@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { KeyStorageBadge } from "@/components/common/key-storage-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -184,9 +185,11 @@ export function ProjectAiProviderCard({
                       </Badge>
                     )}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {config.provider}
-                    {config.model_name ? ` · ${config.model_name}` : ""} ·{" "}
+                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+                    <span className="truncate">
+                      {config.provider}
+                      {config.model_name ? ` · ${config.model_name}` : ""} ·
+                    </span>
                     {config.has_api_key ? (
                       <span className="inline-flex items-center gap-1">
                         <KeyRound className="size-3" />
@@ -195,6 +198,10 @@ export function ProjectAiProviderCard({
                     ) : (
                       "no key"
                     )}
+                    <KeyStorageBadge
+                      storage={config.key_storage}
+                      secretName={config.key_vault_secret_name}
+                    />
                   </p>
                 </div>
                 {canManage && (

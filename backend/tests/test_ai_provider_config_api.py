@@ -14,6 +14,32 @@ def _create_body(name="Test Provider", api_key="sk-test"):
     return {"name": name, "provider": "openai", "model_name": "gpt-4o", "api_key": api_key}
 
 
+def test_key_storage_reports_where_the_key_lives(client):
+    import asyncio
+
+    from beanie import PydanticObjectId
+
+    from app.models.ai_provider_config import AIProviderConfig
+
+    admin_headers = _admin_headers(client, email="prov-admin-ks@zerostrike.dev")
+    created = client.post(BASE, json=_create_body(), headers=admin_headers).json()
+    # Vault URL is unset in tests, so a new key lands in the encrypted database column.
+    assert created["key_storage"] == "encrypted_database"
+    assert created["key_vault_secret_name"] is None
+
+    async def _set_secret_name():
+        doc = await AIProviderConfig.get(PydanticObjectId(created["id"]))
+        doc.api_key_secret_name = "ai-key-demo"
+        doc.api_key_encrypted = None
+        await doc.save()
+
+    asyncio.run(_set_secret_name())
+    fetched = client.get(f"{BASE}/{created['id']}", headers=admin_headers).json()
+    assert fetched["key_storage"] == "key_vault"
+    assert fetched["key_vault_secret_name"] == "ai-key-demo"
+    assert "api_key_encrypted" not in fetched
+
+
 def test_non_admin_forbidden_on_all_routes(client):
     user = register_and_login(client, email="prov-user@zerostrike.dev")
     headers = _headers(user)

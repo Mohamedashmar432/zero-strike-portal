@@ -38,6 +38,9 @@ class AIProviderConfigResponse(BaseModel):
     temperature: float
     is_active: bool
     has_api_key: bool  # never the encrypted or raw key itself
+    # Where the key lives. Read-only; the secret NAME is safe to show, the value never is.
+    key_storage: Literal["key_vault", "encrypted_database", "none"]
+    key_vault_secret_name: str | None
     total_requests: int
     total_failed_requests: int
     total_prompt_tokens: int
@@ -53,6 +56,12 @@ class AIProviderConfigResponse(BaseModel):
         """The one place an AIProviderConfig becomes a response. Both the admin router and the
         per-project BYOK routes go through it, so the has_api_key-instead-of-the-key rule and the
         UTC normalization can't drift apart between them."""
+        if config.api_key_secret_name:
+            key_storage = "key_vault"
+        elif config.api_key_encrypted:
+            key_storage = "encrypted_database"
+        else:
+            key_storage = "none"
         return cls(
             id=str(config.id),
             name=config.name,
@@ -63,6 +72,8 @@ class AIProviderConfigResponse(BaseModel):
             temperature=config.temperature,
             is_active=config.is_active,
             has_api_key=ai_provider_config_service.has_api_key(config),
+            key_storage=key_storage,
+            key_vault_secret_name=config.api_key_secret_name or None,
             total_requests=config.total_requests,
             total_failed_requests=config.total_failed_requests,
             total_prompt_tokens=config.total_prompt_tokens,

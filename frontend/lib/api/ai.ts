@@ -34,6 +34,9 @@ export type AiProviderConfig = {
   // The raw/encrypted API key is never returned -- this is the only signal any UI gets
   // about whether one is already configured server-side.
   has_api_key: boolean;
+  // Read-only: where the key lives. The secret NAME (never the value) is safe to show.
+  key_storage: "key_vault" | "encrypted_database" | "none";
+  key_vault_secret_name: string | null;
   total_requests: number;
   total_failed_requests: number;
   total_prompt_tokens: number;

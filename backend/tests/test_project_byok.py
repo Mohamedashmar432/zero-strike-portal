@@ -96,6 +96,36 @@ def test_owner_can_manage_a_project_key_and_it_is_never_returned(client):
     assert client.get(base, headers=_headers(owner)).json() == []
 
 
+def test_project_key_storage_is_reported(client):
+    import asyncio
+
+    from beanie import PydanticObjectId
+
+    from app.models.ai_provider_config import AIProviderConfig
+
+    admin_headers = _admin_headers(client, email="byok-admin-ks@zerostrike.dev")
+    _enable_byok(client, admin_headers)
+    owner = register_and_login(client, email="byok-owner-ks@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    base = f"/api/v1/projects/{project['id']}/ai-provider"
+
+    body = client.post(base, json=_provider_body(), headers=_headers(owner)).json()
+    assert body["key_storage"] == "encrypted_database"
+    assert body["key_vault_secret_name"] is None
+
+    async def _set_secret_name():
+        doc = await AIProviderConfig.get(PydanticObjectId(body["id"]))
+        doc.api_key_secret_name = "ai-key-project"
+        doc.api_key_encrypted = None
+        await doc.save()
+
+    asyncio.run(_set_secret_name())
+    listed = client.get(base, headers=_headers(owner)).json()
+    assert listed[0]["key_storage"] == "key_vault"
+    assert listed[0]["key_vault_secret_name"] == "ai-key-project"
+    assert "api_key_encrypted" not in listed[0]
+
+
 def test_collaborator_can_read_but_not_manage(client):
     admin_headers = _admin_headers(client, email="byok-admin2@zerostrike.dev")
     _enable_byok(client, admin_headers)

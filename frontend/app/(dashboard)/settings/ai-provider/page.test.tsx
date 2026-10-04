@@ -54,6 +54,8 @@ function makeProvider(overrides: Partial<AiProviderConfig> = {}): AiProviderConf
     temperature: 0.2,
     is_active: true,
     has_api_key: true,
+    key_storage: "encrypted_database",
+    key_vault_secret_name: null,
     total_requests: 0,
     total_failed_requests: 0,
     total_prompt_tokens: 0,

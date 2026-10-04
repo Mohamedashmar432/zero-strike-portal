@@ -24,6 +24,8 @@ const KEY = {
   base_url: null,
   is_active: true,
   has_api_key: true,
+  key_storage: "encrypted_database",
+  key_vault_secret_name: null,
 } as unknown as AiProviderConfig;
 
 function setup() {
