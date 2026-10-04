@@ -675,7 +675,7 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
       if (res.outcome === "up_to_date") {
         toast.success(`Already up to date at ${shortSha(res.remote_head_sha)}`, {
-          action: { label: "Rescan anyway", onClick: () => sync.mutate({ repoId, force: true }) },
+          action: { label: "Rescan anyway", onClick: () => runSync({ repoId, force: true }) },
         });
       } else if (res.outcome === "already_syncing") {
         toast.info("A sync is already running for this repository");
@@ -689,6 +689,15 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
       toast.error(err instanceof ApiError ? err.message : "Failed to sync repository");
     },
   });
+
+  // A double-click lands two clicks before React re-renders the button as disabled; without this the
+  // second one reached the API and surfaced a spurious "already in progress" error toast.
+  const syncInFlight = useRef(false);
+  const runSync = (vars: { repoId: string; force?: boolean }) => {
+    if (syncInFlight.current) return;
+    syncInFlight.current = true;
+    sync.mutate(vars, { onSettled: () => { syncInFlight.current = false; } });
+  };
 
   return (
     <div className="space-y-4">
@@ -779,7 +788,7 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
                   <div className="flex justify-end gap-2">
                     <Button
                       size="sm"
-                      onClick={() => sync.mutate({ repoId: r.id })}
+                      onClick={() => runSync({ repoId: r.id })}
                       disabled={syncing}
                       title={
                         r.sync_state === "error" && r.last_sync_error
