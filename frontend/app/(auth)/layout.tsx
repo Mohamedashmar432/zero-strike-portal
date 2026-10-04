@@ -1,4 +1,4 @@
-import { ZeroStrikeLogo } from "@/components/brand/logo";
+import { ThinkShieldLogo } from "@/components/brand/logo";
 
 /**
  * Auth shell. Left-aligned brand over a single panel on the dot-grid canvas,
@@ -26,7 +26,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           viewports it drops back into the column so it can never clip. */}
       <div className="relative w-full max-w-sm">
         <div className="mb-5 [@media(min-height:560px)]:absolute [@media(min-height:560px)]:bottom-full [@media(min-height:560px)]:left-0">
-          <ZeroStrikeLogo size="lg" animated />
+          <ThinkShieldLogo size="lg" animated />
         </div>
         {children}
       </div>

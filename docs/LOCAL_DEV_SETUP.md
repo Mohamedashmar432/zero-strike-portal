@@ -1,4 +1,4 @@
-# Running ZeroStrike Portal on localhost
+# Running thinkShield Portal on localhost
 
 Step-by-step guide to get the full stack (backend + frontend + a real MongoDB)
 running on your machine, plus how to log in with seeded test accounts. See

@@ -16,20 +16,17 @@ const sizeMap = {
 };
 
 /**
- * The mark is a slashed zero inside registration ticks.
+ * The mark is a shield crossed by a scan line, inside registration ticks.
  *
- * Why: `0` struck through by a diagonal is the exact glyph feature this app
- * turns on in JetBrains Mono (`ss01`/`zero`, see globals.css) so that O and 0
- * never get confused in a hash, a CVE id or a commit sha. So the logo isn't a
- * metaphor bolted on afterwards — it's the product's own typography, drawn
- * large. "Zero" (the aperture) "Strike" (the slash).
+ * Why: the shield is the name; the line is what the product actually does — a
+ * scanner sweeping the code it protects. It overshoots the shield on both
+ * sides so it reads as a pass *across* the thing, not a stripe painted on it.
  *
  * Deliberately two flat colors: currentColor for the chrome, --signal for the
- * strike. No gradients, no glow filter — a gradient-stacked mark is the single
- * loudest "generated asset" tell, and the old one used emerald/cyan/violet that
- * appeared nowhere else in the UI.
+ * scan line. No gradients, no glow filter — a gradient-stacked mark is the
+ * single loudest "generated asset" tell.
  */
-export function ZeroStrikeLogoIcon({ className }: { className?: string }) {
+export function ThinkShieldLogoIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -47,23 +44,31 @@ export function ZeroStrikeLogoIcon({ className }: { className?: string }) {
         <path d="M5.5 22.5H2.75A1.25 1.25 0 0 1 1.5 21.25V18.5" />
       </g>
 
-      {/* The zero: an aperture, not a shield. */}
-      <circle cx="12" cy="12" r="5.6" stroke="currentColor" strokeWidth="2.1" />
-
-      {/* The strike. Overshoots the aperture on both ends the way a real slashed
-          zero does, and sits on the signal accent so it's the one saturated
-          pixel in the chrome. */}
+      {/* The shield. */}
       <path
-        d="M7.4 16.6 16.6 7.4"
-        stroke="var(--signal)"
-        strokeWidth="2.6"
-        strokeLinecap="round"
+        d="M12 4.3 17.9 6.5v4.9c0 3.9-2.5 6.9-5.9 8.4-3.4-1.5-5.9-4.5-5.9-8.4V6.5Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
       />
+
+      {/* The scan line — the one saturated pixel in the chrome. */}
+      <path d="M4.6 11.4h14.8" stroke="var(--signal)" strokeWidth="2.4" strokeLinecap="round" />
     </svg>
   );
 }
 
-export function ZeroStrikeLogo({
+/** Brand rule: lowercase "think", bold; "Shield" regular. */
+export function ThinkShieldWordmark({ className }: { className?: string }) {
+  return (
+    <span className={cn("font-mono leading-none tracking-[-0.04em]", className)}>
+      <span className="font-bold">think</span>
+      <span className="font-normal">Shield</span>
+    </span>
+  );
+}
+
+export function ThinkShieldLogo({
   className,
   size = "sm",
   showText = true,
@@ -80,23 +85,14 @@ export function ZeroStrikeLogo({
           animated && "hover:text-signal"
         )}
       >
-        <ZeroStrikeLogoIcon />
+        <ThinkShieldLogoIcon />
       </div>
 
       {showText && (
         <div className="flex min-w-0 flex-col gap-0.5">
-          {/* One face, one color, tight tracking. The old wordmark switched font
-              family mid-word and tinted half of it — two tells at once. */}
-          <span
-            className={cn(
-              "font-mono font-bold leading-none tracking-[-0.04em] text-foreground",
-              currentSize.text
-            )}
-          >
-            ZeroStrike
-          </span>
+          <ThinkShieldWordmark className={cn("text-foreground", currentSize.text)} />
           <span className={cn("legend text-muted-foreground", currentSize.sub)}>
-            <span className="text-signal">{"//"}</span> SAST Control
+            <span className="text-signal">{"//"}</span> Security Control
           </span>
         </div>
       )}

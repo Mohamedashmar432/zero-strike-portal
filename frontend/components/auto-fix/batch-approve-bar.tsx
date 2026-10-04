@@ -101,7 +101,7 @@ export function BatchApproveBar({
               Create one pull request for {selected.length} fix{selected.length === 1 ? "" : "es"}?
             </DialogTitle>
             <DialogDescription>
-              ZeroStrike pushes a single branch with all {selected.length} patches and opens one pull
+              thinkShield pushes a single branch with all {selected.length} patches and opens one pull
               request against the connected repository. Nothing is committed to your default branch — you
               merge the PR yourself after review.
             </DialogDescription>

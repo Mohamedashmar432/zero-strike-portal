@@ -1,6 +1,6 @@
-# ZeroStrike Portal
+# thinkShield Portal
 
-SaaS platform for orchestrating scans from the independent [ZeroStrike Go SAST scanner](../zero-strike-code-scanner), managing projects, API keys, and reports.
+SaaS platform for orchestrating scans from the independent [thinkShield Go SAST scanner](../zero-strike-code-scanner), managing projects, API keys, and reports.
 
 See [docs/ZeroStrike_Phase1_Architecture_and_Engineering_Plan.md](docs/ZeroStrike_Phase1_Architecture_and_Engineering_Plan.md) for the full architecture.
 

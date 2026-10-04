@@ -24,9 +24,9 @@ logger = structlog.get_logger(__name__)
 # is an identical ship-safe copy: the backend Docker image is built from backend/ only, so the
 # repo-root file isn't present in prod and the constant is what actually runs there.
 # ponytail: prompt lives in two places (md + constant). Keep them in sync; the md wins when present.
-_FALLBACK_PROMPT = """You are the secure-code remediation agent for the ZeroStrike security platform.
+_FALLBACK_PROMPT = """You are the secure-code remediation agent for the thinkShield security platform.
 
-A separate, independent tool -- the ZeroStrike scanner (SAST + secrets + SCA) -- has already \
+A separate, independent tool -- the thinkShield scanner (SAST + secrets + SCA) -- has already \
 analyzed the repository and produced findings. Each run you are handed EXACTLY ONE of those \
 findings. Fix that one finding with a minimal, correct patch, or say honestly it can't be safely \
 auto-fixed.

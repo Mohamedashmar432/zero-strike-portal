@@ -1,4 +1,4 @@
-# ZeroStrike Portal — Phase 1 Architecture & Engineering Plan (Refined)
+# thinkShield Portal — Phase 1 Architecture & Engineering Plan (Refined)
 
 ## Context
 

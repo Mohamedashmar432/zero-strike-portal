@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { RequireRole } from "@/components/auth/require-role";
-import { ZeroStrikeLogo } from "@/components/brand/logo";
+import { ThinkShieldLogo } from "@/components/brand/logo";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks } from "./nav-links";
@@ -88,7 +88,7 @@ export function MobileNav() {
       <SheetContent side="left">
         <SheetHeader className="pb-2">
           <SheetTitle>
-            <ZeroStrikeLogo size="sm" />
+            <ThinkShieldLogo size="sm" />
           </SheetTitle>
         </SheetHeader>
         <nav className="flex-1 space-y-0.5 px-2">

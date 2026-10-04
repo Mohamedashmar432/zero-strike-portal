@@ -163,7 +163,7 @@ Keyed on `(project_id, rule_id)` — a fingerprint identifies one *occurrence* (
 1. **Scope allowlist** — the patch is applied by exact-match replacement of a unique `original_code`
    substring in the single `file_path`; `git diff --name-only` must equal `{file_path}`; reject
    `..`/absolute/symlink-escape.
-2. **Scanner re-run (fresh baseline)** — run the ZeroStrike scanner on the clean clone (baseline
+2. **Scanner re-run (fresh baseline)** — run the thinkShield scanner on the clean clone (baseline
    fingerprints), apply the patch, run again. The target finding's fingerprint must disappear AND
    `post \ baseline` must contain no new finding of severity ≥ medium.
 3. **No repo test-suite / lint execution.** Running a third-party repo's own `npm test`/`pytest` is

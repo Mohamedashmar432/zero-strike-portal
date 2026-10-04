@@ -157,7 +157,7 @@ function ProjectsPageContent() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">
-                      {p.description || "ZeroStrike SAST project repository."}
+                      {p.description || "thinkShield SAST project repository."}
                     </p>
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground border-t border-border/50 pt-2.5">
                       <span className="font-mono">{p.scan_count} scan{p.scan_count === 1 ? "" : "s"}</span>

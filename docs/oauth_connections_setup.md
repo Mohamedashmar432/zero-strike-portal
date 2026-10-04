@@ -26,7 +26,7 @@ below, since the callback URLs you register there must match it exactly.
    organization's developer settings instead if you want the connection scoped to an org's apps
    page, not required).
 2. Fill in:
-   - **Application name**: anything recognizable, e.g. "ZeroStrike Portal (local)"
+   - **Application name**: anything recognizable, e.g. "thinkShield Portal (local)"
    - **Homepage URL**: your `BACKEND_PUBLIC_URL` (or the frontend origin — GitHub doesn't use this
      value functionally)
    - **Authorization callback URL**: `{BACKEND_PUBLIC_URL}/api/v1/connections/github/callback`

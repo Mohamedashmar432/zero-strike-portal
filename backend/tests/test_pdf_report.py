@@ -39,13 +39,17 @@ def _create_scan(client, owner_headers, project_id, report_bytes=None):
 
 def test_scan_report_pdf_returns_pdf_for_completed_scan(client):
     owner = register_and_login(client, email="pdfowner1@zerostrike.dev")
-    project = _create_project(client, _headers(owner))
+    project = _create_project(client, _headers(owner), name="Demo Project")
     scan_id = _create_scan(client, _headers(owner), project["id"], report_bytes=_FIXTURE.read_bytes())
 
     r = client.get(f"/api/v1/scans/{scan_id}/report/pdf", headers=_headers(owner))
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert len(r.content) > 1000
+    # "{project}-{repo}-{date}.pdf" — see pdf_report_service.build_report_filename.
+    disposition = r.headers["content-disposition"]
+    assert disposition.startswith('attachment; filename="demo-project-')
+    assert disposition.endswith('.pdf"')
 
 
 def test_scan_report_pdf_handles_zero_findings(client):
@@ -94,7 +98,7 @@ def test_render_scan_report_html_standard_is_unaffected_by_the_new_param(client)
         findings = await Finding.find(Finding.scan_id == scan_id).to_list()
 
         html = pdf_report_service.render_scan_report_html(scan, report, findings, "standard")
-        assert "ZeroStrike Scan Report" in html
+        assert "thinkShield Scan Report" in html
 
     asyncio.run(run())
 
@@ -183,3 +187,42 @@ def test_executive_template_remediation_plan_handles_findings_with_no_priority_s
     html = pdf_report_service.render_scan_report_html(scan, report, findings, "executive")
     assert "LEGACY-1" in html
     assert "NEW-1" in html
+
+
+def test_build_report_filename_uses_project_repo_and_scan_date():
+    from datetime import datetime, timezone
+
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services.pdf_report_service import build_report_filename
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(
+        project_id="p1",
+        scan_type="cloud",
+        repo_url="https://github.com/acme/Some-Repo.git",
+        started_at=datetime(2026, 3, 5, tzinfo=timezone.utc),
+        created_at=now,
+        updated_at=now,
+    )
+    report = Report(scan_id="s1", project_id="p1", stats=ScanStatsEmbedded(), json_uploaded_at=now)
+
+    assert build_report_filename(scan, report, "Acme Corp") == "acme-corp-some-repo-2026-03-05.pdf"
+
+
+def test_build_report_filename_falls_back_to_root_path_for_local_scans():
+    from datetime import datetime, timezone
+
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services.pdf_report_service import build_report_filename
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(project_id="p1", scan_type="local", started_at=now, created_at=now, updated_at=now)
+    report = Report(
+        scan_id="s1", project_id="p1", root_path="/home/dev/my_app", stats=ScanStatsEmbedded(), json_uploaded_at=now
+    )
+
+    filename = build_report_filename(scan, report, "Demo")
+    assert filename.startswith("demo-my-app-")
+    assert filename.endswith(".pdf")

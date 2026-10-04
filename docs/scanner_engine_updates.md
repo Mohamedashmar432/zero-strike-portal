@@ -111,7 +111,7 @@ curl -X POST {BACKEND_PUBLIC_URL}/api/v1/admin/downloads/zerostrike \
 
 At minimum, publish `linux-amd64` every time — it's the only arch any current CI/CD onboarding
 snippet asks for. `../zero-strike-code-scanner`'s `.github/workflows/release.yml` has a
-"Publish binaries to the ZeroStrike portal" job that automates all five `(os, arch)` combos after
+"Publish binaries to the thinkShield portal" job that automates all five `(os, arch)` combos after
 every tagged release (needs `ZS_PORTAL_ADMIN_EMAIL`/`ZS_PORTAL_ADMIN_PASSWORD` secrets configured
 in that repo) — prefer fixing it there once over remembering this manual step per release.
 

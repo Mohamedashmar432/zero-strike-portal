@@ -25,7 +25,7 @@ from app.services.remediation_tools import SubmitFixProposalArgs
 
 logger = structlog.get_logger(__name__)
 
-_CRITIC_SYSTEM_PROMPT = """You are a senior secure-code reviewer for the ZeroStrike platform. \
+_CRITIC_SYSTEM_PROMPT = """You are a senior secure-code reviewer for the thinkShield platform. \
 Another AI drafted a patch for ONE scanner finding. Your job is to review that patch the way a \
 skeptical human reviewer would, and decide whether it should reach a developer as-is.
 

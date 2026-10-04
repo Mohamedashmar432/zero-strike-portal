@@ -20,11 +20,13 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color:
 .cover-title { font-size: 44px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1; margin-bottom: 8px; }
 .cover-subtitle { font-size: 16px; color: #a8dadc; font-weight: 400; margin-bottom: 48px; }
 
-.cover-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 40px; margin-bottom: 40px; }
+.cover-meta { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 40px; }
+.cover-meta td { width: 50%; padding: 0 40px 20px 0; vertical-align: top; }
 .meta-item label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ec8e3; display: block; margin-bottom: 4px; }
 .meta-item span { font-size: 15px; font-weight: 600; }
 
-.cover-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 40px; }
+.cover-stats { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 40px; }
+.cover-stats td { width: 16.66%; padding: 0 5px; }
 .stat-box { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 14px 10px; text-align: center; }
 .stat-box .num { font-size: 28px; font-weight: 800; display: block; }
 .stat-box .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #a8dadc; margin-top: 4px; display: block; }
@@ -35,7 +37,7 @@ body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color:
 .stat-low .num   { color: #06d6a0; }
 .stat-info .num  { color: #8ab4ff; }
 
-.risk-banner { display: inline-flex; align-items: center; gap: 12px; padding: 12px 24px; border-radius: 6px; font-weight: 700; font-size: 14px; }
+.risk-banner { display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 700; font-size: 14px; }
 .risk-CRITICAL { background: #e63946; color: #fff; }
 .risk-HIGH     { background: #f4a261; color: #1a1a2e; }
 .risk-MEDIUM   { background: #e9c46a; color: #1a1a2e; }
@@ -49,7 +51,8 @@ h2 { font-size: 20px; font-weight: 700; color: #0f3460; border-bottom: 3px solid
 h3 { font-size: 14px; font-weight: 700; color: #16213e; margin-bottom: 8px; margin-top: 20px; }
 p  { line-height: 1.7; margin-bottom: 10px; color: #333; }
 
-.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 28px; }
+.summary-grid { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 28px; }
+.summary-grid td { width: 20%; padding: 0 5px; }
 .summary-card { border-radius: 8px; padding: 16px 10px; text-align: center; }
 .summary-card .count { font-size: 30px; font-weight: 800; display: block; }
 .summary-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; display: block; }
@@ -127,18 +130,24 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 
 <div class="cover">
   <div>
-    <div class="cover-eyebrow">ZeroStrike Security Assessment Report</div>
+    <div class="cover-eyebrow">thinkShield Security Assessment Report</div>
     <div class="cover-title">Security<br>Assessment</div>
     <div class="cover-subtitle">Static Application Security Testing</div>
 
-    <div class="cover-meta">
-      <div class="meta-item"><label>Project</label><span>{{ project_name }}</span></div>
-      <div class="meta-item"><label>Repository</label><span>{{ scan.repo_url or report.root_path or "—" }}</span></div>
-      <div class="meta-item"><label>Branch</label><span>{{ report.branch or scan.branch or "—" }}</span></div>
-      <div class="meta-item"><label>Scan Date</label><span>{{ report.started_at.strftime('%Y-%m-%d') if report.started_at else "—" }}</span></div>
-      <div class="meta-item"><label>AI Provider</label><span>Not tracked</span></div>
-      <div class="meta-item"><label>Scan ID</label><span style="font-size:11px;font-family:monospace;">{{ (scan.id | string)[:8] }}</span></div>
-    </div>
+    <table class="cover-meta">
+      <tr>
+        <td class="meta-item"><label>Project</label><span>{{ project_name }}</span></td>
+        <td class="meta-item"><label>Repository</label><span>{{ (scan.repo_url or report.root_path or "—") | softbreak }}</span></td>
+      </tr>
+      <tr>
+        <td class="meta-item"><label>Branch</label><span>{{ (report.branch or scan.branch or "—") | softbreak }}</span></td>
+        <td class="meta-item"><label>Scan Date</label><span>{{ report.started_at.strftime('%Y-%m-%d') if report.started_at else "—" }}</span></td>
+      </tr>
+      <tr>
+        <td class="meta-item"><label>AI Provider</label><span>Not tracked</span></td>
+        <td class="meta-item"><label>Scan ID</label><span style="font-size:11px;font-family:monospace;">{{ (scan.id | string)[:8] }}</span></td>
+      </tr>
+    </table>
 
     <div class="cover-scanners">
       <label style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#7ec8e3;display:block;margin-bottom:10px;">Scanners Executed</label>
@@ -147,14 +156,16 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
       {% endfor %}
     </div>
 
-    <div class="cover-stats">
-      <div class="stat-box stat-total"><span class="num">{{ total_findings }}</span><span class="lbl">Total</span></div>
-      <div class="stat-box stat-crit"><span class="num">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="lbl">Critical</span></div>
-      <div class="stat-box stat-high"><span class="num">{{ report.stats.by_severity.get('high', 0) }}</span><span class="lbl">High</span></div>
-      <div class="stat-box stat-med"><span class="num">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="lbl">Medium</span></div>
-      <div class="stat-box stat-low"><span class="num">{{ report.stats.by_severity.get('low', 0) }}</span><span class="lbl">Low</span></div>
-      <div class="stat-box stat-info"><span class="num">{{ report.stats.by_severity.get('info', 0) }}</span><span class="lbl">Info</span></div>
-    </div>
+    <table class="cover-stats">
+      <tr>
+        <td><div class="stat-box stat-total"><span class="num">{{ total_findings }}</span><span class="lbl">Total</span></div></td>
+        <td><div class="stat-box stat-crit"><span class="num">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="lbl">Critical</span></div></td>
+        <td><div class="stat-box stat-high"><span class="num">{{ report.stats.by_severity.get('high', 0) }}</span><span class="lbl">High</span></div></td>
+        <td><div class="stat-box stat-med"><span class="num">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="lbl">Medium</span></div></td>
+        <td><div class="stat-box stat-low"><span class="num">{{ report.stats.by_severity.get('low', 0) }}</span><span class="lbl">Low</span></div></td>
+        <td><div class="stat-box stat-info"><span class="num">{{ report.stats.by_severity.get('info', 0) }}</span><span class="lbl">Info</span></div></td>
+      </tr>
+    </table>
   </div>
 
   <div class="risk-banner risk-{{ overall_risk }}">
@@ -167,13 +178,15 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <h2>1. Executive Summary</h2>
 <p>{{ executive_summary }}</p>
 
-<div class="summary-grid">
-  <div class="summary-card card-critical"><span class="count">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="label">Critical</span></div>
-  <div class="summary-card card-high"><span class="count">{{ report.stats.by_severity.get('high', 0) }}</span><span class="label">High</span></div>
-  <div class="summary-card card-medium"><span class="count">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="label">Medium</span></div>
-  <div class="summary-card card-low"><span class="count">{{ report.stats.by_severity.get('low', 0) }}</span><span class="label">Low</span></div>
-  <div class="summary-card card-info"><span class="count">{{ report.stats.by_severity.get('info', 0) }}</span><span class="label">Info</span></div>
-</div>
+<table class="summary-grid">
+  <tr>
+    <td><div class="summary-card card-critical"><span class="count">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="label">Critical</span></div></td>
+    <td><div class="summary-card card-high"><span class="count">{{ report.stats.by_severity.get('high', 0) }}</span><span class="label">High</span></div></td>
+    <td><div class="summary-card card-medium"><span class="count">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="label">Medium</span></div></td>
+    <td><div class="summary-card card-low"><span class="count">{{ report.stats.by_severity.get('low', 0) }}</span><span class="label">Low</span></div></td>
+    <td><div class="summary-card card-info"><span class="count">{{ report.stats.by_severity.get('info', 0) }}</span><span class="label">Info</span></div></td>
+  </tr>
+</table>
 
 <h2>2. Technology Stack</h2>
 <p>Technology stack detection was not performed.</p>
@@ -250,7 +263,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 {% for f in sev_findings %}
 <div class="finding-card sev-{{ f.severity | upper }}">
   <div class="finding-header">
-    <div class="finding-title">{{ f.rule_name or f.rule_id or "Untitled finding" }}</div>
+    <div class="finding-title">{{ (f.rule_name or f.rule_id or "Untitled finding") | softbreak }}</div>
     <span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span>
   </div>
   <div class="finding-meta">
@@ -259,14 +272,14 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
     {% if f.cwe %}<div><span>CWE: </span><strong>{{ f.cwe | join(", ") }}</strong></div>{% endif %}
     {% if f.owasp %}<div style="grid-column:1/-1"><span>OWASP: </span><strong>{{ f.owasp | join(", ") }}</strong></div>{% endif %}
     {% if f.location.file %}
-    <div class="finding-loc">{{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
+    <div class="finding-loc">{{ f.location.file | softbreak }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
     {% endif %}
   </div>
-  <p style="font-size:12px;margin-bottom:8px;">{{ f.message }}</p>
+  <p style="font-size:12px;margin-bottom:8px;">{{ f.message | softbreak }}</p>
   {% if f.evidence and f.evidence[0].snippet %}
-  <pre class="code-block">{{ f.evidence[0].snippet | e }}</pre>
+  <pre class="code-block">{{ f.evidence[0].snippet | e | softbreak(60) }}</pre>
   {% endif %}
-  {% if f.remediation %}<div class="rec"><strong>Recommendation:</strong> {{ f.remediation }}</div>{% endif %}
+  {% if f.remediation %}<div class="rec"><strong>Recommendation:</strong> {{ f.remediation | softbreak }}</div>{% endif %}
 </div>
 {% endfor %}
 {% endif %}
@@ -282,7 +295,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
   {% for f in secret_findings %}
   <tr>
     <td>{{ f.rule_name or f.rule_id or "—" }}</td>
-    <td style="font-family:monospace;font-size:11px;word-break:break-all;">{{ f.location.file }}</td>
+    <td style="font-family:monospace;font-size:11px;word-break:break-all;">{{ f.location.file | softbreak }}</td>
     <td>{{ f.location.start_line or "N/A" }}</td>
     <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
   </tr>
@@ -302,7 +315,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
   <tr>
     <td>{{ f.rule_name or f.rule_id or "—" }}</td>
     <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
-    <td style="font-family:monospace;font-size:11px;">{{ f.dependency.manifest if f.dependency else f.location.file }}</td>
+    <td style="font-family:monospace;font-size:11px;">{{ (f.dependency.manifest if f.dependency else f.location.file) | softbreak }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -346,7 +359,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 {% endif %}
 
 <div class="conclusion">
-  <p>This report was generated by the ZeroStrike Portal's SAST scan engine. All findings should be reviewed by a qualified security engineer before remediation. This report reflects a point-in-time snapshot and does not replace a full manual penetration test.</p>
+  <p>This report was generated by the thinkShield Portal's SAST scan engine. All findings should be reviewed by a qualified security engineer before remediation. This report reflects a point-in-time snapshot and does not replace a full manual penetration test.</p>
   <p style="margin-top:12px;font-size:11px;color:#6c7a8d;">
     Scan ID: {{ scan.id }} &nbsp;|&nbsp; Generated: {{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') if report.generated_at else "—" }}
   </p>

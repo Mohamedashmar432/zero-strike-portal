@@ -403,7 +403,7 @@ async def _propose_for_finding(
     )
 
 
-_ASK_SYSTEM_PROMPT = """You are a secure-code remediation assistant for the ZeroStrike platform.
+_ASK_SYSTEM_PROMPT = """You are a secure-code remediation assistant for the thinkShield platform.
 A developer is reviewing ONE proposed fix and has a question about it. Answer concisely and \
 concretely, using ONLY the finding and proposed-fix context provided. If the answer isn't \
 determinable from that context, say so plainly rather than guessing. Do not invent code that \

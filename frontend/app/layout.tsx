@@ -30,8 +30,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ZeroStrike Portal",
-  description: "SAST scan orchestration, projects, and findings.",
+  title: "thinkShield Portal",
+  description: "Application security scanning, findings, and remediation.",
 };
 
 export default function RootLayout({

@@ -38,7 +38,7 @@ async def handle_callback(provider: str, code: str, state: str, cookie_jti: str 
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid OAuth state")
     # Binds this callback to the browser that started it — without this, an attacker could send their
     # own authorize_url to a victim and have the victim's approval link the victim's real account to
-    # the attacker's ZeroStrike account (state alone only proves it wasn't tampered with, not who's
+    # the attacker's thinkShield account (state alone only proves it wasn't tampered with, not who's
     # completing it).
     if not cookie_jti or cookie_jti != claims.get("jti"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OAuth session mismatch — please retry")

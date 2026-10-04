@@ -46,7 +46,7 @@ mandatory, and this doc has now been updated to say so.
 
 While investigating, I found that a previous session had already diagnosed this exact gap while
 working in the sibling scanner repo (`../zero-strike-code-scanner`) and drafted a fix: a new
-"Publish binaries to the ZeroStrike portal" step at the end of `.github/workflows/release.yml`
+"Publish binaries to the thinkShield portal" step at the end of `.github/workflows/release.yml`
 that logs into the portal as an admin and uploads all five `(os, arch)` binaries after every
 tagged release, closing this gap for good.
 
@@ -101,7 +101,7 @@ there's no self-serve "become admin" button by design.
 ### Part 2: Fix it permanently (done, one step left)
 
 The `release.yml` change is committed and pushed (`zero-strike-code-scanner@689a993`, `main`). It
-adds a "Publish binaries to the ZeroStrike portal" step that runs after every tagged release and
+adds a "Publish binaries to the thinkShield portal" step that runs after every tagged release and
 uploads all 5 `(os, arch)` binaries automatically. One thing left, which needs your credentials so
 I can't do it:
 
@@ -112,7 +112,7 @@ I can't do it:
 
    These must belong to a real admin account in the **production** portal (the one from Part 1).
 2. Next time you cut a release (`git tag vX.Y.Z && git push origin vX.Y.Z`), watch the `release`
-   job's "Publish binaries to the ZeroStrike portal" step in the Actions log — it should show 5
+   job's "Publish binaries to the thinkShield portal" step in the Actions log — it should show 5
    successful publishes. It will fail loudly (curl `-f`) if the secrets are missing or wrong,
    rather than silently skipping.
 

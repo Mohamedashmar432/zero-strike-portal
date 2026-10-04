@@ -73,7 +73,7 @@ export function EvidencePanel({
           </Badge>
         )}
         {finding.language && <Badge variant="outline">{finding.language}</Badge>}
-        <span className="text-xs text-muted-foreground">detected by the ZeroStrike scanner</span>
+        <span className="text-xs text-muted-foreground">detected by the thinkShield scanner</span>
       </div>
 
       <p className="text-sm">{finding.message}</p>

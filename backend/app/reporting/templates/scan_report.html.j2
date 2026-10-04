@@ -6,23 +6,23 @@
   h1 { font-size: 20pt; color: #7a1622; margin-bottom: 0; }
   h2 { font-size: 13pt; color: #7a1622; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 22px; }
   .subtitle { color: #555; font-size: 10pt; margin-top: 2px; }
-  .meta-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  .meta-table td { padding: 3px 6px; font-size: 8.5pt; }
+  .meta-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 10px; }
+  .meta-table td { padding: 3px 6px; font-size: 8.5pt; word-break: break-word; overflow-wrap: break-word; }
   .meta-table td.label { color: #666; width: 30%; }
-  .stats-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-  .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 5px 8px; text-align: left; font-size: 8.5pt; }
+  .stats-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 8px; }
+  .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 5px 8px; text-align: left; font-size: 8.5pt; word-break: break-word; overflow-wrap: break-word; }
   .stats-table th { background: #f2f2f2; }
-  .badge { padding: 2px 7px; border-radius: 3px; color: #fff; font-size: 8pt; }
+  .badge { padding: 2px 7px; border-radius: 3px; color: #fff; font-size: 8pt; white-space: nowrap; }
   .sev-critical { background: #7a1622; }
   .sev-high { background: #c0392b; }
   .sev-medium { background: #d68910; }
   .sev-low { background: #2e86c1; }
   .sev-info { background: #7f8c8d; }
   .finding { border: 1px solid #ddd; border-radius: 4px; padding: 8px 10px; margin-top: 10px; page-break-inside: avoid; }
-  .finding-title { font-size: 10.5pt; font-weight: bold; }
-  .finding-meta { color: #555; font-size: 8pt; margin-top: 2px; }
+  .finding-title { font-size: 10.5pt; font-weight: bold; word-break: break-word; overflow-wrap: break-word; }
+  .finding-meta { color: #555; font-size: 8pt; margin-top: 2px; word-break: break-word; overflow-wrap: break-word; }
   .finding-section-label { font-weight: bold; color: #444; margin-top: 6px; font-size: 8.5pt; }
-  .code { font-family: Courier, monospace; background: #f7f7f7; border: 1px solid #eee; padding: 5px; font-size: 8pt; white-space: pre-wrap; }
+  .code { font-family: Courier, monospace; background: #f7f7f7; border: 1px solid #eee; padding: 5px; font-size: 8pt; white-space: pre-wrap; word-break: break-all; overflow-wrap: break-word; max-width: 100%; }
   .banner { background: #fdf3cd; border: 1px solid #e2c56a; padding: 6px 10px; margin-top: 10px; font-size: 8.5pt; }
   .footer { color: #999; font-size: 7.5pt; margin-top: 24px; border-top: 1px solid #eee; padding-top: 6px; }
   .empty { color: #666; font-style: italic; margin-top: 10px; }
@@ -30,11 +30,11 @@
 </head>
 <body>
 
-<h1>ZeroStrike Scan Report</h1>
+<h1>thinkShield Scan Report</h1>
 <div class="subtitle">{{ scan.scan_label or "Untitled scan" }} &middot; {{ scan.scan_type }}</div>
 
 <table class="meta-table">
-  <tr><td class="label">Repository</td><td>{{ scan.repo_url or report.root_path or "-" }}</td></tr>
+  <tr><td class="label">Repository</td><td>{{ (scan.repo_url or report.root_path or "-") | softbreak }}</td></tr>
   <tr><td class="label">Branch / commit</td><td>{{ report.branch or scan.branch or "-" }} {% if report.git_commit %}({{ report.git_commit[:12] }}){% endif %}</td></tr>
   <tr><td class="label">Scanner version</td><td>{{ report.scanner_version or scan.scanner_version or "-" }}</td></tr>
   <tr><td class="label">Started</td><td>{{ report.started_at or scan.started_at or "-" }}</td></tr>
@@ -89,15 +89,15 @@
 <div class="finding">
   <div class="finding-title">
     {% if f.severity %}<span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>{% endif %}
-    {{ f.rule_name or f.rule_id or "Untitled finding" }}
+    {{ (f.rule_name or f.rule_id or "Untitled finding") | softbreak }}
   </div>
   <div class="finding-meta">
     {% if f.rule_id %}Rule: {{ f.rule_id }} &middot; {% endif %}
     {% if f.kind %}Kind: {{ f.kind }} &middot; {% endif %}
     {% if f.category %}Category: {{ f.category }} &middot; {% endif %}
-    Location: {{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}
+    Location: {{ f.location.file | softbreak }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}
   </div>
-  <div style="margin-top: 6px;">{{ f.message }}</div>
+  <div style="margin-top: 6px;">{{ f.message | softbreak }}</div>
 
   {% if f.cwe or f.owasp %}
   <div class="finding-meta">
@@ -110,7 +110,7 @@
   {% if f.evidence %}
   <div class="finding-section-label">Evidence</div>
   {% for e in f.evidence %}
-  {% if e.snippet %}<div class="code">{{ e.snippet }}</div>{% endif %}
+  {% if e.snippet %}<div class="code">{{ e.snippet | softbreak(60) }}</div>{% endif %}
   {% endfor %}
   {% endif %}
 
@@ -122,7 +122,7 @@
   {% if f.dependency %}
   <div class="finding-section-label">Dependency detail</div>
   <div class="finding-meta">
-    {{ f.dependency.ecosystem or "-" }} package {{ f.dependency.package or "-" }} {{ f.dependency.installed_version or "" }}
+    {{ f.dependency.ecosystem or "-" }} package {{ (f.dependency.package or "-") | softbreak }} {{ f.dependency.installed_version or "" }}
     {% if f.dependency.fixed_version %} &rarr; fix in {{ f.dependency.fixed_version }}{% endif %}
     {% if f.dependency.advisory_ids %} &middot; {{ f.dependency.advisory_ids|join(", ") }}{% endif %}
   </div>
@@ -130,22 +130,22 @@
 
   {% if f.config %}
   <div class="finding-section-label">Configuration detail</div>
-  <div class="finding-meta">{{ f.config.framework or "-" }} &middot; {{ f.config.config_file or "-" }} &middot; key: {{ f.config.key or "-" }}</div>
+  <div class="finding-meta">{{ f.config.framework or "-" }} &middot; {{ (f.config.config_file or "-") | softbreak }} &middot; key: {{ f.config.key or "-" }}</div>
   {% endif %}
 
   {% if f.rationale %}
   <div class="finding-section-label">Rationale</div>
-  <div>{{ f.rationale }}</div>
+  <div>{{ f.rationale | softbreak }}</div>
   {% endif %}
 
   {% if f.remediation %}
   <div class="finding-section-label">Remediation</div>
-  <div>{{ f.remediation }}</div>
+  <div>{{ f.remediation | softbreak }}</div>
   {% endif %}
 </div>
 {% endfor %}
 
-<div class="footer">Generated by ZeroStrike Portal &middot; scan {{ scan.id }}</div>
+<div class="footer">Generated by thinkShield Portal &middot; scan {{ scan.id }}</div>
 
 </body>
 </html>

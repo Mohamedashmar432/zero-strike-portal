@@ -11,6 +11,8 @@ Docker image and on a bare Windows dev machine.
 
 import asyncio
 import io
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -37,10 +39,39 @@ _KIND_LABELS = {
     "config": "Configuration",
 }
 
+_ZWSP = "​"
+_SOFTBREAK_CHARS = "/\\_.-"
+
+
+def _softbreak(value: str | None, chunk: int = 40) -> str:
+    """Insert zero-width-space break points into long unbroken tokens.
+
+    xhtml2pdf (ReportLab's Paragraph under the hood) only wraps on whitespace and
+    ignores CSS word-break/overflow-wrap entirely, so a long URL, file path, or
+    snippet with no spaces overflows the page/table width instead of wrapping.
+    Prefer breaking right after a path/URL separator (invisible either way); only
+    fall back to a fixed-width chunk split for a token with no separators at all.
+    """
+    if not value:
+        return value or ""
+    out_words = []
+    for word in value.split(" "):
+        if len(word) <= chunk:
+            out_words.append(word)
+            continue
+        if any(c in word for c in _SOFTBREAK_CHARS):
+            softened = "".join(c + _ZWSP if c in _SOFTBREAK_CHARS else c for c in word)
+        else:
+            softened = _ZWSP.join(word[i : i + chunk] for i in range(0, len(word), chunk))
+        out_words.append(softened)
+    return " ".join(out_words)
+
+
 _env = Environment(
     loader=FileSystemLoader(Path(__file__).parent.parent / "reporting" / "templates"),
     autoescape=select_autoescape(["html", "j2"]),
 )
+_env.filters["softbreak"] = _softbreak
 
 
 def _severity_sort_key(finding: Finding) -> tuple[int, str]:
@@ -140,3 +171,28 @@ async def render_scan_report_pdf(
 ) -> bytes:
     html = render_scan_report_html(scan, report, findings, template, project_name)
     return await asyncio.to_thread(_html_to_pdf_sync, html)
+
+
+_FILENAME_UNSAFE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str) -> str:
+    return _FILENAME_UNSAFE.sub("-", value.lower()).strip("-") or "unknown"
+
+
+def _repo_name(scan: Scan, report: Report) -> str:
+    source = scan.repo_url or report.root_path
+    if not source:
+        return "unknown-repo"
+    # A repo_url ("https://host/org/name(.git)") or a local root_path both end in the
+    # repo's own directory/name segment — take the last path component either way.
+    name = source.rstrip("/").split("/")[-1]
+    if name.endswith(".git"):
+        name = name[: -len(".git")]
+    return _slugify(name)
+
+
+def build_report_filename(scan: Scan, report: Report, project_name: str) -> str:
+    """"{project}-{repo}-{date}.pdf" — the name users see when they download a report."""
+    date = (scan.started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return f"{_slugify(project_name)}-{_repo_name(scan, report)}-{date}.pdf"

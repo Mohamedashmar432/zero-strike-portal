@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { OctagonAlert } from "lucide-react";
+import { Clock, OctagonAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -21,6 +21,7 @@ export default function LoginPage() {
   // A toast is dismissable and easy to miss — a failed sign-in needs feedback
   // that stays on screen next to the form until you act on it.
   const [formError, setFormError] = useState<string | null>(null);
+  const [awaitingApproval, setAwaitingApproval] = useState(false);
   const {
     register,
     handleSubmit,
@@ -29,6 +30,7 @@ export default function LoginPage() {
 
   async function onSubmit(values: LoginInput) {
     setFormError(null);
+    setAwaitingApproval(false);
     try {
       await login(values.email, values.password);
       router.push("/dashboard");
@@ -45,7 +47,8 @@ export default function LoginPage() {
               : err.message
             : "Sign-in failed for an unexpected reason.";
       setFormError(message);
-      toast.error(message);
+      setAwaitingApproval(err instanceof ApiError && err.status === 403);
+      if (!(err instanceof ApiError && err.status === 403)) toast.error(message);
     }
   }
 
@@ -62,13 +65,27 @@ export default function LoginPage() {
           {formError && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-sm border-l-2 border-severity-critical bg-severity-critical-tint px-2.5 py-2"
+              className={
+                awaitingApproval
+                  ? "flex items-start gap-2 rounded-sm border-l-2 border-severity-medium bg-severity-medium-tint px-2.5 py-2"
+                  : "flex items-start gap-2 rounded-sm border-l-2 border-severity-critical bg-severity-critical-tint px-2.5 py-2"
+              }
             >
-              <OctagonAlert
-                className="mt-px size-3.5 shrink-0 text-severity-critical"
-                aria-hidden="true"
-              />
-              <p className="font-mono text-[11px] leading-relaxed text-severity-critical">
+              {awaitingApproval ? (
+                <Clock className="mt-px size-3.5 shrink-0 text-severity-medium" aria-hidden="true" />
+              ) : (
+                <OctagonAlert
+                  className="mt-px size-3.5 shrink-0 text-severity-critical"
+                  aria-hidden="true"
+                />
+              )}
+              <p
+                className={
+                  awaitingApproval
+                    ? "font-mono text-[11px] leading-relaxed text-severity-medium"
+                    : "font-mono text-[11px] leading-relaxed text-severity-critical"
+                }
+              >
                 {formError}
               </p>
             </div>

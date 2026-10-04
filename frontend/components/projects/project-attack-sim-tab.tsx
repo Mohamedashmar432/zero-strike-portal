@@ -238,7 +238,7 @@ export function ProjectAttackSimTab({ projectId }: ProjectAttackSimTabProps) {
                 <div className="space-y-0.5">
                   <span className="font-semibold text-foreground">Breach Containment Verification</span>
                   <p className="text-[11px] text-muted-foreground">
-                    ZeroStrike SAST + Runtime policy prevented lateral movement.
+                    thinkShield SAST + Runtime policy prevented lateral movement.
                   </p>
                 </div>
                 <Button

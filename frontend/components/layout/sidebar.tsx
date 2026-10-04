@@ -16,7 +16,7 @@ import {
 import { RequireRole } from "@/components/auth/require-role";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { ZeroStrikeLogoIcon } from "@/components/brand/logo";
+import { ThinkShieldLogoIcon, ThinkShieldWordmark } from "@/components/brand/logo";
 import { cn, getInitials } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { adminLinks, mainLinks } from "./nav-links";
@@ -115,14 +115,12 @@ export function Sidebar({ pinned, onTogglePin }: { pinned: boolean; onTogglePin:
       <div className="mb-3 px-2.5">
         <div className="flex items-center gap-3 px-1">
           <div className="flex size-8 shrink-0 items-center justify-center text-sidebar-foreground">
-            <ZeroStrikeLogoIcon className="size-[26px]" />
+            <ThinkShieldLogoIcon className="size-[26px]" />
           </div>
           <div className={cn("flex min-w-0 flex-col gap-0.5", labelClass)}>
-            <span className="font-mono text-sm font-bold leading-none tracking-[-0.04em] text-sidebar-foreground">
-              ZeroStrike
-            </span>
+            <ThinkShieldWordmark className="text-sm text-sidebar-foreground" />
             <span className="legend text-sidebar-foreground/60">
-              <span className="text-signal">{"//"}</span> SAST Control
+              <span className="text-signal">{"//"}</span> Security Control
             </span>
           </div>
         </div>

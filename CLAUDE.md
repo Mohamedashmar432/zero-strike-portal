@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ZeroStrike Portal: a SaaS app (Next.js frontend + FastAPI backend + MongoDB) that
-orchestrates scans from the **independent** ZeroStrike Go SAST scanner (sibling repo
+thinkShield Portal: a SaaS app (Next.js frontend + FastAPI backend + MongoDB) that
+orchestrates scans from the **independent** thinkShield Go SAST scanner (sibling repo
 `../zero-strike-code-scanner`). The scanner has its own release cadence and is never
 code-imported here — the portal only invokes its compiled binary as a subprocess or
 receives its JSON report over HTTP.

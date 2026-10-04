@@ -3,6 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { useAuth } from "@/providers/auth-provider";
 export default function RegisterPage() {
   const { register: registerUser, isAuthenticating } = useAuth();
   const router = useRouter();
+  const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -24,18 +26,42 @@ export default function RegisterPage() {
 
   async function onSubmit(values: RegisterInput) {
     try {
-      await registerUser(values.email, values.password, values.name);
+      const created = await registerUser(values.email, values.password, values.name);
+      if (created.approval_status === "pending") {
+        setSubmittedEmail(created.email);
+        return;
+      }
       router.push("/dashboard");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Registration failed");
     }
   }
 
+  if (submittedEmail) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Request received</CardTitle>
+          <CardDescription>Your account is awaiting administrator approval.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm text-muted-foreground">
+          <p>
+            An administrator will review your request. We&apos;ll email {submittedEmail} as soon as
+            a decision is made, and you can sign in after your access is approved.
+          </p>
+          <Link href="/login" className="text-foreground underline underline-offset-4">
+            Back to sign in
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
-        <CardDescription>Start scanning your projects with ZeroStrike.</CardDescription>
+        <CardDescription>Start scanning your projects with thinkShield.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

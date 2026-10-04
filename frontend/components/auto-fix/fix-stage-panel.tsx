@@ -147,7 +147,7 @@ function ValidationStep({ validation }: { validation: FixValidation }) {
         {validation.scanner_version && <li className="font-mono text-xs">scanner {validation.scanner_version}</li>}
       </ul>
       <p className="text-xs text-muted-foreground">
-        Run by the real ZeroStrike scanner on a fresh clone — not an AI judgement.
+        Run by the real thinkShield scanner on a fresh clone — not an AI judgement.
       </p>
     </Step>
   );
