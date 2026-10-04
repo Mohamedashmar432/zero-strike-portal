@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import {
+  formatSyncCounts,
   listProjectRepos,
   reauthProjectRepo,
   refetchWhileAnyRepoSyncing,
@@ -20,7 +21,7 @@ import {
   syncProjectRepo,
   type ProjectRepo,
 } from "@/lib/api/project-repos";
-import { getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
+import { getScanRegression, getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
 import { getProject, getProjectScanActivity, hasCompletedScan } from "@/lib/api/projects";
 import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
@@ -623,7 +624,7 @@ function ReauthDialog({
   );
 }
 
-function RepositoriesTab({ projectId }: { projectId: string }) {
+function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchived: boolean }) {
   const queryClient = useQueryClient();
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
@@ -640,6 +641,8 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
   // A sync that finished since the last poll: refresh everything it touched and say so.
   // Tracks the previous sync_state per repo so loading the page on an idle repo stays quiet.
   const prevSync = useRef<Map<string, ProjectRepo["sync_state"]>>(new Map());
+  // The scan a repo's sync is running, remembered while "syncing" so its counts can be read after.
+  const syncScanId = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (!data) return;
     let finished = false;
@@ -651,9 +654,21 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
             `Sync of ${r.label || r.repo_full_name} failed${r.last_sync_error ? `: ${r.last_sync_error}` : ""}`
           );
         } else {
-          toast.success(`Sync of ${r.label || r.repo_full_name} finished`);
+          const name = r.label || r.repo_full_name;
+          const scanId = syncScanId.current.get(r.id);
+          const generic = () => toast.success(`Sync of ${name} finished`);
+          if (!scanId) generic();
+          else {
+            getScanRegression(projectId, scanId)
+              .then((reg) => {
+                const summary = formatSyncCounts(reg.fixed.count, reg.new.count, reg.reopened.count);
+                toast.success(`Sync of ${name} finished: ${summary}`);
+              })
+              .catch(generic);
+          }
         }
       }
+      if (r.sync_state === "syncing" && r.active_scan_id) syncScanId.current.set(r.id, r.active_scan_id);
       prevSync.current.set(r.id, r.sync_state);
     }
     if (finished) invalidateSyncViews(queryClient, projectId);
@@ -681,6 +696,7 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
         toast.info("A sync is already running for this repository");
       } else {
         toast.success("Sync started");
+        if (res.scan_id) syncScanId.current.set(repoId, res.scan_id);
         queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
       }
     },
@@ -789,9 +805,11 @@ function RepositoriesTab({ projectId }: { projectId: string }) {
                     <Button
                       size="sm"
                       onClick={() => runSync({ repoId: r.id })}
-                      disabled={syncing}
+                      disabled={syncing || isArchived}
                       title={
-                        r.sync_state === "error" && r.last_sync_error
+                        isArchived
+                          ? "This project is archived — restore it to sync"
+                          : r.sync_state === "error" && r.last_sync_error
                           ? r.last_sync_error
                           : "Check the remote branch and scan it if there is anything new"
                       }
@@ -1139,7 +1157,7 @@ export default function ProjectDetailPage() {
             {activeTab === "ai-usage" && (
               <AiAnalyticsDashboard scope="project" projectId={projectId} />
             )}
-            {activeTab === "repos" && <RepositoriesTab projectId={projectId} />}
+            {activeTab === "repos" && <RepositoriesTab projectId={projectId} isArchived={project.is_archived} />}
             {activeTab === "members" && (
               <MembersTab projectId={projectId} myRole={project?.my_role} />
             )}

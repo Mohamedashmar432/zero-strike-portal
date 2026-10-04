@@ -483,3 +483,25 @@ def test_sync_scan_completion_notification_reports_the_diff(client):
     bodies = [n.body for n in rows]
     assert bodies[0].startswith(f"Baseline established at {SHA_A[:7]}")
     assert bodies[1].startswith("4 fixed, 0 new, 0 reopened, 0 still open")
+
+
+def test_single_repo_responses_report_never_not_unknown(client, monkeypatch):
+    headers, pid, rid = _setup(client, email="sync-never@zerostrike.dev")
+    listed = client.get(f"/api/v1/projects/{pid}/repos", headers=headers).json()[0]
+    assert listed["sync_state"] == "never"
+
+    patched = client.patch(
+        f"/api/v1/projects/{pid}/repos/{rid}", json={"selected_branch": "main"}, headers=headers
+    )
+    assert patched.status_code == 200 and patched.json()["sync_state"] == "never"
+
+    created = client.post(
+        f"/api/v1/projects/{pid}/repos",
+        json={
+            "provider": "github", "pat": "ghp_sync_token2", "organization": "octocat",
+            "repo_full_name": "octocat/other", "clone_url": "https://github.com/octocat/other.git",
+            "selected_branch": "main",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201 and created.json()["sync_state"] == "never"

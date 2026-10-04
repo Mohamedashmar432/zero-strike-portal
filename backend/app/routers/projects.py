@@ -335,6 +335,13 @@ async def update_member_role(
     return _to_member_response(member, invitee.name if invitee else None)
 
 
+async def _repo_response_with_sync(repo: ProjectRepo) -> ProjectRepoResponse:
+    """Same sync_state path as the list endpoint, so single-repo responses never say 'unknown'."""
+    repos = await project_repo_service.list_repos(repo.project_id)
+    overviews = await repo_sync_service.sync_overviews(repo.project_id, repos)
+    return _to_project_repo_response(repo, overviews.get(str(repo.id)))
+
+
 @router.get("/{project_id}/repos", response_model=list[ProjectRepoResponse])
 async def list_project_repos(project_id: str, user: User = Depends(get_current_user)):
     await project_service.get_project_or_404(project_id)
@@ -359,7 +366,7 @@ async def add_project_repo(
         target_id=str(repo.id),
         metadata={"provider": repo.provider, "repo_full_name": repo.repo_full_name},
     )
-    return _to_project_repo_response(repo)
+    return await _repo_response_with_sync(repo)
 
 
 @router.patch("/{project_id}/repos/{repo_id}", response_model=ProjectRepoResponse)
@@ -369,7 +376,7 @@ async def update_project_repo(
     await project_service.get_project_or_404(project_id)
     await project_service.require_owner_or_admin(project_id, user)
     repo = await project_repo_service.update_branch(project_id, repo_id, payload.selected_branch)
-    return _to_project_repo_response(repo)
+    return await _repo_response_with_sync(repo)
 
 
 @router.delete("/{project_id}/repos/{repo_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -400,7 +407,7 @@ async def reauth_project_repo(
         target_type="project_repo",
         target_id=repo_id,
     )
-    return _to_project_repo_response(repo)
+    return await _repo_response_with_sync(repo)
 
 
 @router.post("/{project_id}/repos/{repo_id}/sync", response_model=RepoSyncResponse)
@@ -425,9 +432,7 @@ async def sync_project_repo(
         outcome=result.outcome,
         scan_id=result.scan_id,
         remote_head_sha=result.remote_head_sha,
-        repo=_to_project_repo_response(
-            result.repo, (await repo_sync_service.sync_overviews(project_id, [result.repo]))[repo_id]
-        ),
+        repo=await _repo_response_with_sync(result.repo),
     )
 
 

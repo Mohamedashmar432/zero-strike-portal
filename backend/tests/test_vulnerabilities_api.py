@@ -870,3 +870,29 @@ def test_summary_scopes_by_repo_and_requires_membership(client):
 
     outsider = _headers(register_and_login(client, email="vuln-summary-out@zs.dev"))
     assert client.get(f"{url}/summary", headers=outsider).status_code in (403, 404)
+
+
+def test_legacy_vulnerability_without_commit_fields_serialises(client):
+    owner = register_and_login(client, email="vuln-legacy@zs.dev")
+    headers = _headers(owner)
+    project = _create_project(client, headers)
+
+    async def _insert():
+        now = datetime.now(timezone.utc)
+        v = Vulnerability(
+            project_id=project["id"], repo_scope_key="unlinked", fingerprint="fp-legacy",
+            status="open", first_seen_at=now, last_seen_at=now,
+        )
+        await v.insert()
+        return str(v.id)
+
+    vid = asyncio.run(_insert())
+    base = VULN_URL.format(project_id=project["id"])
+    item = client.get(base, headers=headers).json()["items"][0]
+    detail = client.get(f"{base}/{vid}", headers=headers)
+    assert detail.status_code == 200
+    for row in (item, detail.json().get("vulnerability", detail.json())):
+        assert row["fix_status"] == "open"
+        for field in ("first_seen_commit", "first_seen_branch", "first_seen_scan_id", "last_seen_commit",
+                      "fixed_commit", "fixed_branch", "fixed_scan_id", "reopened_commit"):
+            assert row[field] is None

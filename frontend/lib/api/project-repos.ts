@@ -37,6 +37,11 @@ export function shortSha(sha: string | null | undefined): string {
   return sha ? sha.slice(0, 7) : "";
 }
 
+/** "N fixed, M new, K reopened" for the sync-finished toast. */
+export function formatSyncCounts(fixed: number, added: number, reopened: number): string {
+  return `${fixed} fixed, ${added} new, ${reopened} reopened`;
+}
+
 /**
  * `refetchInterval` for the repos list: poll while any repo is syncing (a queued/running scan),
  * so the row leaves its spinner on its own once the scan finishes.
