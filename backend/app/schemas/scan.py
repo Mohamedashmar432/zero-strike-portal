@@ -38,7 +38,7 @@ class ScanResponse(BaseModel):
     id: str
     project_id: str
     scan_type: Literal["local", "cloud", "cicd"]
-    triggered_by: Literal["cli", "ci", "cloud", "manual"]
+    triggered_by: Literal["cli", "ci", "cloud", "manual", "sync"]
     status: ScanStatus
     api_key_id: str | None
     scanner_version: str | None

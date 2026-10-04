@@ -67,3 +67,15 @@ class ProjectRepoResponse(BaseModel):
     selected_branch: str
     label: str | None
     created_at: datetime
+
+
+class RepoSyncRequest(BaseModel):
+    # Bypass the "already scanned this commit" short circuit ("Rescan anyway").
+    force: bool = False
+
+
+class RepoSyncResponse(BaseModel):
+    outcome: Literal["up_to_date", "scan_queued", "already_syncing"]
+    scan_id: str | None
+    remote_head_sha: str | None
+    repo: ProjectRepoResponse

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
 from beanie.operators import In
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import get_current_user
 from app.models.audit_log import AuditLog
@@ -37,6 +37,8 @@ from app.schemas.project_repo import (
     ProjectRepoReauthRequest,
     ProjectRepoResponse,
     ProjectRepoUpdateRequest,
+    RepoSyncRequest,
+    RepoSyncResponse,
 )
 from app.services import (
     ai_analytics_service,
@@ -46,6 +48,8 @@ from app.services import (
     project_repo_service,
     project_service,
     project_stats_service,
+    repo_sync_service,
+    scan_queue_service,
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -380,6 +384,32 @@ async def reauth_project_repo(
         target_id=repo_id,
     )
     return _to_project_repo_response(repo)
+
+
+@router.post("/{project_id}/repos/{repo_id}/sync", response_model=RepoSyncResponse)
+async def sync_project_repo(
+    project_id: str,
+    repo_id: str,
+    response: Response,
+    background: BackgroundTasks,
+    payload: RepoSyncRequest | None = None,
+    user: User = Depends(get_current_user),
+):
+    project = await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    if project.is_archived:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
+    repo = await project_repo_service.get_project_repo_or_404(project_id, repo_id)
+    result = await repo_sync_service.sync_repo(project, repo, user, force=bool(payload and payload.force))
+    if result.outcome == "scan_queued":
+        response.status_code = status.HTTP_202_ACCEPTED
+        background.add_task(scan_queue_service.drain_queue)
+    return RepoSyncResponse(
+        outcome=result.outcome,
+        scan_id=result.scan_id,
+        remote_head_sha=result.remote_head_sha,
+        repo=_to_project_repo_response(result.repo),
+    )
 
 
 @router.get("/{project_id}/repos/{repo_id}/scan-history", response_model=list[ScanHistoryItem])

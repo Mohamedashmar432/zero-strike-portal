@@ -82,6 +82,10 @@ async def remove_repo(project_id: str, repo_id: str) -> None:
 async def update_branch(project_id: str, repo_id: str, branch: str) -> ProjectRepo:
     repo = await get_project_repo_or_404(project_id, repo_id)
     repo.selected_branch = branch
+    # The remembered head and any error belonged to the old branch.
+    repo.remote_head_sha = None
+    repo.remote_head_checked_at = None
+    repo.last_sync_error = None
     repo.updated_at = datetime.now(timezone.utc)
     await repo.save()
     return repo

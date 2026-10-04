@@ -14,6 +14,7 @@ into one shared primitive if a third caller appears.
 import asyncio
 import base64
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,7 +32,10 @@ from app.services.cloud_scan_service import (  # single SSRF source of truth
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["GitWorkspaceError", "validate_repo_url", "workdir_root", "sanitize", "clone_repo", "git", "run_scanner"]
+__all__ = [
+    "GitWorkspaceError", "validate_repo_url", "workdir_root", "sanitize", "clone_repo", "git", "run_scanner",
+    "remote_head",
+]
 
 
 class GitWorkspaceError(Exception):
@@ -128,6 +132,36 @@ async def clone_repo(
     rc, _out, err = await _run(cmd, settings.remediation_job_timeout_seconds, env=env)
     if rc != 0:
         raise GitWorkspaceError(f"git clone failed (exit {rc}): {err.decode(errors='replace')}")
+
+
+_BRANCH_RE = re.compile(r"[A-Za-z0-9._/-]+")
+
+
+async def remote_head(
+    repo_url: str, branch: str, token: str | None = None, auth_scheme: str = "bearer", timeout: int = 30
+) -> str:
+    """Head commit sha of `branch` on the remote, via `git ls-remote` (no clone). SSRF-validated and
+    pinned like a clone; the token travels in GIT_CONFIG_* env, never argv. Raises GitWorkspaceError
+    with a sanitized message on any failure, including a branch that does not exist remotely."""
+    if not _BRANCH_RE.fullmatch(branch) or branch.startswith("-") or ".." in branch:
+        raise GitWorkspaceError("invalid branch name")
+    try:
+        pinned_ips = validate_repo_url(repo_url)
+    except CloudScanError as exc:
+        raise GitWorkspaceError(str(exc))
+    env = _token_env(token, auth_scheme, repo_url, pinned_ips)
+    ref = f"refs/heads/{branch}"
+    try:
+        rc, out, err = await _run(["git", "ls-remote", "--", repo_url, ref], timeout, env=env)
+    except GitWorkspaceError as exc:
+        raise GitWorkspaceError(sanitize(str(exc), token))
+    if rc != 0:
+        raise GitWorkspaceError(sanitize(f"git ls-remote failed (exit {rc}): {err.decode(errors='replace')}", token))
+    for line in out.decode(errors="replace").splitlines():
+        sha, _, name = line.partition("	")
+        if name.strip() == ref and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
+            return sha
+    raise GitWorkspaceError(f"branch '{branch}' was not found on the remote")
 
 
 async def git(

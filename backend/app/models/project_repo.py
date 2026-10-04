@@ -24,6 +24,13 @@ class ProjectRepo(Document):
     label: str | None = None
     pat_encrypted: str | None = None
     source_credential_id: str | None = None
+    # Repo Sync (docs/REPO_SYNC.md): the remote branch head seen at the last check, and the
+    # lease that stops two overlapping syncs from both enqueueing a scan. The scanned commit
+    # itself lives on the latest completed Scan, never here.
+    remote_head_sha: str | None = None
+    remote_head_checked_at: datetime | None = None
+    last_sync_error: str | None = None
+    sync_lease_until: datetime | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime

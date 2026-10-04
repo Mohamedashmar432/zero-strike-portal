@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import get_current_user
@@ -13,7 +11,6 @@ from app.schemas.report import FindingResponse, ReportResponse
 from app.schemas.scan import ScanCreateRequest, ScanResponse
 from app.services import (
     ai_analysis_service,
-    audit_service,
     connection_service,
     pdf_report_service,
     project_repo_service,
@@ -137,31 +134,15 @@ async def create_scan(
     if not repo_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "repo_url or project_repo_id is required")
 
-    now = datetime.now(timezone.utc)
-    scan = Scan(
-        project_id=project_id,
-        scan_type="cloud",
-        triggered_by="cloud",
-        status="queued",
+    scan = await scan_service.enqueue_repo_scan(
+        project,
+        user,
+        repo_url=repo_url,
+        branch=branch,
         repo_token=repo_token,
         repo_token_auth_scheme=repo_token_auth_scheme,
-        scan_label=payload.scan_label,
-        repo_url=repo_url,
         project_repo_id=payload.project_repo_id,
-        branch=branch,
-        created_by=str(user.id),
-        created_at=now,
-        updated_at=now,
-    )
-    await scan.insert()
-    await scan_service.increment_scan_counter(project)
-    await audit_service.record(
-        "Scan Created",
-        actor_user_id=str(user.id),
-        project_id=project_id,
-        target_type="scan",
-        target_id=str(scan.id),
-        metadata={"scan_type": scan.scan_type, "scan_label": scan.scan_label},
+        scan_label=payload.scan_label,
     )
     # Attempt to start immediately if capacity is free; the poll loop is the backstop otherwise.
     background.add_task(scan_queue_service.drain_queue)

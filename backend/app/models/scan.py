@@ -19,7 +19,7 @@ class Scan(Document):
     project_id: str
     api_key_id: str | None = None
     scan_type: ScanType
-    triggered_by: Literal["cli", "ci", "cloud", "manual"] = "cli"
+    triggered_by: Literal["cli", "ci", "cloud", "manual", "sync"] = "cli"
     status: ScanStatus = "pending"
     scanner_version: str | None = None
     hostname: str | None = None

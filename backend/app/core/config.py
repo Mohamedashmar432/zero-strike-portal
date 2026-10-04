@@ -179,6 +179,9 @@ class Settings(BaseSettings):
     rate_limit_register_window_seconds: int = 60
     rate_limit_forgot_password_max_attempts: int = 5
     rate_limit_forgot_password_window_seconds: int = 300
+    # Repo Sync does a network round trip (git ls-remote) per request, so it is limited per user.
+    rate_limit_repo_sync_max_attempts: int = 10
+    rate_limit_repo_sync_window_seconds: int = 60
 
 
 settings = Settings()
