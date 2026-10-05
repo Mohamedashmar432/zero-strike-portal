@@ -33,7 +33,7 @@ from app.core.repo_url import check_repo_url_syntax
 from app.core.retry import retry_transient
 from app.models.scan import Scan, ScanStage
 from app.schemas.report import GoReportIn
-from app.services import report_ingestion_service, workspace_settings_service
+from app.services import report_ingestion_service, workdir_hygiene, workspace_settings_service
 
 logger = structlog.get_logger(__name__)
 
@@ -272,7 +272,7 @@ async def _clone(
     async def _do_clone() -> None:
         # A retried attempt must start from an empty dir -- git clone refuses a non-empty
         # target, and a failed attempt can leave partial content behind in one that already existed.
-        shutil.rmtree(workdir, ignore_errors=True)
+        workdir_hygiene.rmtree_logged(workdir)
         os.makedirs(workdir, exist_ok=True)
         rc, _out, err = await _run(cmd, settings.scan_timeout_seconds, env=env)
         if rc != 0:
@@ -282,6 +282,14 @@ async def _clone(
             raise CloudScanError(f"git clone failed (exit {rc}): {message}")
 
     await _do_clone()
+
+
+async def _guard_disk(check, *args) -> None:
+    """Run a workdir_hygiene check off the event loop; its readable refusal becomes the scan's error."""
+    try:
+        await asyncio.to_thread(check, *args)
+    except workdir_hygiene.WorkdirError as exc:
+        raise CloudScanError(str(exc))
 
 
 async def _stamp_head_commit(scan: Scan, workdir: str) -> None:
@@ -444,7 +452,8 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
     if not scan or scan.scan_type != "cloud" or not scan.repo_url:
         return
 
-    workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=_workdir_root())
+    root = _workdir_root()
+    workdir = tempfile.mkdtemp(prefix="zs-clone-", dir=root)
     try:
         # The heartbeat covers the whole pipeline, not just the scanner: an 872MB clone is long
         # enough to be reaped mid-clone on its own. It stops before the except block below, so a
@@ -452,8 +461,10 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
         async with _beating(scan):
             await _stage(scan, "validating")
             pinned_ips = validate_repo_url(scan.repo_url)
+            await _guard_disk(workdir_hygiene.preflight_free_disk, root, settings.clone_min_free_mb)
             await _stage(scan, "cloning")
             await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme, pinned_ips)
+            await _guard_disk(workdir_hygiene.check_repo_size, workdir, settings.clone_max_repo_mb)
             await _stamp_head_commit(scan, workdir)
             await _stage(scan, "scanning")
             await _scan_and_ingest(scan, workdir)  # ingest marks the scan completed
@@ -473,4 +484,4 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
         )
         await _fail(scan, message)
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        workdir_hygiene.rmtree_logged(workdir)

@@ -15,7 +15,6 @@ import asyncio
 import base64
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -24,6 +23,7 @@ import structlog
 
 from app.core.config import settings
 from app.schemas.report import GoReportIn
+from app.services import workdir_hygiene
 from app.services.cloud_scan_service import (  # single SSRF source of truth
     CloudScanError,
     git_hardening_entries,
@@ -119,7 +119,11 @@ async def clone_repo(
     except CloudScanError as exc:
         raise GitWorkspaceError(str(exc))
     env = _token_env(token, auth_scheme, repo_url, pinned_ips)
-    shutil.rmtree(workdir, ignore_errors=True)
+    try:
+        await asyncio.to_thread(workdir_hygiene.preflight_free_disk, workdir_root(), settings.clone_min_free_mb)
+    except workdir_hygiene.WorkdirError as exc:
+        raise GitWorkspaceError(str(exc))
+    workdir_hygiene.rmtree_logged(workdir)
     os.makedirs(workdir, exist_ok=True)
     cmd = ["git", "clone"]
     if depth:
@@ -132,6 +136,10 @@ async def clone_repo(
     rc, _out, err = await _run(cmd, settings.remediation_job_timeout_seconds, env=env)
     if rc != 0:
         raise GitWorkspaceError(f"git clone failed (exit {rc}): {err.decode(errors='replace')}")
+    try:
+        await asyncio.to_thread(workdir_hygiene.check_repo_size, workdir, settings.clone_max_repo_mb)
+    except workdir_hygiene.WorkdirError as exc:
+        raise GitWorkspaceError(str(exc))
 
 
 _BRANCH_RE = re.compile(r"[A-Za-z0-9._/-]+")

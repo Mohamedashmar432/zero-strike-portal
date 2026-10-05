@@ -17,7 +17,7 @@ import structlog
 from app.core.config import settings
 from app.core.job_queue import claim_next, reap_stuck
 from app.models.scan import Scan
-from app.services import cloud_scan_service
+from app.services import cloud_scan_service, workdir_hygiene
 
 logger = structlog.get_logger(__name__)
 
@@ -99,11 +99,32 @@ async def reap_stuck_scans() -> None:
     )
 
 
+def stale_workdir_age_seconds() -> int:
+    """How old a clone workdir must be before the sweep may delete it: the longer of the scan and the
+    remediation reap windows, i.e. past anything a live job could still be working on."""
+    scan_window = settings.scan_timeout_seconds * settings.queue_stuck_multiplier
+    remediation_window = settings.remediation_job_timeout_seconds * settings.remediation_queue_stuck_multiplier
+    return max(scan_window, remediation_window)
+
+
+async def sweep_stale_workdirs() -> int:
+    """Delete clone/remediation workdirs orphaned by a hard process death (OOM kill, restart on a
+    persistent volume), which skip the `finally` that normally removes them. Never raises."""
+    try:
+        return await asyncio.to_thread(
+            workdir_hygiene.sweep_stale_workdirs, cloud_scan_service._workdir_root(), stale_workdir_age_seconds()
+        )
+    except Exception:
+        logger.warning("stale workdir sweep failed", exc_info=True)
+        return 0
+
+
 async def poll_loop() -> None:
     while True:
         await asyncio.sleep(settings.queue_poll_interval_seconds)
         try:
             await reap_stuck_scans()
+            await sweep_stale_workdirs()
             await drain_queue()
         except Exception:
             logger.exception("scan queue poll tick failed")

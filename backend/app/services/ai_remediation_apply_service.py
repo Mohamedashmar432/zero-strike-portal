@@ -14,7 +14,6 @@ can't be applied or fails the re-scan gate is dropped from the batch, not fatal 
 single-proposal approve route is simply a batch of one. See docs/AUTOFIX_BATCH_PR.md.
 """
 
-import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -38,6 +37,7 @@ from app.services import (
     remediation_brief_service,
     remediation_settings_service,
 )
+from app.services import workdir_hygiene
 from app.services.repo_write import RepoWriteError
 from app.services.repo_write import azure_devops as ado_write
 from app.services.repo_write import github as gh_write
@@ -495,7 +495,7 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
         # Scrub the write token from any unexpected error before it propagates to the proposal/job.
         raise RuntimeError(git_workspace.sanitize(str(exc), token)) from exc
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        workdir_hygiene.rmtree_logged(workdir)
 
 
 async def _load_batch(job: RemediationJob) -> list[AIFixProposal]:

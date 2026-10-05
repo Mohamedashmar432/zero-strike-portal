@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
         await project_stats_service.reconcile_project_finding_counts()
     except Exception:
         logger.warning("Project findings-counter reconciliation failed on startup", exc_info=True)
+    await scan_queue_service.sweep_stale_workdirs()  # leftovers from a previous process's hard death
     poll_task = asyncio.create_task(scan_queue_service.poll_loop())
     ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
     remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())

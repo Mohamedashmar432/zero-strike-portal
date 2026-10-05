@@ -10,7 +10,6 @@ only a hard, job-wide condition (no active provider) fails the job.
 
 import asyncio
 import json
-import shutil
 import tempfile
 from datetime import datetime, timezone
 
@@ -39,6 +38,7 @@ from app.services import (
     remediation_triage,
     secret_redaction,
 )
+from app.services import workdir_hygiene
 from app.services.remediation_tools import SubmitFixProposalArgs, ToolContext
 
 logger = structlog.get_logger(__name__)
@@ -487,7 +487,7 @@ async def _try_clone(scan: Scan | None, repo: ProjectRepo | None, branch: str, j
         return workdir
     except Exception as exc:  # noqa: BLE001 — degrade to no-clone rather than fail the job
         logger.warning("propose clone failed; proposing without a worktree", error=git_workspace.sanitize(str(exc), token))
-        shutil.rmtree(workdir, ignore_errors=True)
+        workdir_hygiene.rmtree_logged(workdir)
         return None
 
 
@@ -611,7 +611,7 @@ async def run_job(job: RemediationJob) -> None:
         return
     finally:
         if workdir is not None:
-            shutil.rmtree(workdir, ignore_errors=True)
+            workdir_hygiene.rmtree_logged(workdir)
 
     now = datetime.now(timezone.utc)
     job.status = "completed"

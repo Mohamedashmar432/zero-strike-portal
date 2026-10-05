@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # memory headroom is available.
     scanner_max_workers: int = 2
     clone_workdir_path: str = ""  # empty => OS temp dir/zs-clones (cross-platform)
+    # Disk safety for clones (docs/CLONE_LIFECYCLE_AND_SCAN_REUSE.md). Refuse to start a clone when the
+    # workdir volume has less than this free; 0 disables the check.
+    clone_min_free_mb: int = 1024
+    # Fail a scan whose clone (working tree + .git) exceeds this size, before the scanner reads it;
+    # 0 disables. There is deliberately no partial-clone blob filter: checkout fetches the blobs anyway.
+    clone_max_repo_mb: int = 2048
 
     # Mongo-backed cloud-scan queue (see scan_queue_service).
     queue_poll_interval_seconds: int = 5

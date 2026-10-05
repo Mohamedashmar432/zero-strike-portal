@@ -367,6 +367,13 @@ def test_scan_from_public_project_repo_clones_with_no_token(client, monkeypatch)
 
     monkeypatch.setattr(scan_queue_service_module, "drain_queue", _noop)
 
+    from app.services import git_workspace
+
+    async def _fake_head(repo_url, branch, token=None, auth_scheme="bearer", timeout=30):
+        return "c" * 40  # the New-scan route now ls-remotes first; a public repo carries no token
+
+    monkeypatch.setattr(git_workspace, "remote_head", _fake_head)
+
     async def _fake_fetch_public_repo(owner, repo):
         return {
             "id": "1",
