@@ -22,6 +22,31 @@ mongo_module.AsyncIOMotorClient = AsyncMongoMockClient
 from app.main import create_app  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls(monkeypatch):
+    """Tests never reach a real LLM provider. Without this, any code path a test leaves unstubbed
+    (e.g. the remediation critic behind a stubbed agent) sent a real HTTPS request to the provider
+    with the fake key "k" -- so the test's timing, and its outcome, depended on that provider's
+    latency and availability: a 429/5xx/reset is a transient error, retried with a 5 s backoff,
+    which blew past the auto-fix poll budget and failed
+    test_repeated_runs_advance_through_a_scan_larger_than_one_batch intermittently.
+
+    The stub fails the way the real endpoint does for a bogus key (an authentication error, which
+    llm_client treats as permanent), so every caller degrades exactly as before -- instantly and
+    deterministically. A test that wants a response patches `litellm.acompletion` itself; its
+    monkeypatch runs after this one and wins."""
+    import litellm
+
+    async def _offline_acompletion(**kwargs):
+        raise litellm.AuthenticationError(
+            message="tests run offline: no real LLM provider is reachable",
+            llm_provider=str(kwargs.get("custom_llm_provider") or "test"),
+            model=str(kwargs.get("model") or "test"),
+        )
+
+    monkeypatch.setattr(litellm, "acompletion", _offline_acompletion)
+
+
 @pytest.fixture()
 def client():
     # rate_limit.limiter is a module-level singleton shared across the whole test process —
