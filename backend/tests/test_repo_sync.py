@@ -354,6 +354,7 @@ def test_branch_change_clears_remembered_head_and_error(client, monkeypatch):
 
 
 def test_create_scan_still_enqueues_a_cloud_scan(client, monkeypatch):
+    _fake_head(monkeypatch)
     headers, pid, rid = _setup(client)
 
     r = client.post(
@@ -365,6 +366,106 @@ def test_create_scan_still_enqueues_a_cloud_scan(client, monkeypatch):
     assert scan.status == "queued"
     project = asyncio.run(Project.get(pid))
     assert project.scan_count == 1
+    assert r.json()["outcome"] == "scan_queued"
+
+
+# --- manual New-scan route shares Repo Sync's entry point (docs/CLONE_LIFECYCLE_AND_SCAN_REUSE.md) --
+
+
+def _new_scan(client, headers, pid, rid, **extra):
+    return client.post(
+        f"/api/v1/projects/{pid}/scans", json={"scan_type": "cloud", "project_repo_id": rid, **extra}, headers=headers
+    )
+
+
+def test_manual_scan_of_up_to_date_repo_inserts_no_scan(client, monkeypatch):
+    _fake_head(monkeypatch, sha=SHA_A)
+    headers, pid, rid = _setup(client)
+    existing = _add_scan(pid, rid, commit=SHA_A)
+
+    r = _new_scan(client, headers, pid, rid)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["outcome"] == "up_to_date" and body["remote_head_sha"] == SHA_A
+    assert body["id"] == existing and body["git_commit"] == SHA_A  # the scan that already covers it
+    assert len(_scans(pid)) == 1
+
+
+def test_manual_scan_force_scans_an_up_to_date_repo_and_keeps_the_label(client, monkeypatch):
+    _fake_head(monkeypatch, sha=SHA_A)
+    headers, pid, rid = _setup(client)
+    _add_scan(pid, rid, commit=SHA_A)
+
+    r = _new_scan(client, headers, pid, rid, force=True, scan_label="rescan anyway")
+
+    assert r.status_code == 201 and r.json()["outcome"] == "scan_queued"
+    assert r.json()["triggered_by"] == "cloud" and r.json()["scan_label"] == "rescan anyway"
+    assert len(_scans(pid)) == 2
+
+
+def test_second_manual_scan_while_one_is_active_inserts_none(client, monkeypatch):
+    _fake_head(monkeypatch, sha=SHA_B)
+    headers, pid, rid = _setup(client)
+    _add_scan(pid, rid, commit=SHA_A)
+
+    first = _new_scan(client, headers, pid, rid)
+    second = _new_scan(client, headers, pid, rid)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["outcome"] == "already_syncing" and second.json()["id"] == first.json()["id"]
+    assert len(_scans(pid)) == 2  # the seeded completed scan + the one queued scan
+
+
+def test_manual_scan_while_a_sync_scan_runs_is_already_syncing(client, monkeypatch):
+    _fake_head(monkeypatch, sha=SHA_B)
+    headers, pid, rid = _setup(client)
+    running = _add_scan(pid, rid, status="running", commit=None)
+
+    r = _new_scan(client, headers, pid, rid, force=True)
+
+    assert r.status_code == 200 and r.json()["outcome"] == "already_syncing" and r.json()["id"] == running
+    assert len(_scans(pid)) == 1
+
+
+def test_manual_scan_ls_remote_failure_is_a_readable_409(client, monkeypatch):
+    _fake_head(monkeypatch, error="authentication failed")
+    headers, pid, rid = _setup(client)
+
+    r = _new_scan(client, headers, pid, rid)
+
+    assert r.status_code == 409 and "authentication failed" in r.json()["detail"]
+    assert _scans(pid) == []
+
+
+def test_ad_hoc_duplicate_active_scan_is_a_409_naming_it(client, monkeypatch):
+    headers, pid, _rid = _setup(client)
+    body = {"scan_type": "cloud", "repo_url": "https://github.com/octocat/other.git", "branch": "main"}
+
+    first = client.post(f"/api/v1/projects/{pid}/scans", json=body, headers=headers)
+    dup = client.post(f"/api/v1/projects/{pid}/scans", json=body, headers=headers)
+    other_branch = client.post(f"/api/v1/projects/{pid}/scans", json={**body, "branch": "dev"}, headers=headers)
+
+    assert first.status_code == 201 and first.json()["outcome"] == "scan_queued"
+    assert dup.status_code == 409 and first.json()["id"] in dup.json()["detail"]
+    assert other_branch.status_code == 201
+    assert len(_scans(pid)) == 2
+
+
+def test_ad_hoc_rescan_is_allowed_once_the_previous_scan_finished(client, monkeypatch):
+    headers, pid, _rid = _setup(client)
+    body = {"scan_type": "cloud", "repo_url": "https://github.com/octocat/other.git"}
+    first = client.post(f"/api/v1/projects/{pid}/scans", json=body, headers=headers)
+
+    async def finish():
+        scan = await Scan.get(first.json()["id"])
+        scan.status = "completed"
+        await scan.save()
+
+    asyncio.run(finish())
+
+    assert client.post(f"/api/v1/projects/{pid}/scans", json=body, headers=headers).status_code == 201
 
 
 

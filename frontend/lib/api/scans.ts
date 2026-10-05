@@ -55,6 +55,19 @@ export function listScans(projectId: string, page = 1, pageSize = 20) {
   return apiFetch<Page<Scan>>(`/projects/${projectId}/scans?page=${page}&page_size=${pageSize}`);
 }
 
+// What POST /projects/{id}/scans did. Only `scan_queued` creates a scan; for the other two the
+// returned scan fields describe the existing scan (the completed one that already covers the remote
+// head, or the queued/running one), so a caller that only reads `.id` still navigates somewhere sane.
+export type ScanCreateOutcome = "scan_queued" | "up_to_date" | "already_syncing";
+export type CreatedScan = Scan & { outcome: ScanCreateOutcome; remote_head_sha: string | null };
+
+/** "Already scanned at main@abc1234" for an `up_to_date` create result. */
+export function formatAlreadyScanned(scan: Pick<Scan, "branch" | "git_commit">, remoteHead?: string | null): string {
+  const sha = (scan.git_commit ?? remoteHead ?? "").slice(0, 7);
+  const where = [scan.branch, sha].filter(Boolean).join("@");
+  return where ? `Already scanned at ${where}` : "Already scanned";
+}
+
 // Only cloud scans are created via the API — local/CI scans are created by the
 // scanner itself (POST /api/v1/scans, api-key auth) after the user runs the CLI.
 export function createCloudScan(
@@ -66,9 +79,11 @@ export function createCloudScan(
     repo_token?: string;
     connection_id?: string;
     project_repo_id?: string;
+    // With project_repo_id: scan even when the remote head is already covered ("Rescan anyway").
+    force?: boolean;
   }
 ) {
-  return apiFetch<Scan>(`/projects/${projectId}/scans`, {
+  return apiFetch<CreatedScan>(`/projects/${projectId}/scans`, {
     method: "POST",
     body: JSON.stringify({ scan_type: "cloud", ...input }),
   });

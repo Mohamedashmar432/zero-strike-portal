@@ -20,7 +20,13 @@ import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
-import { createCloudScan, type CiProvider, type ScanType } from "@/lib/api/scans";
+import {
+  createCloudScan,
+  formatAlreadyScanned,
+  type CiProvider,
+  type CreatedScan,
+  type ScanType,
+} from "@/lib/api/scans";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
@@ -371,11 +377,20 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
     formState: { errors },
   } = useForm<NewCloudScanInput>({ resolver: zodResolver(newCloudScanSchema) });
 
+  // Set when the server declined to queue anything: the repo head is already scanned, or a scan of
+  // it is already in flight. The form stays put so "Rescan anyway" can re-submit the same input.
+  const [notice, setNotice] = useState<CreatedScan | null>(null);
+
   const mutation = useMutation({
-    mutationFn: (values: NewCloudScanInput) => createCloudScan(projectId, values),
+    mutationFn: ({ values, force }: { values: NewCloudScanInput; force?: boolean }) =>
+      createCloudScan(projectId, { ...values, ...(force ? { force: true } : {}) }),
     onSuccess: (scan) => {
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "scans"] });
       queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      if (scan.outcome !== "scan_queued") {
+        setNotice(scan);
+        return;
+      }
       toast.success("Cloud scan started");
       onClose();
       router.push(`/projects/${projectId}/scans/${scan.id}`);
@@ -419,7 +434,13 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
   }
 
   return (
-    <form onSubmit={handleSubmit((values) => mutation.mutate(values))} className="space-y-4">
+    <form
+      onSubmit={handleSubmit((values) => {
+        setNotice(null);
+        mutation.mutate({ values });
+      })}
+      className="space-y-4"
+    >
       <p className="text-sm text-muted-foreground">
         thinkShield clones the repository and scans it on the server.
       </p>
@@ -490,6 +511,54 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
         <Label htmlFor="cloud-label">Label (optional)</Label>
         <Input id="cloud-label" autoComplete="off" {...register("scan_label")} />
       </div>
+      {notice && (
+        <div role="status" className="space-y-3 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+          {notice.outcome === "up_to_date" ? (
+            <>
+              <p className="font-medium">{formatAlreadyScanned(notice, notice.remote_head_sha)}</p>
+              <p className="text-xs text-muted-foreground">
+                The branch has not moved since the last scan, so nothing was queued.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  nativeButton={false}
+                  render={<Link href={`/projects/${projectId}/scans/${notice.id}`} />}
+                >
+                  View results
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={mutation.isPending}
+                  onClick={() =>
+                    handleSubmit((values) => {
+                      setNotice(null);
+                      mutation.mutate({ values, force: true });
+                    })()
+                  }
+                >
+                  Rescan anyway
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">A scan of this repository is already {notice.status}.</p>
+              <Button
+                type="button"
+                size="sm"
+                nativeButton={false}
+                render={<Link href={`/projects/${projectId}/scans/${notice.id}`} />}
+              >
+                View running scan
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       <div className="flex justify-end border-t border-border pt-4">
         <Button type="submit" disabled={mutation.isPending || needsRepoSelection}>
           {mutation.isPending ? "Starting…" : "Start cloud scan"}

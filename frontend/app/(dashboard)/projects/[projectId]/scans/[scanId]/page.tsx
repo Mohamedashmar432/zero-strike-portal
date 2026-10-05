@@ -479,10 +479,16 @@ export default function ScanDetailPage() {
   // since their token is transient and was never persisted.
   const rescan = useMutation({
     mutationFn: () =>
-      createCloudScan(projectId, { project_repo_id: scan!.project_repo_id!, scan_label: scan!.scan_label ?? undefined }),
+      // An explicit Re-scan is "Rescan anyway": skip the up-to-date short circuit.
+      createCloudScan(projectId, {
+        project_repo_id: scan!.project_repo_id!,
+        scan_label: scan!.scan_label ?? undefined,
+        force: true,
+      }),
     onSuccess: (createdScan) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
-      toast.success("Re-scan started");
+      if (createdScan.outcome === "already_syncing") toast.info("A scan of this repository is already running");
+      else toast.success("Re-scan started");
       router.push(`/projects/${projectId}/scans/${createdScan.id}`);
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start re-scan"),

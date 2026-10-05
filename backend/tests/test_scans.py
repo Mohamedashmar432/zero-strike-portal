@@ -2,11 +2,24 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 import app.services.scan_queue_service as scan_queue_service
+from app.services import git_workspace
 from app.models.scan import Scan
 from tests.test_auth_flow import register_and_login
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "go_report_sample.json"
+
+
+@pytest.fixture(autouse=True)
+def _no_ls_remote(monkeypatch):
+    """Connected-repo scans now go through Repo Sync's ls-remote check; never touch the network."""
+
+    async def fake_head(repo_url, branch, token=None, auth_scheme="bearer", timeout=30):
+        return "a" * 40
+
+    monkeypatch.setattr(git_workspace, "remote_head", fake_head)
 
 
 def _headers(tokens):

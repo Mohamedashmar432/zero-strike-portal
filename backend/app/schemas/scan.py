@@ -22,6 +22,9 @@ class ScanCreateRequest(BaseModel):
     # credential) from a repo already connected to the project (see ProjectRepo) — set by the
     # "Use connected repo" picker.
     project_repo_id: str | None = None
+    # With project_repo_id: scan even when the remote head is already covered by a completed scan
+    # ("Rescan anyway"). Ignored for ad-hoc repo_url scans, which have no head check.
+    force: bool = False
 
     @model_validator(mode="after")
     def _validate_type_config(self):
@@ -69,6 +72,16 @@ class ScanResponse(BaseModel):
     # Denormalized (read-side join) per-scan severity breakdown, batched for the whole list page
     # (see project_stats_service.get_severity_by_scan_ids) -- avoids a per-row report fetch.
     findings_by_severity: SeverityCounts | None = None
+
+
+class ScanCreateResponse(ScanResponse):
+    """POST /projects/{id}/scans. The scan fields are always populated so existing callers keep
+    working: for `scan_queued` it is the new scan; for `up_to_date` the completed scan that already
+    covers the remote head; for `already_syncing` the queued/running scan. Only `outcome` says
+    which, and only `scan_queued` creates anything."""
+
+    outcome: Literal["scan_queued", "up_to_date", "already_syncing"] = "scan_queued"
+    remote_head_sha: str | None = None
 
 
 # --- Scanner-facing (api-key-authed) contract, matches the Go scanner's internal/portal client ---

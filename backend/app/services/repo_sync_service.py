@@ -30,6 +30,9 @@ class SyncResult:
     scan_id: str | None
     remote_head_sha: str | None
     repo: ProjectRepo
+    # For `up_to_date`: the completed scan that already covers the head (the sync endpoint does not
+    # expose it; the manual New-scan route returns it so the UI can offer "View results").
+    last_scan_id: str | None = None
 
 
 async def _acquire_lease(repo: ProjectRepo) -> bool:
@@ -118,7 +121,18 @@ async def sync_overviews(project_id: str, repos: list[ProjectRepo]) -> dict[str,
     return out
 
 
-async def sync_repo(project: Project, repo: ProjectRepo, user: User, *, force: bool = False) -> SyncResult:
+async def sync_repo(
+    project: Project,
+    repo: ProjectRepo,
+    user: User,
+    *,
+    force: bool = False,
+    scan_label: str | None = None,
+    triggered_by: str = "sync",
+) -> SyncResult:
+    """The single entry point for scanning a connected repo: Repo Sync and the New-scan route both
+    come through here, so lease, active-scan check, ls-remote and the up-to-date short circuit
+    cannot drift between them. `triggered_by="cloud"` keeps a manual scan labelled as one."""
     project_id, repo_id = str(project.id), str(repo.id)
     rate_limit.enforce(
         f"repo-sync:{user.id}",
@@ -173,7 +187,7 @@ async def sync_repo(project: Project, repo: ProjectRepo, user: User, *, force: b
         # A last scan with no recorded commit (failed, or legacy) can never prove "up to date".
         last = await latest_completed_scan(repo)
         if not force and last and last.git_commit == head and last.branch == repo.selected_branch:
-            return SyncResult("up_to_date", None, head, repo)
+            return SyncResult("up_to_date", None, head, repo, last_scan_id=str(last.id))
 
         scan = await scan_service.enqueue_repo_scan(
             project,
@@ -183,7 +197,8 @@ async def sync_repo(project: Project, repo: ProjectRepo, user: User, *, force: b
             repo_token=token,
             repo_token_auth_scheme="basic",
             project_repo_id=repo_id,
-            triggered_by="sync",
+            scan_label=scan_label,
+            triggered_by=triggered_by,
         )
         return SyncResult("scan_queued", str(scan.id), head, repo)
     finally:

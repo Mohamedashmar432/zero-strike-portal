@@ -8,7 +8,7 @@ from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.dashboard import SeverityCounts
 from app.schemas.report import FindingResponse, ReportResponse
-from app.schemas.scan import ScanCreateRequest, ScanResponse
+from app.schemas.scan import ScanCreateRequest, ScanCreateResponse, ScanResponse
 from app.services import (
     ai_analysis_service,
     connection_service,
@@ -16,6 +16,7 @@ from app.services import (
     project_repo_service,
     project_service,
     project_stats_service,
+    repo_sync_service,
     report_template_service,
     scan_queue_service,
     scan_service,
@@ -94,11 +95,14 @@ def _to_response(
     )
 
 
-@router.post("/projects/{project_id}/scans", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/projects/{project_id}/scans", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_scan(
     project_id: str,
     payload: ScanCreateRequest,
     background: BackgroundTasks,
+    response: Response,
     user: User = Depends(get_current_user),
 ):
     # Local and CI/CD scans are created by the scanner itself via API key (POST /api/v1/scans);
@@ -113,19 +117,30 @@ async def create_scan(
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
+    if payload.project_repo_id:
+        # A connected repo goes through Repo Sync's entry point (lease, active-scan check,
+        # ls-remote, up-to-date short circuit), so "New scan" and "Sync" cannot disagree or race.
+        project_repo = await project_repo_service.get_project_repo_or_404(project_id, payload.project_repo_id)
+        result = await repo_sync_service.sync_repo(
+            project, project_repo, user, force=payload.force, scan_label=payload.scan_label, triggered_by="cloud"
+        )
+        scan_id = result.scan_id or result.last_scan_id
+        scan = await scan_service.get_scan_or_404(scan_id) if scan_id else None
+        if scan is None:  # unreachable: every outcome carries a scan id
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Scan could not be resolved")
+        if result.outcome == "scan_queued":
+            # Attempt to start immediately if capacity is free; the poll loop is the backstop.
+            background.add_task(scan_queue_service.drain_queue)
+        else:
+            response.status_code = status.HTTP_200_OK  # nothing was created
+        return ScanCreateResponse(
+            **_to_response(scan).model_dump(), outcome=result.outcome, remote_head_sha=result.remote_head_sha
+        )
+
     repo_url = payload.repo_url
-    branch = payload.branch
     repo_token = payload.repo_token
     repo_token_auth_scheme = "bearer"
-
-    if payload.project_repo_id:
-        project_repo = await project_repo_service.get_project_repo_or_404(project_id, payload.project_repo_id)
-        repo_url = project_repo.clone_url
-        branch = project_repo.selected_branch
-        repo_token = project_repo_service.decrypt_pat(project_repo)
-        # Both providers' PATs authenticate git-over-HTTPS via Basic, never Bearer.
-        repo_token_auth_scheme = "basic"
-    elif payload.connection_id:
+    if payload.connection_id:
         repo_token, conn_provider = await connection_service.get_decrypted_token(payload.connection_id, user)
         # GitHub's git-over-HTTPS backend rejects Bearer even for OAuth tokens; Azure DevOps OAuth
         # (AAD) tokens are the one case that actually wants Bearer.
@@ -134,19 +149,32 @@ async def create_scan(
     if not repo_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "repo_url or project_repo_id is required")
 
+    # Ad-hoc scans have no lease or head check, but two live scans of one repo+branch are always waste.
+    duplicate = await Scan.find(
+        Scan.project_id == project_id,
+        Scan.repo_url == repo_url,
+        Scan.branch == payload.branch,
+        {"status": {"$in": ["queued", "running"]}},
+    ).first_or_none()
+    if duplicate:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A scan of this repository and branch is already {duplicate.status} (scan {duplicate.id})",
+        )
+
     scan = await scan_service.enqueue_repo_scan(
         project,
         user,
         repo_url=repo_url,
-        branch=branch,
+        branch=payload.branch,
         repo_token=repo_token,
         repo_token_auth_scheme=repo_token_auth_scheme,
-        project_repo_id=payload.project_repo_id,
+        project_repo_id=None,
         scan_label=payload.scan_label,
     )
     # Attempt to start immediately if capacity is free; the poll loop is the backstop otherwise.
     background.add_task(scan_queue_service.drain_queue)
-    return _to_response(scan)
+    return ScanCreateResponse(**_to_response(scan).model_dump())
 
 
 @router.get("/projects/{project_id}/scans", response_model=Page)
