@@ -379,6 +379,25 @@ def test_trigger_skips_already_fixed_findings_but_still_lists_them(client):
     assert r.status_code == 400 and "already fixed" in r.json()["detail"]
 
 
+def test_finding_trigger_409s_on_an_already_fixed_finding(client):
+    _enable_autofix(client, "loop-admin-one@zerostrike.dev")
+    headers, pid, rid = _setup(client, "loop-one@zerostrike.dev")
+
+    async def seed():
+        scan = await _scan(pid, rid)
+        v = await _vuln(pid, rid, "fp-gone")
+        fixed = await _finding(pid, str(scan.id), "fp-gone", vulnerability_id=str(v.id))
+        live = await _finding(pid, str(scan.id), "fp-live")
+        return str(fixed.id), str(live.id)
+
+    fixed_id, live_id = _run(seed())
+    r = client.post(f"/api/v1/findings/{fixed_id}/auto-fix", json={"force": True}, headers=headers)
+    assert r.status_code == 409 and "already fixed" in r.json()["detail"]
+    assert not _run(RemediationJob.find(RemediationJob.finding_ids == fixed_id).to_list())
+    r = client.post(f"/api/v1/findings/{live_id}/auto-fix", json={}, headers=headers)
+    assert r.status_code == 200, r.text
+
+
 def test_trigger_409s_on_a_superseded_scan(client):
     _enable_autofix(client, "loop-admin-old@zerostrike.dev")
     headers, pid, rid = _setup(client, "loop-old@zerostrike.dev")

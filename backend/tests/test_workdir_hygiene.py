@@ -26,6 +26,17 @@ def _age(path: Path, seconds: float) -> None:
     os.utime(path, (t, t))
 
 
+def test_rmtree_logged_removes_read_only_files(tmp_path):
+    # git writes pack files read-only; Windows refuses to unlink those without clearing the bit.
+    d = tmp_path / "zs-clone-ro"
+    (d / ".git" / "objects").mkdir(parents=True)
+    pack = d / ".git" / "objects" / "pack-1.pack"
+    pack.write_bytes(b"x")
+    os.chmod(pack, 0o444)
+    workdir_hygiene.rmtree_logged(d)
+    assert not d.exists()
+
+
 # --- sweep ------------------------------------------------------------------------------------
 
 

@@ -569,6 +569,11 @@ async def trigger_finding_auto_fix(
     active = await _active_job(scope_key)
     if active is not None:
         return await _finding_response(finding, active)
+    # Same rule as the scan-level trigger: no AI spend on code a later scan shows is gone.
+    if str(finding.id) in set(await vulnerability_service.fixed_findings_of_scan(finding.scan_id)):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This finding is already fixed in a later scan; there is nothing to fix."
+        )
 
     # Per-scan allowance. Free if this finding already has a proposal (a re-run or
     # revision was already paid for when it was first generated).

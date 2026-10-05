@@ -15,6 +15,7 @@ free-disk preflight (refuse before cloning) and the post-clone size cap (refuse 
 
 import os
 import shutil
+import stat
 import sys
 import time
 from dataclasses import dataclass
@@ -45,11 +46,23 @@ def rmtree_logged(path: str | Path) -> None:
             error=repr(exc),
         )
 
+    def _retry_writable(func, failed_path, exc) -> None:
+        # git writes pack/object files read-only; on Windows os.unlink refuses those outright.
+        # Clear the read-only bit and retry once before giving up and logging.
+        if isinstance(exc, PermissionError):
+            try:
+                os.chmod(failed_path, stat.S_IWRITE)
+                func(failed_path)
+                return
+            except Exception as retry_exc:  # noqa: BLE001 — logged below, cleanup never raises
+                exc = retry_exc
+        _log(func, failed_path, exc)
+
     try:
         if sys.version_info >= (3, 12):
-            shutil.rmtree(path, onexc=lambda f, p, e: _log(f, p, e))
+            shutil.rmtree(path, onexc=_retry_writable)
         else:  # `onerror` is deprecated from 3.12 but is the only spelling on 3.11
-            shutil.rmtree(path, onerror=lambda f, p, ei: _log(f, p, ei[1]))
+            shutil.rmtree(path, onerror=lambda f, p, ei: _retry_writable(f, p, ei[1]))
     except Exception as exc:  # the handler itself failing, or a vanished root
         _log(rmtree_logged, path, exc)
 

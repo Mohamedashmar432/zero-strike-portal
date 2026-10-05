@@ -8,6 +8,11 @@ for _name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "AZURE_KEY_VAULT_UR
     os.environ[_name] = ""
 # mongomock resolves an mongodb+srv:// URI over real DNS (slow/flaky offline), so give it a plain one.
 os.environ["MONGODB_URI"] = "mongodb://localhost:27017"
+# The app's startup sweep and every clone/remediation workdir land here, never in the developer's
+# real %TEMP%/zs-clones (which the sweep would otherwise prune).
+import tempfile  # noqa: E402
+
+os.environ["CLONE_WORKDIR_PATH"] = tempfile.mkdtemp(prefix="zs-test-clones-")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
