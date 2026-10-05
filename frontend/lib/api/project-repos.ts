@@ -20,7 +20,28 @@ export type ProjectRepo = {
   active_scan_id: string | null;
   last_sync_error: string | null;
   sync_state: RepoSyncState;
+  // Auto-fix PRs as last read from the provider (distinct PRs): still open, and merged after the
+  // last completed sync — the latter drives the "merged since last sync" reminder.
+  autofix_open_prs: number;
+  autofix_merged_since_sync: number;
 };
+
+export type PrStatusRefreshResponse = {
+  checked: number;
+  open: number;
+  merged: number;
+  closed: number;
+  newly_merged: number;
+  /** Sanitized provider messages; a failed PR read never fails the request. */
+  errors: string[];
+  repo: ProjectRepo;
+};
+
+/** "2 auto-fix PRs merged since last sync", or null when there is nothing to remind about. */
+export function formatMergedPrReminder(count: number): string | null {
+  if (!count || count < 1) return null;
+  return `${count} auto-fix PR${count === 1 ? "" : "s"} merged since last sync`;
+}
 
 export type RepoSyncState = "syncing" | "up_to_date" | "behind" | "error" | "never" | "unknown";
 export type RepoSyncOutcome = "up_to_date" | "scan_queued" | "already_syncing";
@@ -138,6 +159,13 @@ export function reauthProjectRepo(projectId: string, repoId: string, pat: string
   return apiFetch<ProjectRepo>(`/projects/${projectId}/repos/${repoId}/reauth`, {
     method: "POST",
     body: JSON.stringify({ pat }),
+  });
+}
+
+/** Re-read the repo's open auto-fix PRs from the provider (Sync does this too). */
+export function refreshRepoPrStatus(projectId: string, repoId: string) {
+  return apiFetch<PrStatusRefreshResponse>(`/projects/${projectId}/repos/${repoId}/pr-status/refresh`, {
+    method: "POST",
   });
 }
 

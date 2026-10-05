@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { statusChangeBlockReason } from "./vulnerabilities";
+import { fixedViaPrLabel, statusChangeBlockReason } from "./vulnerabilities";
+
+test("fixedViaPrLabel names the PR only when there is one", () => {
+  const pr = { pr_number: 12, pr_url: null, pr_provider: "github", merged_at: null, merge_commit: null };
+  expect(fixedViaPrLabel(pr)).toBe("Fixed via auto-fix PR #12");
+  expect(fixedViaPrLabel(null)).toBeNull();
+});
 
 describe("statusChangeBlockReason", () => {
   test("allows non-resolving transitions with no reason or comment", () => {

@@ -12,11 +12,13 @@ import { ApiError, retryUnlessForbiddenOrMissing } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import {
+  formatMergedPrReminder,
   formatSyncFinishedMessage,
   headCommitForSelectedBranch,
   listProjectRepos,
   reauthProjectRepo,
   refetchWhileAnyRepoSyncing,
+  refreshRepoPrStatus,
   removeProjectRepo,
   shortSha,
   syncProjectRepo,
@@ -754,6 +756,23 @@ function RepositoriesTab({
     if (finished) invalidateSyncViews(queryClient, projectId);
   }, [data, queryClient, projectId]);
 
+  // Once per visit, re-read the state of any repo's open auto-fix PRs so a PR merged on the
+  // provider shows up as the "merged since last sync" reminder without a Sync first. The server
+  // skips a PR read in the last minute, so revisiting the tab costs no provider calls. Failures are
+  // stored per PR server-side; nothing here to toast about.
+  const prChecked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!data) return;
+    const pending = data.filter((r) => r.autofix_open_prs > 0 && !prChecked.current.has(r.id));
+    if (!pending.length) return;
+    for (const r of pending) prChecked.current.add(r.id);
+    Promise.allSettled(pending.map((r) => refreshRepoPrStatus(projectId, r.id))).then((results) => {
+      if (results.some((x) => x.status === "fulfilled" && x.value.newly_merged > 0)) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      }
+    });
+  }, [data, queryClient, projectId]);
+
   const remove = useMutation({
     mutationFn: (repoId: string) => removeProjectRepo(projectId, repoId),
     onSuccess: () => {
@@ -834,10 +853,25 @@ function RepositoriesTab({
               const counts = summary?.by_repo[r.id];
               const syncing =
                 r.sync_state === "syncing" || (sync.isPending && sync.variables?.repoId === r.id);
+              const mergedReminder = formatMergedPrReminder(r.autofix_merged_since_sync);
               return (
               <TableRow key={r.id}>
                 <TableCell className="font-mono text-xs">
                   {r.label ? `${r.label} — ${r.repo_full_name}` : r.repo_full_name}
+                  {/* A reminder, not an auto-scan: nothing scans without a user action. */}
+                  {mergedReminder && !syncing && (
+                    <div className="mt-1 flex items-center gap-1 font-sans text-muted-foreground">
+                      <span>{mergedReminder} —</span>
+                      <button
+                        type="button"
+                        className="text-primary underline-offset-4 hover:underline disabled:opacity-50"
+                        onClick={() => runSync({ repoId: r.id })}
+                        disabled={isArchived}
+                      >
+                        Sync now
+                      </button>
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge variant="secondary" className="font-mono uppercase">

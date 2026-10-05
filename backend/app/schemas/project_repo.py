@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.repo_url import check_repo_url_syntax
 
@@ -75,6 +75,10 @@ class ProjectRepoResponse(BaseModel):
     active_scan_id: str | None = None
     last_sync_error: str | None = None
     sync_state: Literal["syncing", "up_to_date", "behind", "error", "never", "unknown"] = "unknown"
+    #: Auto-fix PRs (distinct PRs, not proposals) still open on the provider as last read, and those
+    #: merged after `last_synced_at` -- the "N auto-fix PRs merged since last sync" reminder.
+    autofix_open_prs: int = 0
+    autofix_merged_since_sync: int = 0
 
 
 class RepoSyncRequest(BaseModel):
@@ -86,4 +90,17 @@ class RepoSyncResponse(BaseModel):
     outcome: Literal["up_to_date", "scan_queued", "already_syncing"]
     scan_id: str | None
     remote_head_sha: str | None
+    repo: ProjectRepoResponse
+
+
+class PrStatusRefreshResponse(BaseModel):
+    """POST /projects/{id}/repos/{repo_id}/pr-status/refresh. `errors` are sanitized provider
+    messages; a failure for one PR never stops the others or the response."""
+
+    checked: int
+    open: int
+    merged: int
+    closed: int
+    newly_merged: int
+    errors: list[str] = Field(default_factory=list)
     repo: ProjectRepoResponse

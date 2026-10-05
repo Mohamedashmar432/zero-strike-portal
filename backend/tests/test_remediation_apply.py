@@ -173,6 +173,43 @@ def test_apply_push_denied_is_manual_review(client, monkeypatch):
     asyncio.run(run())
 
 
+def test_apply_records_pushed_branch_when_pr_call_fails(client, monkeypatch):
+    # The push succeeded, the PR call did not: the branch now exists on the remote with no PR, so its
+    # name must be recorded on the job and shown with the failure -- otherwise nobody can find it.
+    from app.services.repo_write import RepoWriteError
+
+    _install_git_mocks(monkeypatch, post_findings=[])
+
+    async def failing_pr(token, owner, repo, *, head, base, title, body):
+        raise RepoWriteError("GitHub PR creation failed (422): Validation Failed")
+
+    monkeypatch.setattr(gh_write, "open_pull_request", failing_pr)
+
+    async def run():
+        proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        job_reloaded = await RemediationJob.get(job.id)
+        assert reloaded.review_state == "manual_review"
+        assert job_reloaded.leftover_branch and job_reloaded.leftover_branch.startswith("zerostrike/fix-")
+        assert job_reloaded.leftover_branch in reloaded.manual_review_reason
+        assert "no PR was opened" in reloaded.manual_review_reason
+        assert reloaded.pr_url is None
+
+    asyncio.run(run())
+
+
+def test_apply_clears_leftover_branch_once_the_pr_exists(client, monkeypatch):
+    _install_git_mocks(monkeypatch, post_findings=[])
+
+    async def run():
+        _proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        assert (await RemediationJob.get(job.id)).leftover_branch is None
+
+    asyncio.run(run())
+
+
 def test_apply_refuses_branch_equal_to_base(client, monkeypatch):
     # An owner-supplied branch name equal to base must never let the commit land on base.
     _install_git_mocks(monkeypatch, post_findings=[])

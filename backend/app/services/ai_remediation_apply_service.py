@@ -435,6 +435,9 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
         commit_sha = sha_out.strip() if rc == 0 else None
 
         branch_name = await _push_with_recovery(workdir, branch_name, token, git_scheme)
+        # From here until the PR exists, the remote holds a branch nobody will find from the portal.
+        # Record it on the job first, so whatever fails next leaves a name to clean up or PR by hand.
+        await job.set({RemediationJob.leftover_branch: branch_name})
         for it in survivors:
             await audit_service.record(
                 "AI Fix Branch Pushed", actor_user_id=job.approver_user_id,
@@ -465,7 +468,11 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
         try:
             pr = await _open_pr(repo, token, rest_scheme, branch_name, base, title, body)
         except RepoWriteError as exc:
-            raise _ManualReview(str(exc))
+            raise _ManualReview(
+                f"{exc} The fix branch {branch_name!r} was pushed but no PR was opened: open the PR from "
+                "it by hand, or delete the branch before re-approving."
+            )
+        await job.set({RemediationJob.leftover_branch: None})
 
         for it in survivors:
             p = it.proposal

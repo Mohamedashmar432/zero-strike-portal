@@ -1,6 +1,7 @@
 # Clone lifecycle and scan reuse
 
-Status: phases A, B and C built on `feat/repo-sync`; D not started. Date: 2026-10-05.
+Status: phases A, B, C and D built on `feat/repo-sync` (D on 2026-10-05; browser pass still to do).
+Date: 2026-10-05.
 
 ## Question
 
@@ -104,6 +105,33 @@ auto-fix can propose fixes for findings a later scan already shows as fixed.
   the job and show it with the failure, so it can be cleaned up or the PR opened manually.
 - Tests: provider responses stubbed (merged/open/closed/404/auth error); reminder count; trigger
   skips fixed findings and 409s on a superseded scan; attribution shows only for merged PRs.
+
+**As built (D).**
+- The PR is recorded on `AIFixProposal` (every proposal of a batch carries the same `pr_url` /
+  `pr_number`); `RemediationJob` holds no PR fields. So `pr_state`, `pr_merged_at`, `pr_merge_commit`,
+  plus `pr_checked_at` and a sanitized `pr_check_error`, live on the proposal. One provider call per
+  distinct PR, applied to all its proposals. `services/pr_status_service.py` owns it; the provider
+  reads are `repo_write/github.get_pull_request_state` and `repo_write/azure_devops.get_pull_request_state`
+  (project-scoped `_apis/git/pullrequests/{id}`, so no repository-GUID lookup). Credential: the
+  repo's stored PAT (anonymous for a public GitHub repo), header only.
+- Merged and closed are final and never re-read; an open PR read in the last 60 s is skipped. That is
+  what lets the Repos tab call `pr-status/refresh` once per visit for repos with open PRs (so a merge
+  shows up as the reminder without a Sync first) without a provider call per reload. No rate limit on
+  the endpoint for the same reason.
+- Sync runs the refresh inside `sync_repo` (so New scan on a connected repo does too), bounded by a
+  20 s timeout and wrapped so any failure is logged and the sync continues.
+- A merge never marks anything fixed. Only the next scan's reconcile does; the merged state feeds the
+  reminder and the "Fixed via auto-fix PR #N" join on `GET .../vulnerabilities/{id}` (`fixed_via_pr`).
+- Audit: "Auto-Fix PR Merged", "Auto-Fix PR Closed", "Auto-Fix PR Status Check Failed" (project
+  category). No notification: no existing `EVENTS` key fits, and the reminder is the signal.
+- Trigger: findings whose vulnerability is fixed are excluded from selection even under `force` (and
+  even when named in `finding_ids`), the over-fetch bound counts them, and `uncovered_findings` no longer
+  counts them (they are not work left) while `already_fixed_findings` and `insight.already_fixed` list
+  them, so `total_findings` still accounts for the whole scan. A superseded scan 409s only when it maps to
+  a connected repo; unlinked-bucket scans have no repo identity to compare within.
+- Leftover branch: `RemediationJob.leftover_branch` is set right after the push and cleared once the PR
+  exists, so a non-null value always names a branch to clean up. The proposal's manual-review reason
+  names it too, and the scan response exposes it per proposal (`leftover_branch`).
 
 ### Verification
 - pytest/ruff/tsc/lint/vitest; browser pass: New scan on a synced repo shows "Already

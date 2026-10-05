@@ -24,6 +24,7 @@ from app.schemas.ai_remediation import (
     ActivityEvent,
     ActivityResponse,
     AIFixTriggerRequest,
+    AlreadyFixedFinding,
     ApproveRequest,
     AskRequest,
     AutoFixInsight,
@@ -54,13 +55,16 @@ from app.services import (
     auto_fix_quota_service,
     fix_pattern_service,
     llm_client,
+    project_repo_service,
     project_service,
     remediation_brief_service,
     remediation_project_doc_service,
     remediation_settings_service,
     scan_service,
+    vulnerability_service,
     workspace_settings_service,
 )
+from app.services import project_stats_service as stats_svc
 
 router = APIRouter(tags=["ai-remediation"])
 
@@ -112,6 +116,38 @@ async def _active_job(scope_key: str) -> RemediationJob | None:
     ).first_or_none()
 
 
+async def _leftover_branches(scan_id: str) -> dict[str, str]:
+    """{proposal_id: branch} for this scan's apply jobs that pushed a branch but opened no PR."""
+    jobs = await RemediationJob.find(
+        RemediationJob.scan_id == scan_id,
+        RemediationJob.kind == "apply",
+        RemediationJob.leftover_branch != None,  # noqa: E711 -- Mongo null match
+    ).to_list()
+    out: dict[str, str] = {}
+    for j in jobs:
+        for pid in j.proposal_ids or ([j.proposal_id] if j.proposal_id else []):
+            out[pid] = j.leftover_branch
+    return out
+
+
+_SUPERSEDED_409 = (
+    "A newer scan of this repository exists; run Auto-Fix on it. Fixes drafted against an older "
+    "scan target code that may already have changed."
+)
+
+
+async def _is_superseded(scan: Scan) -> bool:
+    """True when a newer completed scan of the same connected repo exists. A scan that maps to no
+    connected repo (the unlinked bucket) has no repo identity to compare within, so never is."""
+    resolve = stats_svc.repo_key_resolver(await project_repo_service.list_repos(scan.project_id))
+    key = resolve(scan)
+    if key == stats_svc.UNLINKED_REPO_KEY:
+        return False
+    created = as_utc(scan.created_at)
+    completed = await Scan.find(Scan.project_id == scan.project_id, Scan.status == "completed").to_list()
+    return any(s.id != scan.id and resolve(s) == key and as_utc(s.created_at) > created for s in completed)
+
+
 # Single implementation, shared with the brief renderer, so the diff shown in the UI, the one the
 # /patch endpoint serves, and the one embedded in a brief are byte-identical.
 _unified_diff = remediation_brief_service.unified_diff
@@ -145,6 +181,8 @@ def _to_out(p: AIFixProposal, fmap: dict[str, Finding]) -> FixProposalOut:
         branch_name=p.branch_name,
         pr_url=p.pr_url,
         pr_number=p.pr_number,
+        pr_state=p.pr_state,
+        pr_merged_at=p.pr_merged_at,
         triage=p.triage,
         critique=p.critique,
         validation=p.validation,
@@ -180,12 +218,17 @@ def _risk_rating(outs: list[FixProposalOut]) -> str:
     return "none" if best < 0 else _RANK_TO_RATING[best]
 
 
-def _summary(outs: list[FixProposalOut], total_findings: int, threshold: float) -> AutoFixSummary:
+def _summary(
+    outs: list[FixProposalOut], total_findings: int, threshold: float, already_fixed: int = 0
+) -> AutoFixSummary:
     s = AutoFixSummary(
         total_findings=total_findings,
         # `outs` is one proposal per finding, so the difference is exactly the findings no
         # run has looked at yet -- never negative even if a proposal outlives its finding.
-        uncovered_findings=max(0, total_findings - len(outs)),
+        # Already-fixed findings are not work left: the trigger skips them, so counting them
+        # here would label the button with findings no run will ever pick up.
+        uncovered_findings=max(0, total_findings - len(outs) - already_fixed),
+        already_fixed_findings=already_fixed,
         confidence_threshold=threshold,
     )
     for o in outs:
@@ -239,11 +282,31 @@ async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFi
     # One proposal per finding (the service replaces priors, but keep newest defensively).
     seen: set[str] = set()
     outs: list[FixProposalOut] = []
+    fixed = await vulnerability_service.fixed_findings_of_scan(scan_id)
+    leftover = await _leftover_branches(scan_id)
     for p in proposals:
         if p.finding_id in seen:
             continue
         seen.add(p.finding_id)
-        outs.append(_to_out(p, fmap))
+        out = _to_out(p, fmap)
+        out.leftover_branch = leftover.get(str(p.id))
+        if p.finding_id in fixed:
+            out.already_fixed, out.already_fixed_in = True, fixed[p.finding_id]
+        outs.append(out)
+    # Every finding of the scan stays accounted for: a proposal row, an "already fixed" row, or the
+    # uncovered count. Excluding a fixed finding from the batch must not drop it from the listing.
+    already_fixed_rows = [
+        AlreadyFixedFinding(
+            finding_id=fid,
+            rule_name=f.rule_name,
+            severity=f.severity,
+            file=f.location.file if f.location else None,
+            start_line=f.location.start_line if f.location else None,
+            fixed_commit=fixed[fid],
+        )
+        for fid, f in fmap.items()
+        if fid in fixed and fid not in seen
+    ]
     status_value, error, started_at, done, total = _resolve_status(job, bool(outs))
     # ponytail: one singleton read per scan (also inside the project-list loop); it's an indexed
     # find_one — thread `threshold` down if a project ever has many scans-with-fixes.
@@ -265,8 +328,14 @@ async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFi
         quota_skipped=job.quota_skipped if job else 0,
         skipped_existing=job.skipped_existing if job else 0,
         insight=AutoFixInsight(
-            summary=_summary(outs, total_findings=len(findings), threshold=policy.confidence_threshold),
+            summary=_summary(
+                outs,
+                total_findings=len(findings),
+                threshold=policy.confidence_threshold,
+                already_fixed=len(already_fixed_rows),
+            ),
             proposals=outs,
+            already_fixed=already_fixed_rows,
         ),
     )
 
@@ -290,6 +359,8 @@ async def trigger_scan_auto_fix(
     active = await _active_job(scope_key)
     if active is not None:
         return await _scan_response(scan_id, active)
+    if await _is_superseded(scan):
+        raise HTTPException(status.HTTP_409_CONFLICT, _SUPERSEDED_409)
 
     # max_findings_per_job is spend policy, so it stays workspace-wide (admin-only) and has
     # no project override -- unlike `enabled` and the confidence threshold above. It bounds
@@ -305,28 +376,37 @@ async def trigger_scan_auto_fix(
             p.finding_id
             for p in await AIFixProposal.find(AIFixProposal.scan_id == scan_id).to_list()
         }
+    # A finding whose vulnerability is already fixed (a later scan no longer sees it, or it was
+    # resolved as fixed) is excluded even under force: a patch for code that is gone spends AI on
+    # nothing. It still lists in the workspace as "Already fixed in <sha7>" -- only selection skips it.
+    fixed_ids = set(await vulnerability_service.fixed_findings_of_scan(scan_id))
+    excluded = done_ids | fixed_ids
     if payload.finding_ids:
-        candidates = [fid for fid in payload.finding_ids if fid not in done_ids]
+        candidates = [fid for fid in payload.finding_ids if fid not in excluded]
     else:
-        # Over-fetch by the number already done: the top (batch + done) by priority is
-        # guaranteed to contain a full batch of un-proposed findings if that many exist,
+        # Over-fetch by the number excluded: the top (batch + excluded) by priority is
+        # guaranteed to contain a full batch of selectable findings if that many exist,
         # so this stays bounded on a scan with thousands of findings.
         findings = (
             await Finding.find(Finding.scan_id == scan_id)
             .sort("-priority_score")
-            .limit(cfg.max_findings_per_job + len(done_ids))
+            .limit(cfg.max_findings_per_job + len(excluded))
             .to_list()
         )
-        candidates = [str(f.id) for f in findings if str(f.id) not in done_ids]
+        candidates = [str(f.id) for f in findings if str(f.id) not in excluded]
     finding_ids = candidates[: cfg.max_findings_per_job]
     if not finding_ids:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Every finding in this scan already has a fix proposal. Use Regenerate on an "
-            "individual proposal to redraft it."
-            if done_ids
-            else "Scan has no findings to fix",
-        )
+        if done_ids:
+            detail = (
+                "Every finding in this scan already has a fix proposal"
+                + (" or is already fixed" if fixed_ids else "")
+                + ". Use Regenerate on an individual proposal to redraft it."
+            )
+        elif fixed_ids:
+            detail = "Every finding in this scan is already fixed in a later scan; there is nothing to fix."
+        else:
+            detail = "Scan has no findings to fix"
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail)
 
     # Per-scan allowance. Clamps rather than rejecting: submitting 10 findings with 3
     # left fixes the 3 highest-priority ones and reports the shortfall, which beats
@@ -361,6 +441,7 @@ async def trigger_scan_auto_fix(
             "findings": len(finding_ids),
             "force": payload.force,
             "quota_skipped": quota_skipped,
+            "already_fixed_skipped": len(fixed_ids),
         },
     )
     return await _scan_response(scan_id, job)

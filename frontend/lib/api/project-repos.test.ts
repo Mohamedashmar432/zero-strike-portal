@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { formatSyncCounts, formatSyncFinishedMessage, headCommitForSelectedBranch, refetchWhileAnyRepoSyncing, shortSha, type ProjectRepo } from "./project-repos";
+import { formatMergedPrReminder, formatSyncCounts, formatSyncFinishedMessage, headCommitForSelectedBranch, refetchWhileAnyRepoSyncing, shortSha, type ProjectRepo } from "./project-repos";
+
+test("formatMergedPrReminder pluralizes and stays quiet at zero", () => {
+  expect(formatMergedPrReminder(1)).toBe("1 auto-fix PR merged since last sync");
+  expect(formatMergedPrReminder(3)).toBe("3 auto-fix PRs merged since last sync");
+  expect(formatMergedPrReminder(0)).toBeNull();
+});
 
 const repo = (sync_state: ProjectRepo["sync_state"]) => ({ sync_state }) as ProjectRepo;
 

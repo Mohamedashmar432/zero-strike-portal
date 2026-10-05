@@ -68,6 +68,14 @@ class AIFixProposal(Document):
     pr_url: str | None = None
     pr_number: int | None = None
     pr_provider: str | None = None
+    # PR lifecycle as last read from the provider (pr_status_service; docs/CLONE_LIFECYCLE_AND_SCAN_REUSE.md
+    # phase D). None until first checked. Every proposal of a batch PR carries the same values.
+    pr_state: Literal["open", "merged", "closed"] | None = None
+    pr_merged_at: datetime | None = None
+    pr_merge_commit: str | None = None
+    pr_checked_at: datetime | None = None
+    # The last check's sanitized error, cleared by the next successful read. Never fails a sync.
+    pr_check_error: str | None = None
     # --- per-stage artifacts. Three dicts, one per pipeline stage that can independently judge
     # this proposal, so a reviewer (and a debugger) can see WHY it ended up in its review_state
     # without re-running anything. Each is None until its stage runs.

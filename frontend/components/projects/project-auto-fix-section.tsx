@@ -16,7 +16,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SeverityBadge } from "@/components/severity/severity-badge";
 import {
+  alreadyFixedLabel,
   type AutoFixRiskRating,
   downloadScanBrief,
   getScanAutoFix,
@@ -101,6 +103,7 @@ export function ProjectAutoFixSection({
   const commentCounts = new Map((commentSummary?.by_finding ?? []).map((c) => [c.finding_id, c.count]));
 
   const proposals = data?.insight?.proposals ?? [];
+  const alreadyFixed = data?.insight?.already_fixed ?? [];
   const summary = data?.insight?.summary;
   const uncovered = summary?.uncovered_findings ?? 0;
   const status = data?.status;
@@ -270,6 +273,30 @@ export function ProjectAutoFixSection({
           title="Generate fixes"
           description="Run Auto-Fix to produce reviewable patch proposals for this scan's findings."
         />
+      )}
+
+      {/* Findings Auto-Fix skipped because a later scan already shows them fixed. Listed so the
+          workspace still accounts for every finding of the scan — only the batch leaves them out. */}
+      {alreadyFixed.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Already fixed ({alreadyFixed.length})</h3>
+          <p className="text-sm text-muted-foreground">
+            A later scan no longer detects these, so Auto-Fix skips them and spends nothing on them.
+          </p>
+          <ul className="divide-y rounded-lg border">
+            {alreadyFixed.map((f) => (
+              <li key={f.finding_id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                {f.severity && <SeverityBadge severity={f.severity} />}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{f.rule_name ?? "Finding"}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {f.file ?? "—"}
+                  {f.start_line ? `:${f.start_line}` : ""}
+                </span>
+                <span className="text-xs text-muted-foreground">{alreadyFixedLabel(f.fixed_commit)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <CommentsDrawer

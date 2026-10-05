@@ -86,10 +86,26 @@ export type VulnerabilityActivityEvent = {
   created_at: string;
 };
 
+/** The merged auto-fix PR behind a fixed vulnerability (read-time join, server-side). */
+export type FixedViaPullRequest = {
+  pr_number: number;
+  pr_url: string | null;
+  pr_provider: string | null;
+  merged_at: string | null;
+  merge_commit: string | null;
+};
+
 export type VulnerabilityDetail = Vulnerability & {
   observations: VulnerabilityScanObservation[];
   activity: VulnerabilityActivityEvent[];
+  /** Set only for a fixed vulnerability whose finding's auto-fix PR was merged. */
+  fixed_via_pr: FixedViaPullRequest | null;
 };
+
+/** "Fixed via auto-fix PR #12", or null when the fix did not come through an auto-fix PR. */
+export function fixedViaPrLabel(pr: FixedViaPullRequest | null | undefined): string | null {
+  return pr ? `Fixed via auto-fix PR #${pr.pr_number}` : null;
+}
 
 export type RegressionBucket = {
   /** True total for this bucket -- `items` below is only a capped preview. */

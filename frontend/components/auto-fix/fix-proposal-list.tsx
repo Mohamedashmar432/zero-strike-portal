@@ -11,7 +11,7 @@ import { useMemo, useRef, useState } from "react";
 import { FixReviewStateBadge } from "@/components/auto-fix/fix-review-state-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
 import { Input } from "@/components/ui/input";
-import type { AiFixProposal, FixReviewState } from "@/lib/api/auto-fix";
+import { type AiFixProposal, alreadyFixedLabel, type FixReviewState } from "@/lib/api/auto-fix";
 import type { Severity } from "@/lib/api/findings";
 import { cn } from "@/lib/utils";
 import { canBatchApprove, confidenceTone, FALLBACK_THRESHOLD } from "./fix-actions";
@@ -284,6 +284,9 @@ export function FixProposalList({
                   )}
                   <FixReviewStateBadge state={p.review_state as FixReviewState} />
                 </div>
+                {p.already_fixed && (
+                  <p className="text-xs text-muted-foreground">{alreadyFixedLabel(p.already_fixed_in)}</p>
+                )}
               </button>
             </li>
           );

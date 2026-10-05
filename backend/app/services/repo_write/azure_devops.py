@@ -3,6 +3,7 @@ the repository GUID, so resolve it by name at apply time. PAT -> Basic auth; OAu
 Bearer (matches repo_pat vs oauth adapters). Requires the vso.code_write scope (see oauth/azure_devops.py)."""
 
 import base64
+from urllib.parse import quote
 
 import httpx
 
@@ -70,3 +71,31 @@ async def open_pull_request(
     web = (b.get("repository") or {}).get("webUrl") or ""
     pr_url = f"{web}/pullrequest/{pr_id}" if web else ((b.get("_links") or {}).get("web") or {}).get("href", "")
     return {"pr_url": pr_url, "pr_number": pr_id}
+
+
+# Azure DevOps PR status -> the portal's open|merged|closed. "completed" is a merge; "abandoned" is a
+# close without one.
+_ADO_STATE = {"active": "open", "completed": "merged", "abandoned": "closed"}
+
+
+async def get_pull_request_state(token: str, auth_scheme: str, org: str, project: str, pr_id: int) -> dict:
+    """Read one PR's state by id at the project scope (a PR id is unique within an ADO project, so no
+    repository GUID lookup is needed). Token in the Authorization header only. Returns {state,
+    merged_at, merge_commit}."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://dev.azure.com/{quote(org, safe='')}/{quote(project, safe='')}"
+            f"/_apis/git/pullrequests/{int(pr_id)}",
+            headers=_headers(token, auth_scheme),
+            params={"api-version": API_VERSION},
+            timeout=15,
+        )
+    if resp.status_code != 200:
+        raise RepoWriteError(f"Azure DevOps PR lookup failed ({resp.status_code}): {_msg(resp)}")
+    b = resp.json()
+    state = _ADO_STATE.get(str(b.get("status") or "").lower(), "open")
+    return {
+        "state": state,
+        "merged_at": b.get("closedDate") if state == "merged" else None,
+        "merge_commit": ((b.get("lastMergeCommit") or {}).get("commitId")) if state == "merged" else None,
+    }

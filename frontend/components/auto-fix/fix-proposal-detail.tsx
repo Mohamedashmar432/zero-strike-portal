@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   type AiFixProposal,
+  alreadyFixedLabel,
   downloadFixPatch,
   type FixReviewState,
   saveBlob,
@@ -142,6 +143,19 @@ export function FixProposalDetail({
           <p className="rounded-md border border-severity-high/30 bg-severity-high/5 px-3 py-2 text-sm">
             <span className="font-medium">Apply failed: </span>
             {caps.failedReason}
+          </p>
+        )}
+        {/* Pushed but no PR: the branch exists on the remote and nothing in the portal points at it. */}
+        {proposal.leftover_branch && (caps.manualReason || caps.failedReason) && (
+          <p className="rounded-md border px-3 py-2 text-sm">
+            <span className="font-medium">Branch pushed without a PR: </span>
+            <code className="font-mono text-xs">{proposal.leftover_branch}</code> — open the PR from it by hand,
+            or delete it before re-approving.
+          </p>
+        )}
+        {proposal.already_fixed && (
+          <p className="rounded-md border px-3 py-2 text-sm text-muted-foreground">
+            {alreadyFixedLabel(proposal.already_fixed_in)} — a later scan no longer detects this finding.
           </p>
         )}
         {proposal.risk_notes && <p className="text-xs text-severity-medium">Risk: {proposal.risk_notes}</p>}

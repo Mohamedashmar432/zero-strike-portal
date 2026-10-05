@@ -93,6 +93,14 @@ export type AiFixProposal = {
   branch_name: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  /** PR lifecycle as last read from the provider; null until checked. */
+  pr_state?: "open" | "merged" | "closed" | null;
+  pr_merged_at?: string | null;
+  /** A branch the apply pushed without opening a PR — PR it by hand or delete it. */
+  leftover_branch?: string | null;
+  /** A later scan already shows this finding's vulnerability fixed (in this commit, when known). */
+  already_fixed?: boolean;
+  already_fixed_in?: string | null;
   // Per-stage artifacts, so the UI can explain *why* a proposal is in its review_state instead of
   // just showing the badge. Each is null until its stage ran.
   triage: FixTriage | null;
@@ -108,6 +116,8 @@ export type AutoFixSummary = {
   total_findings: number;
   /** Findings with no proposal yet. Execution is batched; the listing is the whole scan. */
   uncovered_findings: number;
+  /** Findings with no proposal that a later scan shows fixed; skipped by Auto-Fix, still listed. */
+  already_fixed_findings?: number;
   auto_fixable: number;
   manual_review: number;
   proposed: number;
@@ -126,7 +136,26 @@ export type AutoFixSummary = {
   confidence_threshold: number;
 };
 
-export type AutoFixInsight = { summary: AutoFixSummary; proposals: AiFixProposal[] };
+/** A finding of the scan Auto-Fix skipped because its vulnerability is already fixed. */
+export type AlreadyFixedFinding = {
+  finding_id: string;
+  rule_name: string | null;
+  severity: Severity | null;
+  file: string | null;
+  start_line: number | null;
+  fixed_commit: string | null;
+};
+
+export type AutoFixInsight = {
+  summary: AutoFixSummary;
+  proposals: AiFixProposal[];
+  already_fixed?: AlreadyFixedFinding[];
+};
+
+/** "Already fixed in abc1234" (or without a sha when the fixing commit is unknown). */
+export function alreadyFixedLabel(commit: string | null | undefined): string {
+  return commit ? `Already fixed in ${commit.slice(0, 7)}` : "Already fixed";
+}
 
 // One row in the dedicated Auto-Fix section list.
 export type ProjectAutoFixScanItem = {

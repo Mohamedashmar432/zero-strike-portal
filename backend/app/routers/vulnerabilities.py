@@ -22,6 +22,7 @@ from app.models.user import User
 from app.models.vulnerability import Vulnerability
 from app.schemas.common import Page
 from app.schemas.vulnerability import (
+    FixedViaPullRequest,
     RegressionBucket,
     ScanRegressionResponse,
     VulnerabilityActivityEvent,
@@ -33,7 +34,13 @@ from app.schemas.vulnerability import (
     VulnerabilityStatusUpdateRequest,
     VulnerabilitySummaryResponse,
 )
-from app.services import audit_service, project_repo_service, project_service, vulnerability_service
+from app.services import (
+    audit_service,
+    pr_status_service,
+    project_repo_service,
+    project_service,
+    vulnerability_service,
+)
 from app.services import project_stats_service as stats_svc
 
 router = APIRouter(tags=["vulnerabilities"])
@@ -318,7 +325,20 @@ async def get_vulnerability(
     ]
 
     base = _to_out(vuln, emails)
-    return VulnerabilityDetailResponse(**base.model_dump(), observations=observations, activity=activity)
+    fixed_via_pr = None
+    if base.fix_status == "fixed":
+        merged = await pr_status_service.merged_pr_for_findings([str(f.id) for f in findings])
+        if merged is not None:
+            fixed_via_pr = FixedViaPullRequest(
+                pr_number=merged.pr_number,
+                pr_url=merged.pr_url,
+                pr_provider=merged.pr_provider,
+                merged_at=merged.pr_merged_at,
+                merge_commit=merged.pr_merge_commit,
+            )
+    return VulnerabilityDetailResponse(
+        **base.model_dump(), observations=observations, activity=activity, fixed_via_pr=fixed_via_pr
+    )
 
 
 # --- transitions ----------------------------------------------------------------------------

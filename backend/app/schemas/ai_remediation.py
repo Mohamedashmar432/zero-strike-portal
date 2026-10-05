@@ -86,6 +86,16 @@ class FixProposalOut(BaseModel):
     branch_name: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
+    #: PR lifecycle as last read from the provider (None until checked) -- see pr_status_service.
+    pr_state: Literal["open", "merged", "closed"] | None = None
+    pr_merged_at: datetime | None = None
+    #: A branch the apply job pushed without opening a PR (RemediationJob.leftover_branch), shown with
+    #: the failure so it can be PR'd by hand or deleted. Only set on scan-level responses.
+    leftover_branch: str | None = None
+    #: The commit a later scan saw this finding's vulnerability fixed in, when it is already fixed.
+    #: Auto-fix skips such findings; the row still lists, saying so.
+    already_fixed_in: str | None = None
+    already_fixed: bool = False
     # Per-stage artifacts, so the UI can explain *why* a proposal is in its review_state:
     # triage (deterministic, pre-LLM), critique (post-draft review), validation (re-scan gate).
     triage: dict | None = None
@@ -105,6 +115,10 @@ class AutoFixSummary(BaseModel):
     #: execution is batched, so this is the honest "how much work is left" number and the
     #: UI labels the trigger button with it. 0 means the scan is fully covered.
     uncovered_findings: int = 0
+    #: Findings with no proposal whose vulnerability a later scan already shows as fixed. Auto-fix
+    #: skips them (no AI spend), so they are not counted in uncovered_findings; the workspace still
+    #: lists each one as "Already fixed in <sha7>".
+    already_fixed_findings: int = 0
     auto_fixable: int = 0  # can_fix (any confidence) — kept for back-compat
     manual_review: int = 0
     proposed: int = 0
@@ -125,9 +139,22 @@ class AutoFixSummary(BaseModel):
     confidence_threshold: float = 0.0
 
 
+class AlreadyFixedFinding(BaseModel):
+    """A finding of this scan with no proposal, skipped by auto-fix because its vulnerability is
+    already fixed. Listed so the workspace still accounts for every finding of the scan."""
+
+    finding_id: str
+    rule_name: str | None = None
+    severity: str | None = None
+    file: str | None = None
+    start_line: int | None = None
+    fixed_commit: str | None = None
+
+
 class AutoFixInsight(BaseModel):
     summary: AutoFixSummary
     proposals: list[FixProposalOut] = Field(default_factory=list)
+    already_fixed: list[AlreadyFixedFinding] = Field(default_factory=list)
 
 
 class ProjectAutoFixScanItem(BaseModel):

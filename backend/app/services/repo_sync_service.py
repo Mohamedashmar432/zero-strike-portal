@@ -6,10 +6,12 @@ The fixed / still-open / new diff is NOT computed here -- it happens in vulnerab
 reconcile_scan when that scan ingests, so a failed scan can never mark anything fixed.
 """
 
+import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import HTTPException, status
 
 from app.core import rate_limit
@@ -18,10 +20,12 @@ from app.models.project import Project
 from app.models.project_repo import ProjectRepo
 from app.models.scan import Scan
 from app.models.user import User
-from app.services import audit_service, git_workspace, project_repo_service, scan_service
+from app.services import audit_service, git_workspace, pr_status_service, project_repo_service, scan_service
 from app.services import project_stats_service as stats_svc
 
 _LEASE_SECONDS = 90
+_PR_REFRESH_TIMEOUT_SECONDS = 20
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,18 @@ async def _acquire_lease(repo: ProjectRepo) -> bool:
 
 async def _release_lease(repo: ProjectRepo) -> None:
     await ProjectRepo.get_pymongo_collection().update_one({"_id": repo.id}, {"$set": {"sync_lease_until": None}})
+
+
+async def _refresh_pr_states(project_id: str, repo: ProjectRepo, user: User) -> None:
+    """Re-read this repo's open auto-fix PRs (pr_status_service) as part of the sync. Bounded and
+    best-effort: a slow or failing provider must never fail, or noticeably stall, the sync itself."""
+    try:
+        await asyncio.wait_for(
+            pr_status_service.refresh_repo_prs(project_id, repo, actor_user_id=str(user.id)),
+            timeout=_PR_REFRESH_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 -- includes the timeout
+        logger.warning("auto-fix PR status refresh during sync failed", repo_id=str(repo.id), exc_info=True)
 
 
 async def latest_completed_scan(repo: ProjectRepo) -> Scan | None:
@@ -158,6 +174,7 @@ async def sync_repo(
             target_id=repo_id,
             metadata={"branch": repo.selected_branch, "force": force},
         )
+        await _refresh_pr_states(project_id, repo, user)
         token = project_repo_service.decrypt_pat(repo)
         now = datetime.now(timezone.utc)
         try:

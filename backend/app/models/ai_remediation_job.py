@@ -92,6 +92,11 @@ class RemediationJob(Document):
     credential_source: CredentialSource | None = None
     connection_id: str | None = None
 
+    # kind="apply" only: a branch this job pushed whose PR was never opened (the PR call or anything
+    # after the push failed). Set right after the push, cleared once the PR exists, so a non-null value
+    # always names a branch someone must clean up or open a PR from by hand.
+    leftover_branch: str | None = None
+
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error_message: str | None = None

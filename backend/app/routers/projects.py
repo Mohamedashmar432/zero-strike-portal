@@ -37,6 +37,7 @@ from app.schemas.project_repo import (
     ProjectRepoReauthRequest,
     ProjectRepoResponse,
     ProjectRepoUpdateRequest,
+    PrStatusRefreshResponse,
     RepoSyncRequest,
     RepoSyncResponse,
 )
@@ -45,6 +46,7 @@ from app.services import (
     ai_provider_config_service,
     audit_service,
     llm_client,
+    pr_status_service,
     project_repo_service,
     project_service,
     project_stats_service,
@@ -79,7 +81,9 @@ def _to_project_response(
 
 
 def _to_project_repo_response(
-    repo: ProjectRepo, overview: repo_sync_service.SyncOverview | None = None
+    repo: ProjectRepo,
+    overview: repo_sync_service.SyncOverview | None = None,
+    prs: pr_status_service.RepoPrCounts | None = None,
 ) -> ProjectRepoResponse:
     sync = (
         {
@@ -96,6 +100,8 @@ def _to_project_repo_response(
         remote_head_sha=repo.remote_head_sha,
         last_sync_error=repo.last_sync_error,
         **sync,
+        autofix_open_prs=prs.open_prs if prs else 0,
+        autofix_merged_since_sync=prs.merged_since_sync if prs else 0,
         id=str(repo.id),
         project_id=repo.project_id,
         provider=repo.provider,
@@ -335,11 +341,21 @@ async def update_member_role(
     return _to_member_response(member, invitee.name if invitee else None)
 
 
+async def _repo_responses(project_id: str, repos: list[ProjectRepo]) -> dict[str, ProjectRepoResponse]:
+    """Sync state + auto-fix PR counts for a project's repos, one path for list and single-repo reads."""
+    all_repos = await project_repo_service.list_repos(project_id)
+    overviews = await repo_sync_service.sync_overviews(project_id, all_repos)
+    prs = await pr_status_service.repo_pr_counts(
+        project_id, all_repos, {k: o.last_synced_at for k, o in overviews.items()}
+    )
+    return {
+        str(r.id): _to_project_repo_response(r, overviews.get(str(r.id)), prs.get(str(r.id))) for r in repos
+    }
+
+
 async def _repo_response_with_sync(repo: ProjectRepo) -> ProjectRepoResponse:
     """Same sync_state path as the list endpoint, so single-repo responses never say 'unknown'."""
-    repos = await project_repo_service.list_repos(repo.project_id)
-    overviews = await repo_sync_service.sync_overviews(repo.project_id, repos)
-    return _to_project_repo_response(repo, overviews.get(str(repo.id)))
+    return (await _repo_responses(repo.project_id, [repo]))[str(repo.id)]
 
 
 @router.get("/{project_id}/repos", response_model=list[ProjectRepoResponse])
@@ -347,8 +363,8 @@ async def list_project_repos(project_id: str, user: User = Depends(get_current_u
     await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)
     repos = await project_repo_service.list_repos(project_id)
-    overviews = await repo_sync_service.sync_overviews(project_id, repos)
-    return [_to_project_repo_response(r, overviews.get(str(r.id))) for r in repos]
+    responses = await _repo_responses(project_id, repos)
+    return [responses[str(r.id)] for r in repos]
 
 
 @router.post("/{project_id}/repos", response_model=ProjectRepoResponse, status_code=status.HTTP_201_CREATED)
@@ -433,6 +449,28 @@ async def sync_project_repo(
         scan_id=result.scan_id,
         remote_head_sha=result.remote_head_sha,
         repo=await _repo_response_with_sync(result.repo),
+    )
+
+
+@router.post("/{project_id}/repos/{repo_id}/pr-status/refresh", response_model=PrStatusRefreshResponse)
+async def refresh_repo_pr_status(project_id: str, repo_id: str, user: User = Depends(get_current_user)):
+    """Re-read the state of this repo's open auto-fix PRs from the provider (also done on every
+    Sync). Read-only against the provider and the project, so members may call it on an archived
+    project too. Provider failures come back in `errors`, never as a non-2xx."""
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    repo = await project_repo_service.get_project_repo_or_404(project_id, repo_id)
+    # No rate limit: a PR read in the last minute is not re-read (pr_status_service._RECHECK_AFTER),
+    # so a reload-happy Repos tab costs Mongo reads, not provider calls.
+    result = await pr_status_service.refresh_repo_prs(project_id, repo, actor_user_id=str(user.id))
+    return PrStatusRefreshResponse(
+        checked=result.checked,
+        open=result.open,
+        merged=result.merged,
+        closed=result.closed,
+        newly_merged=result.newly_merged,
+        errors=result.errors,
+        repo=await _repo_response_with_sync(repo),
     )
 
 
