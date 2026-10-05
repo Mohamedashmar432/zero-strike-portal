@@ -163,7 +163,8 @@ export function FixProposalDetail({
 
       <div className="min-w-0 p-4">
         <Tabs defaultValue="diff">
-          <TabsList variant="line">
+          {/* Five tabs are ~434px wide; scroll inside the strip rather than the page at 390px. */}
+          <TabsList variant="line" className="max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="diff">Patch</TabsTrigger>
             <TabsTrigger value="evidence">Evidence</TabsTrigger>
             <TabsTrigger value="pipeline">Checks</TabsTrigger>

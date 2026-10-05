@@ -87,7 +87,7 @@ function ScanRow({ projectId, scan, isLatest }: { projectId: string; scan: FlatS
             </div>
           )}
         </div>
-        <SeverityCountPills counts={scan.findings_by_severity} />
+        <SeverityCountPills counts={scan.findings_by_severity} scanStatus={scan.status} />
       </Link>
     </li>
   );

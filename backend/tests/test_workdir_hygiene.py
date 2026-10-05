@@ -174,6 +174,7 @@ def test_preflight_below_threshold_fails_the_scan_readably_without_cloning(clien
     assert scan.status == "failed"
     assert "low on disk space" in scan.error_message and "not a problem with your repository" in scan.error_message
     assert git_calls == []  # refused before any clone
+    assert scan.stage == "cloning"  # not "validating", whose label blames the repository URL
     assert [p for p in tmp_path.iterdir() if p.name.startswith("zs-clone-")] == []
 
 

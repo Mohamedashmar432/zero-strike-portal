@@ -461,8 +461,10 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
         async with _beating(scan):
             await _stage(scan, "validating")
             pinned_ips = validate_repo_url(scan.repo_url)
-            await _guard_disk(workdir_hygiene.preflight_free_disk, root, settings.clone_min_free_mb)
+            # Inside "cloning", not "validating": a low-disk refusal is about the clone, and the
+            # "Checking the repository URL" stage label would blame the repo the message exonerates.
             await _stage(scan, "cloning")
+            await _guard_disk(workdir_hygiene.preflight_free_disk, root, settings.clone_min_free_mb)
             await _clone(scan.repo_url, scan.branch, workdir, repo_token, repo_token_auth_scheme, pinned_ips)
             await _guard_disk(workdir_hygiene.check_repo_size, workdir, settings.clone_max_repo_mb)
             await _stamp_head_commit(scan, workdir)

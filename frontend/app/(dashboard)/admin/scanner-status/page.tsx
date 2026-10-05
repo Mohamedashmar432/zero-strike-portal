@@ -20,7 +20,8 @@ export default function ScannerStatusPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["admin", "scanner-status"],
     queryFn: () => getScannerStatus(),
-    refetchInterval: 15000,
+    // Stop polling once it fails (e.g. a non-admin's 403): a forbidden page must not re-ask every 15 s.
+    refetchInterval: (query) => (query.state.status === "error" ? false : 15000),
   });
 
   return (
