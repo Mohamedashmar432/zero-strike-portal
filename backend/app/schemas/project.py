@@ -59,6 +59,9 @@ class ScanHistoryItem(BaseModel):
     # older per-repo scan-history endpoint.
     scan_type: ScanType | None = None
     scanned_by: str | None = None
+    triggered_by: str | None = None
+    branch: str | None = None
+    git_commit: str | None = None
 
 
 class OwaspSummaryResponse(BaseModel):

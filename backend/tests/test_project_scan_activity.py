@@ -136,3 +136,22 @@ def test_project_ai_usage_aggregates_and_is_project_scoped(client):
     assert body["total_requests"] == 3
     assert body["total_prompt_tokens"] == 150
     assert body["total_completion_tokens"] == 50
+
+
+def test_scan_activity_items_carry_trigger_branch_and_commit(client):
+    owner = register_and_login(client, email="activity-trigger@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    async def seed():
+        repo = await _repo(project["id"], "acme/sync")
+        await Scan(
+            project_id=project["id"], scan_type="cloud", triggered_by="sync", status="completed",
+            project_repo_id=str(repo.id), branch="main", git_commit="a" * 40,
+            created_at=now, completed_at=now, updated_at=now,
+        ).insert()
+
+    asyncio.run(seed())
+    body = client.get(f"/api/v1/projects/{project['id']}/scan-activity", headers=_headers(owner)).json()
+    item = body["repos"][0]["scans"][0]
+    assert (item["triggered_by"], item["branch"], item["git_commit"]) == ("sync", "main", "a" * 40)

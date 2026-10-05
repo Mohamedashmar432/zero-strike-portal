@@ -8,17 +8,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { revokeApiKey, createApiKey, listApiKeys } from "@/lib/api/api-keys";
-import { ApiError } from "@/lib/api/client";
+import { ApiError, retryUnlessForbiddenOrMissing } from "@/lib/api/client";
 import { inviteMember, listMembers, removeMember, updateMemberRole } from "@/lib/api/project-members";
 import { refetchWhileAnyScanOrAiActive } from "@/lib/api/polling";
 import {
-  formatSyncCounts,
+  formatSyncFinishedMessage,
+  headCommitForSelectedBranch,
   listProjectRepos,
   reauthProjectRepo,
   refetchWhileAnyRepoSyncing,
   removeProjectRepo,
   shortSha,
   syncProjectRepo,
+  updateProjectRepoBranch,
   type ProjectRepo,
 } from "@/lib/api/project-repos";
 import { getScanRegression, getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
@@ -624,9 +626,88 @@ function ReauthDialog({
   );
 }
 
-function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchived: boolean }) {
+function ChangeBranchDialog({
+  projectId,
+  repo,
+  onClose,
+}: {
+  projectId: string;
+  repo: ProjectRepo | null;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [branch, setBranch] = useState("");
+  // Re-seed whenever a different repo is opened (render-time one-shot, like the settings form).
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  if (repo && seededFor !== repo.id) {
+    setSeededFor(repo.id);
+    setBranch(repo.selected_branch);
+  }
+
+  const change = useMutation({
+    mutationFn: () => updateProjectRepoBranch(projectId, repo!.id, branch.trim()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      toast.success("Branch changed — sync to scan it");
+      setSeededFor(null);
+      onClose();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to change branch"),
+  });
+
+  return (
+    <Dialog open={repo !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            change.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Change branch</DialogTitle>
+            <DialogDescription>
+              Syncs and cloud scans of {repo?.label || repo?.repo_full_name} will use this branch. The
+              remembered head is cleared, so the next sync scans the new branch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-4">
+            <Label htmlFor="change-branch">Branch</Label>
+            <Input
+              id="change-branch"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="submit"
+              disabled={change.isPending || !branch.trim() || branch.trim() === repo?.selected_branch}
+            >
+              {change.isPending ? "Saving…" : "Change branch"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RepositoriesTab({
+  projectId,
+  isArchived,
+  canChangeBranch,
+}: {
+  projectId: string;
+  isArchived: boolean;
+  canChangeBranch: boolean;
+}) {
   const queryClient = useQueryClient();
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
+  const [branchTarget, setBranchTarget] = useState<ProjectRepo | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
@@ -661,8 +742,7 @@ function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchi
           else {
             getScanRegression(projectId, scanId)
               .then((reg) => {
-                const summary = formatSyncCounts(reg.fixed.count, reg.new.count, reg.reopened.count);
-                toast.success(`Sync of ${name} finished: ${summary}`);
+                toast.success(formatSyncFinishedMessage(name, reg));
               })
               .catch(generic);
           }
@@ -766,14 +846,19 @@ function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchi
                 </TableCell>
                 <TableCell className="font-mono text-xs">{r.selected_branch}</TableCell>
                 <TableCell className="font-mono text-xs">
-                  {r.sync_state === "behind" && r.scanned_commit ? (
+                  {r.sync_state === "behind" && headCommitForSelectedBranch(r) ? (
                     <span title="The remote branch has commits that were not scanned yet">
                       {shortSha(r.scanned_commit)} → {shortSha(r.remote_head_sha)}
                     </span>
-                  ) : r.scanned_commit ? (
+                  ) : headCommitForSelectedBranch(r) ? (
                     shortSha(r.scanned_commit)
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                    <span
+                      className="text-muted-foreground"
+                      title={r.scanned_commit ? "Not synced on this branch" : undefined}
+                    >
+                      —
+                    </span>
                   )}
                   {r.sync_state === "behind" && (
                     <Badge variant="secondary" className="ml-2 font-mono uppercase">
@@ -826,6 +911,11 @@ function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchi
                         </>
                       )}
                     </Button>
+                    {canChangeBranch && (
+                      <Button variant="outline" size="sm" onClick={() => setBranchTarget(r)}>
+                        Change branch
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => setReauthTargetId(r.id)}>
                       Re-authenticate
                     </Button>
@@ -846,6 +936,7 @@ function RepositoriesTab({ projectId, isArchived }: { projectId: string; isArchi
         </Table>
       </DataTableCard>
       <ReauthDialog projectId={projectId} repoId={reauthTargetId} onClose={() => setReauthTargetId(null)} />
+      <ChangeBranchDialog projectId={projectId} repo={branchTarget} onClose={() => setBranchTarget(null)} />
     </div>
   );
 }
@@ -1013,9 +1104,14 @@ export default function ProjectDetailPage() {
   // and left the old tab rendered while the state was the source of truth.
   const activeTab = tabParam && TAB_VALUES.includes(tabParam) ? tabParam : "overview";
 
-  const { data: project, isLoading: isProjectLoading } = useQuery({
+  const {
+    data: project,
+    isLoading: isProjectLoading,
+    error: projectError,
+  } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
+    retry: retryUnlessForbiddenOrMissing,
   });
 
   const { data: repos } = useQuery({
@@ -1047,6 +1143,35 @@ export default function ProjectDetailPage() {
     }
     const query = params.toString();
     router.replace(`/projects/${projectId}${query ? `?${query}` : ""}`, { scroll: false });
+  }
+
+  if (projectError && !project) {
+    const status = projectError instanceof ApiError ? projectError.status : null;
+    return (
+      <div className="space-y-4">
+        <EmptyState
+          title={
+            status === 403
+              ? "You don't have access to this project"
+              : status === 404
+                ? "Project not found"
+                : "Couldn't load this project"
+          }
+          description={
+            status === 403
+              ? "Ask a project owner to add you as a member."
+              : status === 404
+                ? "It may have been deleted, or the link is wrong."
+                : (projectError as Error).message
+          }
+        />
+        <div className="flex justify-center">
+          <Button variant="outline" nativeButton={false} render={<Link href="/projects" />}>
+            Back to Projects
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   if (isProjectLoading || !project) {
@@ -1157,7 +1282,13 @@ export default function ProjectDetailPage() {
             {activeTab === "ai-usage" && (
               <AiAnalyticsDashboard scope="project" projectId={projectId} />
             )}
-            {activeTab === "repos" && <RepositoriesTab projectId={projectId} isArchived={project.is_archived} />}
+            {activeTab === "repos" && (
+              <RepositoriesTab
+                projectId={projectId}
+                isArchived={project.is_archived}
+                canChangeBranch={canManage(project.my_role)}
+              />
+            )}
             {activeTab === "members" && (
               <MembersTab projectId={projectId} myRole={project?.my_role} />
             )}

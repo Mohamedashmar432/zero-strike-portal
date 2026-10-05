@@ -48,6 +48,9 @@ export type ScanHistoryItem = {
   // Populated by scan-activity: scan kind + who/what started it (member name, CI provider, host).
   scan_type: ScanType | null;
   scanned_by: string | null;
+  triggered_by?: string | null;
+  branch?: string | null;
+  git_commit?: string | null;
 };
 
 export type OwaspSummary = {

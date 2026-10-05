@@ -77,6 +77,7 @@ def _add_scan(pid, rid, *, status="completed", commit=SHA_A, branch="main"):
         scan = Scan(
             project_id=pid, scan_type="cloud", triggered_by="cloud", status=status, project_repo_id=rid,
             repo_url=URL, git_commit=commit, branch=branch, created_at=now, updated_at=now,
+            completed_at=now if status == "completed" else None,
         )
         await scan.insert()
         return str(scan.id)
@@ -410,6 +411,12 @@ def test_repo_state_up_to_date_vs_behind(client):
 
     _set_repo(rid, remote_head_sha=SHA_B)
     assert _repos(client, headers, pid)[rid]["sync_state"] == "behind"
+
+
+def test_last_synced_ignores_head_check_without_completed_scan(client):
+    headers, pid, rid = _setup(client, "state-lastsync@zerostrike.dev")
+    _set_repo(rid, remote_head_sha=SHA_A, remote_head_checked_at=datetime.now(timezone.utc))
+    assert _repos(client, headers, pid)[rid]["last_synced_at"] is None
 
 
 def test_repo_state_error_and_syncing_take_precedence(client):

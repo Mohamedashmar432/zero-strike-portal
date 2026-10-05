@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import structlog
 from beanie import PydanticObjectId
 
+from app.core.timeutils import as_utc
 from app.core.owasp import OWASP_CODES_ORDERED
 from app.core.priority import compute_priority
 from app.models.finding import (
@@ -311,7 +312,13 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     await _apply_finding_delta(project_id, old_total, old_by_sev, findings)
 
     now = datetime.now(timezone.utc)
-    duration_ms = round(report.duration_ns / 1_000_000) if report.duration_ns is not None else None
+    if report.duration_ns:  # None or 0 = the scanner did not time itself; 0 must not read as "0.0s"
+        duration_ms: int | None = round(report.duration_ns / 1_000_000)
+    elif scan.started_at:
+        # Wall time since the scan was claimed - includes clone, but is real, unlike a zero.
+        duration_ms = max(0, round((now - as_utc(scan.started_at)).total_seconds() * 1000)) or None
+    else:
+        duration_ms = None
     diagnostics = [_diagnostic(d) for d in report.diagnostics]
     stored_raw_json: str | None = raw_json
     if len(raw_json.encode("utf-8", errors="replace")) > _MAX_RAW_JSON_BYTES:

@@ -107,12 +107,11 @@ async def sync_overviews(project_id: str, repos: list[ProjectRepo]) -> dict[str,
             state = "unknown"
         else:
             state = "up_to_date" if commit == repo.remote_head_sha and branch == repo.selected_branch else "behind"
-        stamps = [t for t in (last.get("completed_at") if last else None,
-                              None if repo.last_sync_error else repo.remote_head_checked_at) if t]
         out[key] = SyncOverview(
             scanned_commit=commit,
             scanned_branch=branch,
-            last_synced_at=max(stamps, key=lambda t: t.replace(tzinfo=None)) if stamps else None,
+            # Last *completed* sync only - a head check or a queued request is not a sync.
+            last_synced_at=last.get("completed_at") if last else None,
             active_scan_id=active.get(key),
             sync_state=state,
         )

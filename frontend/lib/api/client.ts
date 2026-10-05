@@ -25,6 +25,12 @@ export class ApiError extends Error {
   }
 }
 
+/** Query `retry` that gives up at once on 403/404 — an answer retrying cannot change — else once. */
+export function retryUnlessForbiddenOrMissing(failureCount: number, err: unknown): boolean {
+  if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return false;
+  return failureCount < 1;
+}
+
 /**
  * The API host could not be reached at all — wrong port, backend down, DNS,
  * offline. Distinct from ApiError, which means the server answered.

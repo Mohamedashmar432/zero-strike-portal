@@ -64,6 +64,18 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update report template"),
   });
 
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const setArchived = useMutation({
+    mutationFn: (isArchived: boolean) => updateProject(projectId, { is_archived: isArchived }),
+    onSuccess: (_res, isArchived) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all() });
+      toast.success(isArchived ? "Project archived" : "Project restored");
+      setArchiveDialogOpen(false);
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update project"),
+  });
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const deleteMutation = useMutation({
@@ -120,6 +132,28 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-normal text-muted-foreground">Archive</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            {project.is_archived
+              ? "This project is archived: repository syncs are disabled. Restore it to sync again."
+              : "Archiving disables repository syncs. Scans, findings and reports are kept, and you can restore it at any time."}
+          </p>
+          {project.is_archived ? (
+            <Button variant="outline" onClick={() => setArchived.mutate(false)} disabled={setArchived.isPending}>
+              {setArchived.isPending ? "Restoring…" : "Restore project"}
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(true)}>
+              Archive project
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border-destructive/30">
         <CardHeader>
           <CardTitle className="text-sm font-medium text-destructive">Danger Zone</CardTitle>
@@ -133,6 +167,26 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           </Button>
         </CardContent>
       </Card>
+
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive project</DialogTitle>
+            <DialogDescription>
+              Archive <strong>{project.name}</strong>? Repository syncs will be disabled until it is
+              restored. Nothing is deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => setArchived.mutate(true)} disabled={setArchived.isPending}>
+              {setArchived.isPending ? "Archiving…" : "Archive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={deleteDialogOpen}

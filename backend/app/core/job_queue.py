@@ -32,7 +32,11 @@ async def claim_next(model, queued_status: str, running_status: str, extra_unset
     )
     if raw is None:
         return None
-    return model.model_validate(raw)
+    doc = model.model_validate(raw)
+    # find_one_and_update returns the pre-update document, so without this the caller's copy
+    # has started_at=None and any later save() would write that None back over the claim stamp.
+    doc.started_at = now
+    return doc
 
 
 async def reap_stuck(

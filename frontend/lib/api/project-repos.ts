@@ -37,6 +37,38 @@ export function shortSha(sha: string | null | undefined): string {
   return sha ? sha.slice(0, 7) : "";
 }
 
+/**
+ * The commit to show in the Head column. A scan from a different branch than the one now selected
+ * says nothing about this branch's head, so it is hidden until the branch is synced.
+ */
+export function headCommitForSelectedBranch(
+  r: Pick<ProjectRepo, "scanned_commit" | "scanned_branch" | "selected_branch">
+): string | null {
+  if (!r.scanned_commit) return null;
+  if (r.scanned_branch && r.scanned_branch !== r.selected_branch) return null;
+  return r.scanned_commit;
+}
+
+/** Sync-finished toast text. A first scan on a branch is a baseline, not "N new". */
+export function formatSyncFinishedMessage(
+  name: string,
+  reg: {
+    has_baseline: boolean;
+    baseline_branch_mismatch: boolean;
+    commit: string | null;
+    branch: string | null;
+    new: { count: number };
+    fixed: { count: number };
+    reopened: { count: number };
+  }
+): string {
+  if (!reg.has_baseline || reg.baseline_branch_mismatch) {
+    const where = [reg.commit ? shortSha(reg.commit) : null, reg.branch].filter(Boolean).join(" on ");
+    return `Sync of ${name} finished: Baseline established${where ? ` at ${where}` : ""} — ${reg.new.count} findings tracked`;
+  }
+  return `Sync of ${name} finished: ${formatSyncCounts(reg.fixed.count, reg.new.count, reg.reopened.count)}`;
+}
+
 /** "N fixed, M new, K reopened" for the sync-finished toast. */
 export function formatSyncCounts(fixed: number, added: number, reopened: number): string {
   return `${fixed} fixed, ${added} new, ${reopened} reopened`;

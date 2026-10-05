@@ -7,12 +7,14 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { getProjectScanActivity, type ProjectScanActivity, type ScanHistoryItem } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/common/empty-state";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { SeverityCountPills } from "@/components/severity/severity-count-pills";
+import { shortSha } from "@/lib/api/project-repos";
 import { formatRelativeTime, parseApiDate } from "@/lib/utils";
 
 const ALL = "__all__";
@@ -71,8 +73,19 @@ function ScanRow({ projectId, scan, isLatest }: { projectId: string; scan: FlatS
             <span className="inline-flex items-center rounded-md border bg-background px-2 py-0.5 text-xs font-medium text-foreground">
               {scan.repoLabel}
             </span>
+            {scan.triggered_by === "sync" && (
+              <Badge variant="secondary" className="font-mono uppercase">
+                Sync
+              </Badge>
+            )}
             {scan.status !== "completed" && <ScanStatusBadge status={scan.status} />}
           </div>
+          {scan.git_commit && (
+            <div className="font-mono text-xs text-muted-foreground" title={scan.git_commit}>
+              {scan.branch ? `${scan.branch}@` : ""}
+              {shortSha(scan.git_commit)}
+            </div>
+          )}
         </div>
         <SeverityCountPills counts={scan.findings_by_severity} />
       </Link>

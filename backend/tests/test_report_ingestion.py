@@ -155,6 +155,37 @@ def test_stats_tallies_by_owasp_across_all_ten_codes():
     assert "not-a-real-code" not in stats.by_owasp
 
 
+def test_zero_scanner_duration_falls_back_to_claim_wall_time(client):
+    from datetime import timedelta
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id="proj-dur", scan_type="cloud", created_at=now, updated_at=now,
+            started_at=now - timedelta(seconds=30),
+        )
+        await scan.insert()
+        report = _load()
+        report.duration_ns = 0
+        await ingest_svc.ingest(scan, report, raw_json=_FIXTURE.read_text())
+        from app.models.report import Report
+
+        r = await Report.find_one(Report.scan_id == str(scan.id))
+        assert 29_000 <= r.duration_ms <= 40_000
+
+        bare = Scan(project_id="proj-dur", scan_type="local", created_at=now, updated_at=now)
+        await bare.insert()
+        bare_report = _load()
+        bare_report.duration_ns = 0
+        bare_report.started_at = None
+        await ingest_svc.ingest(bare, bare_report, raw_json=_FIXTURE.read_text())
+        # started_at is stamped during ingest itself, so only an instant-ish wall time remains
+        r2 = await Report.find_one(Report.scan_id == str(bare.id))
+        assert r2.duration_ms is None or r2.duration_ms < 5_000
+
+    asyncio.run(run())
+
+
 def test_ingest_writes_findings_report_and_completes_scan(client):
     async def run():
         now = datetime.now(timezone.utc)
