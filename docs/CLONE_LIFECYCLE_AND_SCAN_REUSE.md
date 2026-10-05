@@ -1,6 +1,6 @@
 # Clone lifecycle and scan reuse
 
-Status: findings + plan, not yet built. Date: 2026-10-05.
+Status: phases A, B and C built on `feat/repo-sync`; D not started. Date: 2026-10-05.
 
 ## Question
 
@@ -64,9 +64,11 @@ changed) without keeping anything on disk.
 - Free-disk preflight: `shutil.disk_usage(workdir_root())` before cloning; below
   `clone_min_free_mb` (new setting, default 1024) the scan fails with a readable message
   instead of filling the disk.
-- Size guard: clone with `--filter=blob:limit=<clone_max_blob_mb>` (the scanner does not read
-  large binaries; GitHub and Azure DevOps support partial clone), and after cloning fail the
-  scan if the workdir exceeds `clone_max_repo_mb`.
+- Size guard: after cloning, fail the scan if the workdir exceeds `clone_max_repo_mb`
+  (default 2048). **Built without `--filter=blob:limit`**: a partial clone only defers large blobs and
+  `git checkout` of the tip then fetches every blob it needs for the working tree, so the bytes land
+  on disk anyway (verified with a 6 MB blob: present in the worktree, nothing reported missing). No
+  `clone_max_blob_mb` setting exists. The guards are the free-disk preflight and the post-clone cap.
 - Tests: sweep deletes only old dirs; preflight failure marks the scan failed with the message;
   cleanup failure is logged.
 

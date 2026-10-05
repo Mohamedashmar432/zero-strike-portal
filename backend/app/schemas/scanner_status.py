@@ -41,8 +41,20 @@ class FailureItem(BaseModel):
     completed_at: datetime | None
 
 
+class CloneWorkspaceStatus(BaseModel):
+    """Live clone/remediation workdirs on this replica. A count above the running scans, or a size
+    that never falls back, is a leak showing up before it becomes an outage."""
+
+    workdir_count: int
+    total_mb: int
+    free_mb: int
+    min_free_mb: int
+    max_repo_mb: int
+
+
 class ScannerStatusResponse(BaseModel):
     engine_available: bool
     binaries: list[BinaryChecklistItem]
     queue: QueueStatus
     recent_failures: list[FailureItem]
+    clones: CloneWorkspaceStatus

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Binary, CheckCircle2, Cpu, RefreshCw, XCircle } from "lucide-react";
+import { Activity, Binary, CheckCircle2, Cpu, HardDrive, RefreshCw, XCircle } from "lucide-react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatCard } from "@/components/common/stat-card";
@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getScannerStatus } from "@/lib/api/scanner-status";
+import { cloneWorkspaceWarning, formatMegabytes, getScannerStatus } from "@/lib/api/scanner-status";
 import { SCAN_STAGE_LABELS } from "@/lib/api/scans";
 
 function formatDate(value: string | null) {
@@ -41,6 +41,37 @@ export default function ScannerStatusPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {/* Clone workspace: leftovers or a full disk show up here before they cause an outage */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+          <HardDrive className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Clone Workspace</h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard
+            label="Clone Directories"
+            value={data?.clones.workdir_count ?? "—"}
+            isLoading={isLoading}
+            caption="zs-clone-* and zs-remediate-* on this replica"
+          />
+          <StatCard
+            label="Clone Disk Used"
+            value={data ? formatMegabytes(data.clones.total_mb) : "—"}
+            isLoading={isLoading}
+            caption={data ? `Per-repo cap ${formatMegabytes(data.clones.max_repo_mb)}` : undefined}
+          />
+          <StatCard
+            label="Free Disk"
+            value={data ? formatMegabytes(data.clones.free_mb) : "—"}
+            isLoading={isLoading}
+            caption={data ? `Clones refused below ${formatMegabytes(data.clones.min_free_mb)}` : undefined}
+          />
+        </div>
+        {data && cloneWorkspaceWarning(data.clones, data.queue.running) && (
+          <p className="text-xs text-severity-medium">{cloneWorkspaceWarning(data.clones, data.queue.running)}</p>
+        )}
+      </div>
 
       {/* Cloud Scan Queue KPIs */}
       <div className="space-y-3">

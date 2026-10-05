@@ -4,6 +4,7 @@ the kind of thing that would have surfaced the CI/CD-binary-404 incident proacti
 of via a support ticket.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from beanie import PydanticObjectId
@@ -15,12 +16,13 @@ from app.models.scanner_binary import ScannerBinary
 from app.models.user import User
 from app.schemas.scanner_status import (
     BinaryChecklistItem,
+    CloneWorkspaceStatus,
     FailureItem,
     QueueStatus,
     RunningScanItem,
     ScannerStatusResponse,
 )
-from app.services import cloud_scan_service
+from app.services import cloud_scan_service, workdir_hygiene
 
 # The 5 combos zero-strike-code-scanner's release.yml actually builds and publishes — not all 6
 # download_service._VALID_OS x _VALID_ARCH combos (windows/arm64 isn't a real release target).
@@ -118,10 +120,23 @@ async def recent_failures(limit: int = 10) -> list[FailureItem]:
     ]
 
 
+async def clone_workspace_status() -> CloneWorkspaceStatus:
+    """Measured on this replica's workdir volume (each replica has its own ephemeral disk)."""
+    usage = await asyncio.to_thread(workdir_hygiene.usage, cloud_scan_service._workdir_root())
+    return CloneWorkspaceStatus(
+        workdir_count=usage.count,
+        total_mb=usage.total_mb,
+        free_mb=usage.free_mb,
+        min_free_mb=settings.clone_min_free_mb,
+        max_repo_mb=settings.clone_max_repo_mb,
+    )
+
+
 async def get_status() -> ScannerStatusResponse:
     return ScannerStatusResponse(
         engine_available=cloud_scan_service.scanner_available(),
         binaries=await binary_checklist(),
         queue=await queue_status(),
         recent_failures=await recent_failures(),
+        clones=await clone_workspace_status(),
     )

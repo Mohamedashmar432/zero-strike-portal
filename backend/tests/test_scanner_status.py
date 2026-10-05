@@ -102,3 +102,25 @@ def test_binary_checklist_names_the_uploader_by_email(client):
     by_combo = {(b["os"], b["arch"]): b for b in body["binaries"]}
     assert by_combo[("linux", "amd64")]["uploaded_by_email"] == "statusadmin-uploader@zerostrike.dev"
     assert by_combo[("linux", "arm64")]["uploaded_by_email"] is None
+
+
+def test_status_reports_clone_workdirs_size_and_free_disk(client, monkeypatch, tmp_path):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "clone_workdir_path", str(tmp_path))
+    monkeypatch.setattr(settings, "clone_min_free_mb", 111)
+    monkeypatch.setattr(settings, "clone_max_repo_mb", 222)
+    (tmp_path / "zs-clone-a").mkdir()
+    (tmp_path / "zs-clone-a" / "f.bin").write_bytes(bytes(2 * 1024 * 1024))
+    (tmp_path / "zs-remediate-b").mkdir()
+    (tmp_path / "unrelated").mkdir()
+    headers = _admin_headers(client, email="statusadmin-clones@zerostrike.dev")
+
+    r = client.get("/api/v1/admin/scanner-status", headers=headers)
+
+    assert r.status_code == 200
+    clones = r.json()["clones"]
+    assert clones["workdir_count"] == 2  # only zs-clone-* / zs-remediate-*
+    assert clones["total_mb"] == 2
+    assert clones["free_mb"] > 0
+    assert clones["min_free_mb"] == 111 and clones["max_repo_mb"] == 222
