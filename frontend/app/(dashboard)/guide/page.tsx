@@ -5,15 +5,18 @@ import {
   GitBranch,
   Key,
   ListChecks,
+  PlayCircle,
   ShieldCheck,
   Sparkles,
   Terminal,
   TriangleAlert,
+  Users,
   Wand2,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { CopyCommand } from "@/components/common/copy-command";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -38,8 +41,10 @@ import { cn } from "@/lib/utils";
 const PORTAL = process.env.NEXT_PUBLIC_SCANNER_SERVER_ORIGIN ?? "<PORTAL_URL>";
 
 const TOC: { id: string; label: string }[] = [
+  { id: "tour", label: "Watch the tour" },
   { id: "orientation", label: "How it fits together" },
   { id: "onboard", label: "1. Onboard a project" },
+  { id: "team", label: "Invite your team" },
   { id: "scan", label: "2. Run a scan" },
   { id: "results", label: "3. Read the results" },
   { id: "ai", label: "4. Turn on AI analysis" },
@@ -146,12 +151,8 @@ function SevChip({ level }: { level: "critical" | "high" | "medium" | "low" | "i
   );
 }
 
-function Cmd({ children }: { children: ReactNode }) {
-  return (
-    <pre className="overflow-x-auto rounded-sm border border-border bg-muted px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground">
-      {children}
-    </pre>
-  );
+function Cmd({ children }: { children: string }) {
+  return <CopyCommand>{children}</CopyCommand>;
 }
 
 function Note({ children }: { children: ReactNode }) {
@@ -176,7 +177,7 @@ export default function GuidePage() {
       <PageHeader
         eyebrow="DOCS / DEVELOPER GUIDE"
         title="Developer Guide"
-        description="Everything a developer does in thinkShield, in the order you actually do it: onboard a project, get a scan running, read findings, switch on AI analysis, ship an Auto-Fix PR, run a compliance audit."
+        description="Everything a developer does in thinkShield, in the order you actually do it: onboard a project, invite your team, get a scan running, read findings, switch on AI analysis, ship an Auto-Fix PR, run a compliance audit. Short on time? Start with the 100-second tour."
       />
 
       <div className="grid gap-8 lg:grid-cols-[210px_minmax(0,1fr)]">
@@ -197,6 +198,33 @@ export default function GuidePage() {
         </nav>
 
         <div className="min-w-0 space-y-8">
+          {/* ─────────────────────────── Tour video ─────────────────────────── */}
+          <Section
+            id="tour"
+            title="Watch the tour"
+            icon={PlayCircle}
+            lede="The whole guide in 100 seconds: create a project, connect a GitHub or Azure DevOps repo, run a cloud scan, analyse findings with AI on your own key, ship Auto-Fix patches as one pull request, and run a SOC 2 / ISO 27001 audit from the same scans."
+          >
+            <figure className="overflow-hidden rounded-lg border border-border bg-black">
+              {/* Static file in /public, so it streams with range requests and needs no player library. */}
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                poster="/guide/thinkshield-tour.jpg"
+                className="aspect-video w-full"
+              >
+                <source src="/guide/thinkshield-tour.mp4" type="video/mp4" />
+                Your browser cannot play this video.{" "}
+                <a href="/guide/thinkshield-tour.mp4">Download the tour (MP4)</a> instead.
+              </video>
+            </figure>
+            <Note>
+              The screens in the video are schematic, like the sketches on this page: real button names and
+              layout, illustrative findings. Each step below links to the real screen.
+            </Note>
+          </Section>
+
           {/* ─────────────────────────── Orientation ─────────────────────────── */}
           <Section
             id="orientation"
@@ -262,7 +290,7 @@ export default function GuidePage() {
             id="onboard"
             title="1. Onboard a project"
             icon={FolderPlus}
-            lede="Two things to create: the project, and a connection to the code. Repository credentials live on your user account and get copied into a project connection, so you enter a PAT once and reuse it across projects."
+            lede="Two things to create: the project, and a connection to the code. GitHub and Azure DevOps are supported. A saved credential lives on your user account and can be reused across projects, so you enter a PAT once."
           >
             <Steps>
               <Step n={1} title="Create the project">
@@ -274,22 +302,24 @@ export default function GuidePage() {
               <Step n={2} title="Store a repository credential (once per provider)">
                 <p>
                   <Jump href="/settings/integrations">Settings → Integrations</Jump>. Add a personal access
-                  token for GitHub / GitLab / Azure DevOps / Bitbucket. It is stored against your user, not the
-                  project, and is never echoed back after saving.
+                  token for GitHub or Azure DevOps. It is stored against your user, not the project, and is
+                  never echoed back after saving. You can also create one inline from the connect wizard.
                 </p>
               </Step>
               <Step n={3} title="Connect a repository to the project">
                 <p>
                   Open the project → <span className="font-mono text-foreground">Repositories</span> → connect.
-                  The wizard lists repos the credential can see, so you pick rather than paste a URL. A project
-                  can hold several repositories; each scan targets one.
+                  Choose how the portal reaches the code: a <strong>saved credential</strong> (browse the repos it
+                  can see), a <strong>public GitHub repo</strong> (no token), or a <strong>one-off token</strong>{" "}
+                  pasted for this repo only. A project can hold several repositories; each scan targets one.
                 </p>
               </Step>
               <Step n={4} title="Know your way around the project workspace">
                 <p>
                   Every project has the same left rail. Deep-linkable — the tab is in the URL as{" "}
                   <span className="font-mono text-foreground">?tab=…</span>, so you can bookmark or share any
-                  view.
+                  view. <span className="font-mono text-foreground">Vulnerabilities</span> is the one
+                  exception: it opens its own page.
                 </p>
               </Step>
             </Steps>
@@ -299,6 +329,7 @@ export default function GuidePage() {
                 {[
                   { label: "Project Overview", active: true },
                   { label: "SAST Code Scanner" },
+                  { label: "Vulnerabilities" },
                   { label: "Scan History" },
                   { label: "AI Auto-Fix" },
                   { label: "AI Auditor & Tokens" },
@@ -323,6 +354,51 @@ export default function GuidePage() {
                     {item.label}
                   </span>
                 ))}
+              </div>
+            </Screen>
+          </Section>
+
+          {/* ─────────────────────────── Team ─────────────────────────── */}
+          <Section
+            id="team"
+            title="Invite your team"
+            icon={Users}
+            lede="Access is per project. A project owner or admin invites by email from Members & Access, and the invitee gets an email either way. What happens next depends on whether they already have an account."
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">They already have an account</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm leading-relaxed text-muted-foreground">
+                  Access is granted the moment you invite. The email links straight to the project; they sign
+                  in and it is in their project list.
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">They are new</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm leading-relaxed text-muted-foreground">
+                  The email links to registration. They must register with <em>the invited address</em>; the
+                  pending invite attaches on signup. If signup approval is on, an admin approves them under{" "}
+                  <Jump href="/admin/users?status=pending">Admin → Users</Jump> and they are emailed when they
+                  can sign in.
+                </CardContent>
+              </Card>
+            </div>
+            <Screen label="new teammate — what they go through">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2 font-mono text-[12px] text-muted-foreground">
+                {["invite email", "register", "admin approves", "approved email", "sign in → project"].map(
+                  (stage, i) => (
+                    <span key={stage} className="flex items-center gap-2">
+                      {i > 0 && <span className="text-signal">→</span>}
+                      <span className="rounded-sm border border-border bg-background px-2 py-1 text-foreground">
+                        {stage}
+                      </span>
+                    </span>
+                  )
+                )}
               </div>
             </Screen>
           </Section>
@@ -377,6 +453,9 @@ export default function GuidePage() {
 ./zerostrike scan . --server ${PORTAL} --token <PROJECT_TOKEN>`}
                 </Cmd>
                 <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
+                  That is the Linux line. The wizard has a macOS and a Windows (PowerShell) variant too.
+                </p>
+                <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
                   The CLI scans locally and uploads only the report. The scan then appears in the project like
                   any other. Copy the command from the wizard rather than from here — it comes out with this
                   portal&apos;s real URL, your OS&apos;s install line and a freshly generated token already
@@ -397,6 +476,12 @@ export default function GuidePage() {
                   This is the only path that needs the repository credential at scan time, and the only one
                   that can feed Auto-Fix pull requests without you running anything.
                 </p>
+                <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
+                  If that commit was already scanned, or a scan of it is still running, the wizard says so and
+                  links to it instead of spending a second scan; you can still force one. To keep a repo current
+                  without thinking about it, use <span className="font-mono text-foreground">Sync now</span> on
+                  the Repositories tab: it checks the branch head and scans only when something new landed.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -407,12 +492,15 @@ export default function GuidePage() {
                   The wizard emits a ready pipeline snippet for GitHub Actions, GitLab CI or Azure Pipelines,
                   plus the project token to store as a CI secret. It downloads the binary from this portal at
                   job time, scans the checkout and uploads. Blocking severities are workspace policy, so the
-                  pipeline fails on what the workspace decided is unacceptable — not on a per-repo guess.
+                  pipeline fails on what the workspace decided is unacceptable — not on a per-repo guess. The
+                  download step verifies the binary against the portal&apos;s published checksums.
                 </p>
-                <Cmd>{`- run: ./zerostrike scan . --server ${PORTAL} --token $ZEROSTRIKE_TOKEN`}</Cmd>
+                <Cmd>{`- run: ./zerostrike scan . --server ${PORTAL} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`}</Cmd>
                 <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
-                  Take the full snippet from the wizard — it is generated with this portal&apos;s real URL and
-                  the download step for the runner&apos;s platform.
+                  That is the GitHub Actions step. Take the full snippet from the wizard — it is generated with
+                  this portal&apos;s real URL, the download step, and the right secret syntax for GitLab (
+                  <span className="font-mono text-foreground">$ZEROSTRIKE_TOKEN</span>) or Azure Pipelines (
+                  <span className="font-mono text-foreground">$(ZEROSTRIKE_TOKEN)</span>).
                 </p>
               </div>
             </div>
@@ -476,14 +564,23 @@ export default function GuidePage() {
                   provider is active.
                 </p>
               </Step>
-              <Step n={2} title="Check the OWASP view for shape, not detail">
+              <Step n={2} title="Follow a vulnerability across scans">
+                <p>
+                  The project&apos;s <span className="font-mono text-foreground">Vulnerabilities</span> page
+                  tracks each issue across rescans instead of per scan: it moves{" "}
+                  <span className="font-mono text-foreground">open → fixed</span> when a later scan no longer
+                  finds it, and is flagged as a <span className="font-mono text-foreground">regression</span> if
+                  it comes back. Use it to answer &ldquo;did the fix stick?&rdquo;.
+                </p>
+              </Step>
+              <Step n={3} title="Check the OWASP view for shape, not detail">
                 <p>
                   The project&apos;s <span className="font-mono text-foreground">OWASP Top 10</span>{" "}
                   tab
                   answers &ldquo;what kind of problem do we keep having&rdquo;, which a flat list buries.
                 </p>
               </Step>
-              <Step n={3} title="Export a report when someone outside needs it">
+              <Step n={4} title="Export a report when someone outside needs it">
                 <p>
                   Each scan carries its raw report; report templates are configured under{" "}
                   <Jump href="/settings/report-templates">Settings → Report Templates</Jump> and a project can
@@ -530,7 +627,16 @@ export default function GuidePage() {
                   Per project: the <span className="font-mono text-foreground">AI Auditor &amp; Tokens</span>{" "}
                   tab. Portal-wide: <Jump href="/admin/ai-analytics">Admin → AI Analytics</Jump>. Every call,
                   success or failure, is logged with latency, tokens and cost — and never with the prompt or
-                  response content.
+                  response content. A cost the price list does not know is shown as unknown, never as $0.
+                </p>
+              </Step>
+              <Step n={5} title="Cap it with a budget">
+                <p>
+                  Project → <span className="font-mono text-foreground">Project Settings</span> →{" "}
+                  <span className="font-mono text-foreground">AI budget</span> (owner or admin). Set a monthly USD
+                  or token limit and an alert percentage; the project owner is emailed once when spend crosses the
+                  alert and once at the limit. Turn on <span className="font-mono text-foreground">hard stop</span>{" "}
+                  to block further AI calls for the rest of the month instead of just alerting.
                 </p>
               </Step>
             </Steps>
@@ -568,13 +674,18 @@ export default function GuidePage() {
               </Step>
               <Step n={3} title="Review each proposal">
                 <p>
-                  Patch, evidence, the checks that ran, discussion and activity — all on the proposal. Approve
-                  or reject per proposal, or select several and approve as a batch.
+                  Patch, evidence, the checks that ran, discussion and activity — all on the proposal. Use{" "}
+                  <span className="font-mono text-foreground">Ask AI about this fix</span> to question a patch,{" "}
+                  <span className="font-mono text-foreground">Comments</span> to discuss it with the team, and{" "}
+                  <span className="font-mono text-foreground">Dismiss proposal</span> to drop one you don&apos;t
+                  want.
                 </p>
               </Step>
-              <Step n={4} title="Approve → one PR">
+              <Step n={4} title="Create PR → one PR">
                 <p>
-                  An approve job writes one branch and one PR for the whole batch, scoped to a single scan (so
+                  <span className="font-mono text-foreground">Create PR</span> on one proposal, or tick several
+                  and use <span className="font-mono text-foreground">Create one PR</span>. Either way one job
+                  writes one branch and one PR for the whole batch, scoped to a single scan (so
                   the repo and base branch are unambiguous by construction). The apply step re-scans the
                   combined diff, drops anything that drifted or introduced a new blocking finding, retries the
                   survivors once, and lists every drop in the PR body. A new blocking finding in a file no patch
@@ -617,9 +728,10 @@ export default function GuidePage() {
                   </span>
                 </pre>
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <FauxButton tone="solid">Approve</FauxButton>
-                  <FauxButton>Reject</FauxButton>
-                  <FauxButton>Ask a question</FauxButton>
+                  <FauxButton tone="solid">Create PR</FauxButton>
+                  <FauxButton>Ask AI about this fix</FauxButton>
+                  <FauxButton>Comments</FauxButton>
+                  <FauxButton>Dismiss proposal</FauxButton>
                 </div>
               </div>
             </Screen>
@@ -674,7 +786,8 @@ export default function GuidePage() {
                 <p>
                   Project → <span className="font-mono text-foreground">Compliance Config</span> sets
                   frameworks, evidence scope (latest scan vs all history), whether an audit runs automatically
-                  after every scan, and evidence retention. Defaults come from{" "}
+                  after every scan, evidence retention, and whether failing controls get AI explanations.
+                  Defaults come from{" "}
                   <Jump href="/settings/general">Settings → General</Jump>; a project may override them.
                 </p>
               </Step>
@@ -744,7 +857,7 @@ export default function GuidePage() {
                 {
                   href: "/admin/users",
                   label: "Users",
-                  body: "Invite, promote, deactivate. Role changes are recorded in the audit log as privilege events.",
+                  body: "Approve or decline pending signups (the applicant is emailed either way), promote, disable or delete. Role changes are recorded as privilege events.",
                 },
                 {
                   href: "/admin/auto-fix-requests",
@@ -759,12 +872,17 @@ export default function GuidePage() {
                 {
                   href: "/admin/scanner-status",
                   label: "Scanner Status",
-                  body: "Which scanner build the running image actually ships, and whether scans are draining.",
+                  body: "Which scanner build the running image actually ships, whether scans are draining, and clone disk usage.",
                 },
                 {
                   href: "/admin/ai-analytics",
                   label: "AI Analytics",
                   body: "Portal-wide AI spend, latency and error rates across every project.",
+                },
+                {
+                  href: "/settings/notifications",
+                  label: "Notifications & email",
+                  body: "Signup approval switch, which admins review signups, and the email templates — edit, reset, send yourself a test.",
                 },
                 {
                   href: "/settings/general",
@@ -791,7 +909,7 @@ export default function GuidePage() {
             id="gotchas"
             title="Gotchas"
             icon={TriangleAlert}
-            lede="The failures that look like bugs and are not. Each of these has cost somebody an afternoon."
+            lede="The failures that look like bugs and are not. Each of these has cost somebody an afternoon — click one to open it."
           >
             <div className="space-y-3">
               {[
@@ -821,17 +939,27 @@ export default function GuidePage() {
                 },
                 {
                   q: "Nobody got the notification email.",
-                  a: "Email is a no-op until SMTP is configured on the deployment; in-app notifications still fire. The notifications page says so plainly.",
+                  a: "Email only goes out when SMTP is configured on the deployment; in-app notifications fire regardless. An admin can check delivery with “Send test” on Settings → Notifications. Each person also picks which emails they want there.",
+                },
+                {
+                  q: "An invited teammate cannot see the project.",
+                  a: "They registered with a different email than the one invited, or their signup is still waiting for an admin under Admin → Users (Pending approval). The invite only attaches to the exact invited address.",
                 },
                 {
                   q: "A project token stopped working.",
                   a: "Tokens expire (90 days by default when generated from the scan wizard) and the raw value is only ever shown once. Generate a new one under Project Tokens.",
                 },
               ].map((g) => (
-                <div key={g.q} className="rounded-lg border border-border bg-card p-3.5">
-                  <p className="font-mono text-[13px] font-semibold tracking-[-0.01em] text-foreground">{g.q}</p>
+                // Native <details>: click-to-expand with no client JS, and find-in-page still opens it.
+                <details key={g.q} className="group rounded-lg border border-border bg-card p-3.5">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-mono text-[13px] font-semibold tracking-[-0.01em] text-foreground [&::-webkit-details-marker]:hidden">
+                    {g.q}
+                    <span className="text-signal transition-transform group-open:rotate-45" aria-hidden>
+                      +
+                    </span>
+                  </summary>
                   <p className="mt-1.5 max-w-[80ch] text-[13px] leading-relaxed text-muted-foreground">{g.a}</p>
-                </div>
+                </details>
               ))}
             </div>
           </Section>
