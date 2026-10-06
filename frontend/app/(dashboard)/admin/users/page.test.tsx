@@ -43,6 +43,12 @@ function setup(users: User[]) {
   );
 }
 
+// Secondary row actions live behind the "⋯" menu (components/common/row-actions.tsx).
+async function clickRowMenuItem(name: string | RegExp) {
+  fireEvent.click(await screen.findByRole("button", { name: /^Actions for/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("AdminUsersPage role changes", () => {
   afterEach(() => vi.clearAllMocks());
 
@@ -50,7 +56,7 @@ describe("AdminUsersPage role changes", () => {
     vi.mocked(updateUser).mockResolvedValue(user({ role: "admin" }));
     setup([user()]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Promote to/ }));
+    await clickRowMenuItem(/^Promote to/);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Make member@example.com an administrator?")).toBeTruthy();
     expect(updateUser).not.toHaveBeenCalled();
@@ -62,7 +68,7 @@ describe("AdminUsersPage role changes", () => {
   test("cancelling the role confirmation changes nothing", async () => {
     setup([user()]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Promote to/ }));
+    await clickRowMenuItem(/^Promote to/);
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
@@ -74,7 +80,7 @@ describe("AdminUsersPage role changes", () => {
     vi.mocked(updateUser).mockResolvedValue(user());
     setup([user({ role: "admin" })]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Demote to/ }));
+    await clickRowMenuItem(/^Demote to/);
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByText("Remove administrator access from member@example.com?")

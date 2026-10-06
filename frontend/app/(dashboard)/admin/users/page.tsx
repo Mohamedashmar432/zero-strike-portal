@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { RowActionsMenu } from "@/components/common/row-actions";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
@@ -19,7 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import { ShieldCheck, Trash2, UserCheck, UserX } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
@@ -65,43 +68,38 @@ function UserRowActions({
 
   if (targetUser.approval_status !== "approved") {
     return (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex items-center gap-1">
         <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate()}>
           {approve.isPending ? "Approving…" : "Approve"}
         </Button>
-        {targetUser.approval_status === "pending" && (
-          <Button variant="outline" size="sm" onClick={() => onRequestDecline(targetUser)}>
-            Decline
-          </Button>
-        )}
-        <Button variant="destructive" size="sm" onClick={() => onRequestDelete(targetUser)}>
-          Delete
-        </Button>
+        <RowActionsMenu label={`Actions for ${targetUser.email}`}>
+          {targetUser.approval_status === "pending" && (
+            <DropdownMenuItem onClick={() => onRequestDecline(targetUser)}>
+              <UserX /> Decline
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem variant="destructive" onClick={() => onRequestDelete(targetUser)}>
+            <Trash2 /> Delete
+          </DropdownMenuItem>
+        </RowActionsMenu>
       </div>
     );
   }
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={isSelf}
-        onClick={() => onRequestRoleChange(targetUser)}
-      >
+    <RowActionsMenu label={`Actions for ${targetUser.email}`}>
+      <DropdownMenuItem disabled={isSelf} onClick={() => onRequestRoleChange(targetUser)}>
+        <ShieldCheck />
         {targetUser.role === "admin" ? `Demote to ${roleLabel("user")}` : `Promote to ${roleLabel("admin")}`}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={isSelf || toggleActive.isPending}
-        onClick={() => toggleActive.mutate()}
-      >
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={isSelf || toggleActive.isPending} onClick={() => toggleActive.mutate()}>
+        {targetUser.is_active ? <UserX /> : <UserCheck />}
         {targetUser.is_active ? "Disable" : "Enable"}
-      </Button>
-      <Button variant="destructive" size="sm" disabled={isSelf} onClick={() => onRequestDelete(targetUser)}>
-        Delete
-      </Button>
-    </div>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" disabled={isSelf} onClick={() => onRequestDelete(targetUser)}>
+        <Trash2 /> Delete
+      </DropdownMenuItem>
+    </RowActionsMenu>
   );
 }
 

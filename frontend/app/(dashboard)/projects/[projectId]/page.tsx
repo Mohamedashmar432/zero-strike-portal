@@ -59,12 +59,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Activity, ChevronDown, Loader2, Play, RefreshCw, ShieldAlert, Swords } from "lucide-react";
+import { Activity, ChevronDown, GitBranch, KeyRound, Loader2, Play, RefreshCw, ShieldAlert, Swords, Unplug } from "lucide-react";
+import { IconAction, RowActionsMenu } from "@/components/common/row-actions";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -920,47 +922,41 @@ function RepositoriesTab({
                   )}
                 </TableCell>
                 <TableCell>
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
+                  <div className="flex items-center justify-end gap-1">
+                    <IconAction
+                      variant="outline"
                       onClick={() => runSync({ repoId: r.id })}
                       disabled={syncing || isArchived}
-                      title={
-                        isArchived
+                      label={
+                        syncing
+                          ? "Syncing…"
+                          : isArchived
                           ? "This project is archived — restore it to sync"
                           : r.sync_state === "error" && r.last_sync_error
-                          ? r.last_sync_error
-                          : "Check the remote branch and scan it if there is anything new"
+                          ? `Retry sync — ${r.last_sync_error}`
+                          : "Sync — check the remote branch and scan anything new"
                       }
                     >
-                      {syncing ? (
-                        <>
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                          Syncing…
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="size-3.5" aria-hidden="true" />
-                          {r.sync_state === "error" ? "Retry" : "Sync"}
-                        </>
+                      {syncing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                    </IconAction>
+                    <RowActionsMenu label={`Actions for ${r.repo_full_name}`}>
+                      {canChangeBranch && (
+                        <DropdownMenuItem onClick={() => setBranchTarget(r)}>
+                          <GitBranch /> Change branch
+                        </DropdownMenuItem>
                       )}
-                    </Button>
-                    {canChangeBranch && (
-                      <Button variant="outline" size="sm" onClick={() => setBranchTarget(r)}>
-                        Change branch
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => setReauthTargetId(r.id)}>
-                      Re-authenticate
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => remove.mutate(r.id)}
-                      disabled={remove.isPending}
-                    >
-                      Disconnect
-                    </Button>
+                      <DropdownMenuItem onClick={() => setReauthTargetId(r.id)}>
+                        <KeyRound /> Re-authenticate
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => remove.mutate(r.id)}
+                        disabled={remove.isPending}
+                      >
+                        <Unplug /> Disconnect
+                      </DropdownMenuItem>
+                    </RowActionsMenu>
                   </div>
                 </TableCell>
               </TableRow>

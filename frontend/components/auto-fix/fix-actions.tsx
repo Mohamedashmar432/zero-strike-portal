@@ -15,6 +15,7 @@ import { ExternalLink, GitPullRequest, MessageSquare, Package, Sparkles, Wand2, 
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { IconAction } from "@/components/common/row-actions";
 import {
   Dialog,
   DialogContent,
@@ -286,25 +287,32 @@ export function FixSecondaryActions({
   });
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
       {proposal.review_state !== "dismissed" && (
-        <Button size="sm" variant={askOpen ? "secondary" : "outline"} onClick={onToggleAsk}>
-          <Sparkles /> Ask AI
-        </Button>
+        <IconAction label="Ask AI about this fix" variant={askOpen ? "secondary" : "outline"} onClick={onToggleAsk}>
+          <Sparkles />
+        </IconAction>
       )}
-      <Button size="sm" variant="outline" onClick={() => onOpenComments(proposal.finding_id)}>
-        <MessageSquare /> Comments{commentCount ? ` (${commentCount})` : ""}
-      </Button>
+      <IconAction
+        label={commentCount ? `Comments (${commentCount})` : "Comments"}
+        variant="outline"
+        size={commentCount ? "sm" : "icon-sm"}
+        onClick={() => onOpenComments(proposal.finding_id)}
+      >
+        <MessageSquare />
+        {commentCount ? commentCount : null}
+      </IconAction>
       {caps.canDismiss && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto text-muted-foreground"
-          onClick={() => dismiss.mutate()}
-          disabled={dismiss.isPending}
-        >
-          <X /> Dismiss
-        </Button>
+        <span className="ml-auto">
+          <IconAction
+            label="Dismiss proposal"
+            className="text-muted-foreground"
+            onClick={() => dismiss.mutate()}
+            disabled={dismiss.isPending}
+          >
+            <X />
+          </IconAction>
+        </span>
       )}
     </div>
   );
