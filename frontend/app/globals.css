@@ -103,9 +103,9 @@
      with severity for attention. */
   --color-ai: var(--ai);
 
-  /* Phosphor lime. Constant across both themes, unlike --primary, because it is
-     only ever used as a FILL with dark ink on top — so it needs no per-theme
-     contrast correction. Active rail markers, live indicators, the one CTA. */
+  /* The brand accent: phosphor lime in dark mode and on the graphite rails, olive
+     lime on light surfaces (see :root). Active rail markers, live indicators,
+     hover ink, the one CTA. */
   --color-signal: var(--signal);
   --color-signal-foreground: var(--signal-foreground);
   /* The canvas dot-grid + the hairline that divides instrument cells. */
@@ -147,8 +147,12 @@
   --ring: #46620c;
   --radius: 3px;
 
-  --signal: #c8fa4b;
-  --signal-foreground: #131316;
+  /* Lime measures 1.1-1.2:1 on bone/white, yet --signal is also used as INK (hover
+     links, active nav icons, tab underline, row-hover bar). Light mode takes an olive
+     lime instead: 5.4:1 on the card, 4.9:1 on the canvas, 5.3:1 under its light ink
+     as a fill. The graphite rails (.bg-sidebar) restore the phosphor below. */
+  --signal: #4d7300;
+  --signal-foreground: #f7fbe9;
   --grid-dot: #d5d3c8;
   --hairline: #dcdad1;
 
@@ -257,6 +261,13 @@
   --status-success-tint: #172424;
   --status-progress-tint: #1b2027;
   --ai-tint: #222126;
+}
+
+/* The sidebar (and any bg-sidebar panel) is graphite in BOTH themes, so it keeps
+   the phosphor lime even while light mode swaps --signal to olive. */
+.bg-sidebar {
+  --signal: #c8fa4b;
+  --signal-foreground: #131316;
 }
 
 @layer base {
