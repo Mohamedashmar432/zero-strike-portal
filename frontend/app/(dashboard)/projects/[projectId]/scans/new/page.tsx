@@ -399,6 +399,8 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
   });
 
   function selectConnectedRepo(repo: ProjectRepo) {
+    // A notice describes the repo it was answered for; a new selection makes it stale.
+    setNotice(null);
     setSelectedRepoId(repo.id);
     setValue("project_repo_id", repo.id, { shouldValidate: true });
     setValue("repo_url", undefined);
@@ -422,12 +424,14 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
   }
 
   function switchToManual() {
+    setNotice(null);
     setSource("manual");
     setSelectedRepoId("");
     setValue("project_repo_id", undefined);
   }
 
   function switchToConnected() {
+    setNotice(null);
     setSource("connected");
     setValue("repo_url", undefined);
     setValue("repo_token", "");
@@ -486,13 +490,13 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
               id="cloud-repo"
               placeholder="https://github.com/org/repo"
               autoComplete="off"
-              {...register("repo_url")}
+              {...register("repo_url", { onChange: () => setNotice(null) })}
             />
             {errors.repo_url && <p className="text-sm text-destructive">{errors.repo_url.message}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="cloud-branch">Branch (optional)</Label>
-            <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch")} />
+            <Input id="cloud-branch" placeholder="main" autoComplete="off" {...register("branch", { onChange: () => setNotice(null) })} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="cloud-token">Access token (private repos only)</Label>

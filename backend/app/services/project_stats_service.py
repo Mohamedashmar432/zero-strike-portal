@@ -81,13 +81,15 @@ def repo_key_resolver(repos):
     silently under-report per-repo. Returns _UNLINKED for scans matching no connected repo
     so nothing is dropped."""
     by_id = {str(r.id): r for r in repos}
-    by_clone_url = {r.clone_url: r for r in repos}
+    by_clone_url = {project_repo_service.normalize_repo_url(r.clone_url): r for r in repos}
 
     def resolve(scan) -> str:
         if scan.project_repo_id and scan.project_repo_id in by_id:
             return scan.project_repo_id
-        if scan.project_repo_id is None and scan.repo_url and scan.repo_url in by_clone_url:
-            return str(by_clone_url[scan.repo_url].id)
+        if scan.project_repo_id is None and scan.repo_url:
+            match = by_clone_url.get(project_repo_service.normalize_repo_url(scan.repo_url))
+            if match is not None:
+                return str(match.id)
         return _UNLINKED
 
     return resolve
@@ -417,7 +419,10 @@ async def get_repo_scan_history(project_id: str, repo_id: str, limit: int = 30) 
     scans = (
         await Scan.find(
             Scan.project_id == project_id,
-            Or(Eq(Scan.project_repo_id, repo_id), And(Eq(Scan.project_repo_id, None), Eq(Scan.repo_url, repo.clone_url))),
+            Or(
+                Eq(Scan.project_repo_id, repo_id),
+                And(Eq(Scan.project_repo_id, None), {"repo_url": project_repo_service.repo_url_regex(repo.clone_url)}),
+            ),
         )
         .sort(-Scan.created_at)
         .limit(limit)

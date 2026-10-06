@@ -469,6 +469,87 @@ def test_ad_hoc_rescan_is_allowed_once_the_previous_scan_finished(client, monkey
 
 
 
+# --- ad-hoc URL of an already-connected repo ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://github.com/octocat/repo.git", "https://github.com/octocat/repo"),
+        ("https://GitHub.COM/octocat/repo/", "https://github.com/octocat/repo"),
+        ("  https://github.com/octocat/repo.git/  ", "https://github.com/octocat/repo"),
+        ("https://dev.azure.com/Org/Proj/_git/Repo", "https://dev.azure.com/Org/Proj/_git/Repo"),
+    ],
+)
+def test_normalize_repo_url(url, expected):
+    assert project_repo_service.normalize_repo_url(url) == expected
+
+
+@pytest.mark.parametrize("url", ["https://github.com/octocat/repo", "https://GITHUB.com/octocat/repo.git/"])
+def test_ad_hoc_url_of_a_connected_repo_is_linked_via_sync(client, monkeypatch, url):
+    calls = _fake_head(monkeypatch, sha=SHA_B)
+    headers, pid, rid = _setup(client)  # connected as ...repo.git
+
+    r = client.post(f"/api/v1/projects/{pid}/scans", json={"scan_type": "cloud", "repo_url": url}, headers=headers)
+
+    assert r.status_code == 201 and r.json()["outcome"] == "scan_queued"
+    assert r.json()["project_repo_id"] == rid and r.json()["triggered_by"] == "cloud"
+    assert calls  # went through Repo Sync's ls-remote head check
+    (scan,) = _scans(pid)
+    assert scan.project_repo_id == rid
+
+
+def test_ad_hoc_url_of_an_up_to_date_connected_repo_is_already_scanned(client, monkeypatch):
+    _fake_head(monkeypatch, sha=SHA_A)
+    headers, pid, rid = _setup(client)
+    existing = _add_scan(pid, rid, commit=SHA_A)
+
+    r = client.post(
+        f"/api/v1/projects/{pid}/scans",
+        json={"scan_type": "cloud", "repo_url": "https://github.com/octocat/repo", "branch": "main"},
+        headers=headers,
+    )
+
+    assert r.status_code == 200 and r.json()["outcome"] == "up_to_date" and r.json()["id"] == existing
+    assert len(_scans(pid)) == 1
+
+
+def test_ad_hoc_url_of_a_connected_repo_on_another_branch_stays_ad_hoc(client, monkeypatch):
+    calls = _fake_head(monkeypatch)
+    headers, pid, _rid = _setup(client)
+
+    r = client.post(
+        f"/api/v1/projects/{pid}/scans",
+        json={"scan_type": "cloud", "repo_url": "https://github.com/octocat/repo", "branch": "dev"},
+        headers=headers,
+    )
+
+    assert r.status_code == 201 and r.json()["project_repo_id"] is None
+    assert calls == []
+
+
+def test_legacy_unlinked_scan_with_url_variant_groups_under_the_repo(client):
+    from app.services import project_stats_service
+
+    headers, pid, rid = _setup(client)
+
+    async def go():
+        now = datetime.now(timezone.utc)
+        scan = Scan(
+            project_id=pid, scan_type="cloud", triggered_by="cloud", status="completed", project_repo_id=None,
+            repo_url="https://GitHub.com/octocat/repo/", branch="main", created_at=now, updated_at=now,
+            completed_at=now,
+        )
+        await scan.insert()
+        resolve = project_stats_service.repo_key_resolver(await project_repo_service.list_repos(pid))
+        history = await project_stats_service.get_repo_scan_history(pid, rid)
+        return resolve(scan), [h.scan_id for h in history], str(scan.id)
+
+    key, history_ids, scan_id = asyncio.run(go())
+    assert key == rid
+    assert history_ids == [scan_id]
+
+
 # --- phase 3: repo sync_state on the repos list ----------------------------------------------
 
 

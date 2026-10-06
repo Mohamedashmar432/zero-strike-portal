@@ -1151,21 +1151,26 @@ export default function ProjectDetailPage() {
   const { data: repos } = useQuery({
     queryKey: queryKeys.projects.repos(projectId),
     queryFn: () => listProjectRepos(projectId),
+    // A 403/404 on the project means every project-scoped call would fail the same way.
+    enabled: !!project,
   });
 
   const { data: members } = useQuery({
     queryKey: queryKeys.projects.members(projectId),
     queryFn: () => listMembers(projectId),
+    enabled: !!project,
   });
 
   const { data: activity } = useQuery({
     queryKey: queryKeys.projects.scanActivity(projectId),
     queryFn: () => getProjectScanActivity(projectId),
+    enabled: !!project,
   });
 
   const { data: aiUsage } = useQuery({
     queryKey: queryKeys.projects.aiUsage(projectId),
     queryFn: () => getProjectAiUsage(projectId),
+    enabled: !!project,
   });
 
   function handleTabChange(tabId: string) {

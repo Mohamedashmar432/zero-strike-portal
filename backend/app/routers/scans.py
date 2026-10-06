@@ -117,10 +117,19 @@ async def create_scan(
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
-    if payload.project_repo_id:
+    project_repo_id = payload.project_repo_id
+    if not project_repo_id and payload.repo_url:
+        # A pasted URL naming a repo already connected to this project (".git", trailing "/" and
+        # host case aside) IS that repo: link it and take the same path, or it lands as "Unlinked"
+        # beside its own repo. Another branch than the one the connection tracks stays ad hoc.
+        match = await project_repo_service.find_repo_by_url(project_id, payload.repo_url)
+        if match and (not payload.branch or payload.branch == match.selected_branch):
+            project_repo_id = str(match.id)
+
+    if project_repo_id:
         # A connected repo goes through Repo Sync's entry point (lease, active-scan check,
         # ls-remote, up-to-date short circuit), so "New scan" and "Sync" cannot disagree or race.
-        project_repo = await project_repo_service.get_project_repo_or_404(project_id, payload.project_repo_id)
+        project_repo = await project_repo_service.get_project_repo_or_404(project_id, project_repo_id)
         result = await repo_sync_service.sync_repo(
             project, project_repo, user, force=payload.force, scan_label=payload.scan_label, triggered_by="cloud"
         )
@@ -152,7 +161,7 @@ async def create_scan(
     # Ad-hoc scans have no lease or head check, but two live scans of one repo+branch are always waste.
     duplicate = await Scan.find(
         Scan.project_id == project_id,
-        Scan.repo_url == repo_url,
+        {"repo_url": project_repo_service.repo_url_regex(repo_url)},
         Scan.branch == payload.branch,
         {"status": {"$in": ["queued", "running"]}},
     ).first_or_none()

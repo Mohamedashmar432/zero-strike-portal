@@ -3,7 +3,9 @@ Each connection stores its own copy of the encrypted PAT at connect time (via a 
 or an inline one-off PAT), decoupled from whichever credential it came from — see ProjectRepo's
 docstring for why that matters."""
 
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException, status
 
@@ -61,6 +63,36 @@ async def add_repo(project_id: str, payload: ProjectRepoCreateRequest, user: Use
     )
     await repo.insert()
     return repo
+
+
+def normalize_repo_url(url: str | None) -> str:
+    """Comparison key for a clone URL: lowercase scheme and host, no trailing "/" or ".git".
+    "https://GitHub.com/o/r.git/" and "https://github.com/o/r" name the same repo, so an ad-hoc
+    scan of either must land on the connected repo rather than in the Unlinked bucket."""
+    url = (url or "").strip()
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4].rstrip("/")
+    if not parts.scheme or not parts.netloc:
+        return path
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+
+
+def repo_url_regex(url: str) -> dict:
+    """A Mongo `$regex` matching every spelling of `url` that normalize_repo_url folds together
+    (host case, trailing ".git", trailing "/"), for queries that cannot normalise stored rows."""
+    parts = urlsplit(normalize_repo_url(url))
+    prefix = f"{re.escape(parts.scheme)}://{re.escape(parts.netloc)}" if parts.netloc else ""
+    return {"$regex": rf"^(?i:{prefix}){re.escape(parts.path)}(\.git)?/?$"}
+
+
+async def find_repo_by_url(project_id: str, url: str | None) -> ProjectRepo | None:
+    """The project's connected repo whose clone URL normalises to the same key as `url`."""
+    key = normalize_repo_url(url)
+    if not key:
+        return None
+    return next((r for r in await list_repos(project_id) if normalize_repo_url(r.clone_url) == key), None)
 
 
 async def list_repos(project_id: str) -> list[ProjectRepo]:
