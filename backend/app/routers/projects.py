@@ -48,6 +48,7 @@ from app.services import (
     ai_budget_service,
     ai_provider_config_service,
     audit_service,
+    auth_service,
     llm_client,
     pr_status_service,
     project_repo_service,
@@ -233,9 +234,12 @@ async def delete_project(project_id: str, user: User = Depends(get_current_user)
 
 @router.post("/{project_id}/members", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
 async def invite_member(
-    project_id: str, payload: MemberInviteRequest, user: User = Depends(get_current_user)
+    project_id: str,
+    payload: MemberInviteRequest,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
 ):
-    await project_service.get_project_or_404(project_id)
+    project = await project_service.get_project_or_404(project_id)
     await project_service.require_owner_or_admin(project_id, user)
 
     if await ProjectMember.find_one(
@@ -261,6 +265,9 @@ async def invite_member(
         target_type="user",
         target_id=str(invitee.id) if invitee else None,
         metadata={"email": payload.email},
+    )
+    background.add_task(
+        auth_service.send_project_invite, payload.email, user.name, project, invitee is not None
     )
     return _to_member_response(member, invitee.name if invitee else None)
 

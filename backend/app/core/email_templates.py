@@ -1,4 +1,4 @@
-"""Signup-approval email templates: built-in defaults plus admin overrides.
+"""Signup-approval and project-invite email templates: built-in defaults plus admin overrides.
 
 An admin may rewrite the subject and body of each email in Settings > Notifications. Overrides
 live on `WorkspaceSettings.email_templates`; a missing key falls back to the default here, so
@@ -74,6 +74,29 @@ TEMPLATES: tuple[EmailTemplate, ...] = (
             "If you believe this is a mistake, please contact your administrator."
         ),
     ),
+    EmailTemplate(
+        key="project_invite_existing",
+        label="Project invite (existing account)",
+        description="Sent when someone who already has an account is added to a project.",
+        placeholders=("inviter", "project", "action_url"),
+        subject="{inviter} added you to {project} on thinkShield Portal",
+        body=(
+            "Hello,\n\n"
+            "{inviter} has added you to the project {project}. You have access now:\n{action_url}"
+        ),
+    ),
+    EmailTemplate(
+        key="project_invite_new",
+        label="Project invite (no account yet)",
+        description="Sent when a project invite goes to an email that has no account yet.",
+        placeholders=("inviter", "project", "action_url"),
+        subject="{inviter} invited you to {project} on thinkShield Portal",
+        body=(
+            "Hello,\n\n"
+            "{inviter} has invited you to the project {project}. Register with this email address "
+            "to join; you will get access once an administrator approves your account:\n{action_url}"
+        ),
+    ),
 )
 
 BY_KEY = {t.key: t for t in TEMPLATES}
@@ -113,6 +136,47 @@ def render(
     # A subject is a header: collapse any newline an applicant's name could smuggle in.
     subject = " ".join(_fill(subject_t, values, html=False).split())
     text = re.sub(r"\n{3,}", "\n\n", _fill(body_t, values, html=False)).strip()
-    html_body = re.sub(r"\n{3,}", "\n\n", _fill(body_t, values, html=True)).strip()
-    html_body = _URL.sub(r'<a href="\1">\1</a>', html_body).replace("\n", "<br>")
-    return subject, text, f"<div>{html_body}</div>"
+    return subject, text, to_html(_fill(body_t, values, html=True).strip())
+
+
+# Signal Room tokens (frontend/app/globals.css, light theme). Inline styles only: email
+# clients strip <style> blocks and ignore CSS variables.
+INK, MUTED, BRAND, SIGNAL = "#16161a", "#5c5c55", "#46620c", "#c8fa4b"
+MONO = "'JetBrains Mono',SFMono-Regular,Consolas,'Liberation Mono',monospace"
+_LINK = rf'<a href="\1" style="color:{BRAND};text-decoration:underline">\1</a>'
+
+
+def _button(url: str) -> str:
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px">'
+        f'<tr><td style="background:{SIGNAL};border-radius:3px">'
+        f'<a href="{url}" style="display:inline-block;padding:12px 22px;font-family:{MONO};'
+        f'font-size:14px;font-weight:700;color:#131316;text-decoration:none">'
+        "Open thinkShield Portal &rarr;</a></td></tr></table>"
+        f'<p style="margin:0 0 24px;font-size:12px;line-height:1.5;color:{MUTED};word-break:break-all">'
+        f'Or paste this link into your browser:<br><a href="{url}" style="color:{BRAND}">{url}</a></p>'
+    )
+
+
+def to_html(escaped: str) -> str:
+    """Already-escaped plain text -> email HTML. Blank lines split paragraphs, a URL alone on
+    its line becomes the call-to-action button, any other URL becomes a link."""
+    out: list[str] = []
+    para: list[str] = []
+
+    def flush() -> None:
+        if para:
+            out.append(f'<p style="margin:0 0 16px">{"<br>".join(para)}</p>')
+            para.clear()
+
+    for line in escaped.split("\n"):
+        stripped = line.strip()
+        if _URL.fullmatch(stripped):
+            flush()
+            out.append(_button(stripped))
+        elif not stripped:
+            flush()
+        else:
+            para.append(_URL.sub(_LINK, stripped))
+    flush()
+    return "".join(out)

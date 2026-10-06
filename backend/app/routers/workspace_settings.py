@@ -98,6 +98,8 @@ _SAMPLE = {
     "email": "alex.sample@example.com",
     "action_url": "https://portal.example.com/admin/users?status=pending",
     "reason": "Reason: Please request access through your team lead.",
+    "inviter": "Sam Owner",
+    "project": "Sample Project",
 }
 
 

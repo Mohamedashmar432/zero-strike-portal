@@ -111,18 +111,20 @@ def test_send_email_skips_login_when_only_username_set(monkeypatch):
     assert smtp.login_args is None
 
 
-def test_send_email_text_only_has_no_html_part(monkeypatch):
+def test_send_email_text_only_gets_a_branded_html_part(monkeypatch):
     monkeypatch.setattr(email_service.settings, "smtp_host", "smtp.example.com")
     monkeypatch.setattr(email_service.settings, "smtp_use_tls", False)
     monkeypatch.setattr(email_service.settings, "smtp_username", "")
     monkeypatch.setattr(email_service.settings, "smtp_password", "")
     _reset_fake_smtp(monkeypatch)
 
-    email_service.send_email("user@example.com", "Subject", "plain only body")
+    email_service.send_email("user@example.com", "Subject", "plain <only> body\n\nhttps://p.example/x")
 
     _from_addr, _to_addrs, message = _FakeSMTP.instances[0].sendmail_args
-    assert "plain only body" in message
-    assert "text/html" not in message
+    assert "plain <only> body" in message  # text part untouched
+    assert "plain &lt;only&gt; body" in message  # html part escaped
+    assert "<b>think</b>Shield" in message  # wrapped in the brand layout
+    assert 'href="https://p.example/x"' in message and "Open thinkShield Portal" in message
 
 
 def test_send_password_reset_email_includes_reset_url_in_both_bodies(monkeypatch):

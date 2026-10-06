@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks, HTTPException, status
 
 from app.core import email_templates, security
 from app.core.config import settings
+from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import RefreshTokenRecord, User
 from app.services import audit_service, email_service, notification_service, workspace_settings_service
@@ -111,6 +112,23 @@ async def send_welcome_email(user: User) -> None:
         "signup_welcome",
         {"name": user.name, "action_url": f"{settings.frontend_origin}/login"},
         context="welcome",
+    )
+
+
+async def send_project_invite(email: str, inviter: str, project: Project, existing: bool) -> None:
+    """Tell the invitee about a project invite. An existing account already has access, so the
+    link opens the project; otherwise it goes to registration, which picks up the pending
+    membership (see `register`). Run as a background task; never raises."""
+    origin = settings.frontend_origin
+    await _send_template(
+        email,
+        "project_invite_existing" if existing else "project_invite_new",
+        {
+            "inviter": inviter,
+            "project": project.name,
+            "action_url": f"{origin}/projects/{project.id}" if existing else f"{origin}/register",
+        },
+        context="project invite",
     )
 
 

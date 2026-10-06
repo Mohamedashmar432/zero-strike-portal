@@ -1,3 +1,4 @@
+from tests.test_signup_approval import sent  # noqa: F401,F811  (fixture)
 from tests.test_auth_flow import register_and_login
 
 
@@ -249,3 +250,20 @@ def test_demotion_race_guard_reverts_when_no_owner_left(client, monkeypatch):
     monkeypatch.setattr(ProjectMember, "find", real_find)
     members = client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()
     assert [m["role"] for m in members] == ["owner"]
+
+
+def test_invite_emails_point_existing_users_at_the_project_and_new_ones_at_register(client, sent):  # noqa: F811
+    owner = register_and_login(client, email="mowner-mail@zerostrike.dev")
+    register_and_login(client, email="has-account@zerostrike.dev")
+    project = _create_project(client, _headers(owner), name="Mail Demo")
+    for email in ("has-account@zerostrike.dev", "no-account@zerostrike.dev"):
+        r = client.post(
+            f"/api/v1/projects/{project['id']}/members", json={"email": email}, headers=_headers(owner)
+        )
+        assert r.status_code == 201
+
+    by_to = {to: (subject, text) for to, subject, text, _ in sent}
+    subject, text = by_to["has-account@zerostrike.dev"]
+    assert "added you to Mail Demo" in subject and f"/projects/{project['id']}" in text
+    subject, text = by_to["no-account@zerostrike.dev"]
+    assert "invited you to Mail Demo" in subject and text.rstrip().endswith("/register")
