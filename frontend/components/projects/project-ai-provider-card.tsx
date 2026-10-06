@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, KeyRound } from "lucide-react";
+import { CheckCircle2, KeyRound, Loader2, Pencil, PlugZap, Power, Trash2 } from "lucide-react";
+import { IconAction, RowActionsMenu } from "@/components/common/row-actions";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
 import { ApiError } from "@/lib/api/client";
 import {
@@ -19,7 +21,8 @@ import {
 } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
-import { KeyStorageBadge } from "@/components/common/key-storage-badge";
+import { KeyStorageBadge, KeyVaultNote } from "@/components/common/key-storage-badge";
+import { PricingOverrideFields, toPrice } from "@/components/common/pricing-override-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +58,8 @@ const BLANK = {
   model_name: "",
   api_key: "",
   base_url: "",
+  input_cost: "",
+  output_cost: "",
 };
 
 export function ProjectAiProviderCard({
@@ -94,6 +99,8 @@ export function ProjectAiProviderCard({
         provider: form.provider,
         model_name: form.model_name.trim(),
         base_url: form.base_url.trim() || undefined,
+        input_cost_per_million: toPrice(form.input_cost),
+        output_cost_per_million: toPrice(form.output_cost),
       };
       if (editingId) {
         // api_key omitted (not empty-string) means "keep the stored key" — see the backend's
@@ -151,6 +158,8 @@ export function ProjectAiProviderCard({
       model_name: config.model_name ?? "",
       api_key: "",
       base_url: config.base_url ?? "",
+      input_cost: config.input_cost_per_million?.toString() ?? "",
+      output_cost: config.output_cost_per_million?.toString() ?? "",
     });
   };
 
@@ -205,40 +214,36 @@ export function ProjectAiProviderCard({
                   </p>
                 </div>
                 {canManage && (
-                  <div className="flex flex-wrap gap-2">
-                    {!config.is_active && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => activate.mutate(config.id)}
-                        disabled={activate.isPending}
-                      >
-                        Activate
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
+                  <div className="flex shrink-0 items-center gap-1">
+                    <IconAction
                       variant="outline"
+                      label={test.isPending ? "Testing…" : "Test connection"}
                       onClick={() => test.mutate(config.id)}
                       disabled={test.isPending}
                     >
-                      {test.isPending ? "Testing…" : "Test connection"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(config)}>
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => {
-                        setRemoveTarget(config);
-                        setRemoveOpen(true);
-                      }}
-                      disabled={remove.isPending}
-                    >
-                      Remove
-                    </Button>
+                      {test.isPending ? <Loader2 className="animate-spin" /> : <PlugZap />}
+                    </IconAction>
+                    <RowActionsMenu label={`Actions for ${config.name}`}>
+                      {!config.is_active && (
+                        <DropdownMenuItem onClick={() => activate.mutate(config.id)} disabled={activate.isPending}>
+                          <Power /> Activate
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onClick={() => startEdit(config)}>
+                        <Pencil /> Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => {
+                          setRemoveTarget(config);
+                          setRemoveOpen(true);
+                        }}
+                        disabled={remove.isPending}
+                      >
+                        <Trash2 /> Remove
+                      </DropdownMenuItem>
+                    </RowActionsMenu>
                   </div>
                 )}
               </li>
@@ -307,6 +312,7 @@ export function ProjectAiProviderCard({
                   disabled={keyless}
                   onChange={(e) => setForm({ ...form, api_key: e.target.value })}
                 />
+                {!keyless && <KeyVaultNote />}
               </div>
               {(keyless || form.base_url) && (
                 <div className="space-y-2 sm:col-span-2">
@@ -319,6 +325,12 @@ export function ProjectAiProviderCard({
                   />
                 </div>
               )}
+              <PricingOverrideFields
+                idPrefix="byok"
+                className="sm:col-span-2"
+                input={{ value: form.input_cost, onChange: (e) => setForm({ ...form, input_cost: e.target.value }) }}
+                output={{ value: form.output_cost, onChange: (e) => setForm({ ...form, output_cost: e.target.value }) }}
+              />
             </div>
             <div className="flex gap-2">
               <Button

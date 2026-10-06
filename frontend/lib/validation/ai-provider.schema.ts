@@ -27,9 +27,20 @@ export const aiProviderFormSchema = z
     model_name: z.string().min(1, "Model name is required"),
     api_key: z.string().optional(),
     base_url: z.string().optional(),
+    // USD per 1M tokens; blank = use the price list.
+    input_cost: z.string().optional(),
+    output_cost: z.string().optional(),
   })
   .refine((v) => !SELF_HOSTED_PROVIDERS.includes(v.provider) || !!v.base_url?.trim(), {
     message: "Base URL is required for this provider",
     path: ["base_url"],
+  })
+  .refine((v) => !v.input_cost?.trim() || Number(v.input_cost) >= 0, {
+    message: "Must be a number of 0 or more",
+    path: ["input_cost"],
+  })
+  .refine((v) => !v.output_cost?.trim() || Number(v.output_cost) >= 0, {
+    message: "Must be a number of 0 or more",
+    path: ["output_cost"],
   });
 export type AiProviderFormValues = z.infer<typeof aiProviderFormSchema>;

@@ -13,6 +13,7 @@ import {
   type AiProviderConfig,
 } from "@/lib/api/ai";
 import { ApiError } from "@/lib/api/client";
+import { getAiStatus } from "@/lib/api/ai";
 import AiProviderSettingsPage from "./page";
 
 const mockUseHasRole = vi.fn();
@@ -32,6 +33,11 @@ vi.mock("@/lib/api/ai", () => ({
   // exercising the portal-wide provider table only.
   getAiSettings: vi.fn(() => Promise.resolve({ project_byok_enabled: false })),
   updateAiSettings: vi.fn(),
+  getAiStatus: vi.fn(() => Promise.resolve({ enabled: true, key_vault_enabled: false })),
+  getAiPricingStatus: vi.fn(() =>
+    Promise.resolve({ models: 4477, source: "remote", url: "", refreshed_at: null, fallback_reason: null })
+  ),
+  refreshAiPricing: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -52,6 +58,8 @@ function makeProvider(overrides: Partial<AiProviderConfig> = {}): AiProviderConf
     model_name: "claude-sonnet-5",
     base_url: null,
     temperature: 0.2,
+    input_cost_per_million: null,
+    output_cost_per_million: null,
     is_active: true,
     has_api_key: true,
     key_storage: "encrypted_database",
@@ -67,6 +75,12 @@ function makeProvider(overrides: Partial<AiProviderConfig> = {}): AiProviderConf
     updated_by: null,
     ...overrides,
   };
+}
+
+// Secondary row actions live behind the "⋯" menu (components/common/row-actions.tsx).
+async function clickRowMenuItem(name: string | RegExp) {
+  fireEvent.click(await screen.findByRole("button", { name: /^Actions for/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
 }
 
 async function openDialog(triggerName: string) {
@@ -128,7 +142,8 @@ describe("AiProviderSettingsPage", () => {
     expect(screen.getByText(/150K tokens/)).toBeDefined();
     expect(screen.getByText(/\$12\.50/)).toBeDefined();
     expect(screen.getByText("1 hour ago")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Deactivate" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /^Actions for/ }));
+    expect(await screen.findByRole("menuitem", { name: "Deactivate" })).toBeDefined();
   });
 
   test("a provider with no usage yet shows zero counts and Never used", async () => {
@@ -234,11 +249,29 @@ describe("AiProviderSettingsPage", () => {
           model_name: "gpt-5",
           base_url: undefined,
           api_key: "sk-test",
+          input_cost_per_million: null,
+          output_cost_per_million: null,
         })
       );
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       expect(toast.success).toHaveBeenCalledWith("AI provider added");
     });
+  });
+
+  test("the key field says where the key goes: Key Vault when the vault is on, the database when off", async () => {
+    mockUseHasRole.mockReturnValue(true);
+    vi.mocked(listAiProviders).mockResolvedValue([]);
+    vi.mocked(getAiStatus).mockResolvedValue({ enabled: true, key_vault_enabled: true });
+    const { unmount } = renderWithClient(<AiProviderSettingsPage />);
+    let dialog = await openDialog("Add provider");
+    expect(await within(dialog).findByText(/Every key is stored in Azure Key Vault/)).toBeDefined();
+    unmount();
+
+    vi.mocked(getAiStatus).mockResolvedValue({ enabled: true, key_vault_enabled: false });
+    renderWithClient(<AiProviderSettingsPage />);
+    dialog = await openDialog("Add provider");
+    expect(await within(dialog).findByText("Stored encrypted in the portal database.")).toBeDefined();
+    expect(within(dialog).queryByText(/Azure Key Vault/)).toBeNull();
   });
 
   describe("Edit dialog", () => {
@@ -248,7 +281,8 @@ describe("AiProviderSettingsPage", () => {
       renderWithClient(<AiProviderSettingsPage />);
       await screen.findByText("Prod Anthropic");
 
-      const dialog = await openDialog("Edit");
+      await clickRowMenuItem("Edit");
+      const dialog = await screen.findByRole("dialog");
       expect(await within(dialog).findByDisplayValue("Prod Anthropic")).toBeDefined();
       expect(within(dialog).getByDisplayValue("claude-sonnet-5")).toBeDefined();
       const apiKeyInput = within(dialog).getByLabelText("API key") as HTMLInputElement;
@@ -264,7 +298,8 @@ describe("AiProviderSettingsPage", () => {
       renderWithClient(<AiProviderSettingsPage />);
       await screen.findByText("Prod Anthropic");
 
-      const dialog = await openDialog("Edit");
+      await clickRowMenuItem("Edit");
+      const dialog = await screen.findByRole("dialog");
       await within(dialog).findByDisplayValue("Prod Anthropic");
       fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
@@ -320,7 +355,7 @@ describe("AiProviderSettingsPage", () => {
       renderWithClient(<AiProviderSettingsPage />);
       await screen.findByText("Prod Anthropic");
 
-      fireEvent.click(screen.getByRole("button", { name: "Test" }));
+      fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
       await waitFor(() =>
         expect(testAiProviderConnection).toHaveBeenCalledWith({
           id: "p1",
@@ -339,7 +374,7 @@ describe("AiProviderSettingsPage", () => {
     renderWithClient(<AiProviderSettingsPage />);
     await screen.findByText("Prod Anthropic");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await clickRowMenuItem("Delete");
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Delete AI provider?")).toBeTruthy();
     expect(within(dialog).getByText(/Prod Anthropic/)).toBeTruthy();
@@ -356,7 +391,7 @@ describe("AiProviderSettingsPage", () => {
     renderWithClient(<AiProviderSettingsPage />);
     await screen.findByText("Prod Anthropic");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await clickRowMenuItem("Delete");
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 

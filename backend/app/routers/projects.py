@@ -13,6 +13,8 @@ from app.models.project_repo import ProjectRepo
 from app.models.user import User
 from app.schemas.ai_analytics import AiAnalyticsResponse, AiUsageEventPage
 from app.schemas.ai_provider_config import (
+    AIBudgetResponse,
+    AIBudgetUpdateRequest,
     AIProviderConfigCreateRequest,
     AIProviderConfigResponse,
     AIProviderConfigUpdateRequest,
@@ -43,6 +45,7 @@ from app.schemas.project_repo import (
 )
 from app.services import (
     ai_analytics_service,
+    ai_budget_service,
     ai_provider_config_service,
     audit_service,
     llm_client,
@@ -581,6 +584,53 @@ async def get_project_ai_usage(project_id: str, user: User = Depends(get_current
     return ProjectAiUsageResponse(**await ai_provider_config_service.get_project_usage(project_id))
 
 
+async def _budget_response(project) -> AIBudgetResponse:
+    usage = await ai_budget_service.month_to_date(str(project.id))
+    return AIBudgetResponse(
+        usd_monthly=project.ai_budget_usd_monthly,
+        tokens_monthly=project.ai_budget_tokens_monthly,
+        alert_percent=project.ai_budget_alert_percent,
+        hard_stop=project.ai_budget_hard_stop,
+        period_start=usage["period_start"],
+        used_usd=usage["cost_usd"],
+        used_tokens=usage["tokens"],
+        requests=usage["requests"],
+        unpriced_requests=usage["unpriced_requests"],
+    )
+
+
+@router.get("/{project_id}/ai-budget", response_model=AIBudgetResponse)
+async def get_project_ai_budget(project_id: str, user: User = Depends(get_current_user)):
+    project = await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await _budget_response(project)
+
+
+@router.put("/{project_id}/ai-budget", response_model=AIBudgetResponse)
+async def update_project_ai_budget(
+    project_id: str, payload: AIBudgetUpdateRequest, user: User = Depends(get_current_user)
+):
+    project = await project_service.get_project_or_404(project_id)
+    await project_service.require_owner_or_admin(project_id, user)
+    project.ai_budget_usd_monthly = payload.usd_monthly
+    project.ai_budget_tokens_monthly = payload.tokens_monthly
+    project.ai_budget_alert_percent = payload.alert_percent
+    project.ai_budget_hard_stop = payload.hard_stop
+    # New limits re-arm this month's alerts: 80% of a raised budget is a new event worth sending.
+    project.ai_budget_alerts_sent = []
+    project.updated_at = datetime.now(timezone.utc)
+    await project.save()
+    await audit_service.record(
+        "AI Budget Updated",
+        actor_user_id=str(user.id),
+        project_id=project_id,
+        metadata=payload.model_dump(),
+    )
+    # The usage may already be past a new, lower threshold -- say so now, not on the next call.
+    await ai_budget_service.check_thresholds(project_id)
+    return await _budget_response(project)
+
+
 # --- per-project AI usage analytics (readable by any member) ------------------------------
 
 
@@ -659,6 +709,8 @@ async def create_project_ai_provider(
         model_name=payload.model_name,
         base_url=payload.base_url,
         temperature=payload.temperature,
+        input_cost_per_million=payload.input_cost_per_million,
+        output_cost_per_million=payload.output_cost_per_million,
         api_key=payload.api_key,
         created_by=str(user.id),
         project_id=project_id,
@@ -689,6 +741,8 @@ async def update_project_ai_provider(
         model_name=payload.model_name,
         base_url=payload.base_url,
         temperature=payload.temperature,
+        input_cost_per_million=payload.input_cost_per_million,
+        output_cost_per_million=payload.output_cost_per_million,
         api_key=payload.api_key,
         clear_api_key=payload.clear_api_key,
         updated_by=str(user.id),

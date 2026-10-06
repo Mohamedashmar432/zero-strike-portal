@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles } from "lucide-react";
+import { Loader2, Pencil, PlugZap, PowerOff, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -10,7 +10,10 @@ import { RequireRole } from "@/components/auth/require-role";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
-import { KeyStorageBadge } from "@/components/common/key-storage-badge";
+import { KeyStorageBadge, KeyVaultNote } from "@/components/common/key-storage-badge";
+import { PricingOverrideFields, toPrice } from "@/components/common/pricing-override-fields";
+import { IconAction, RowActionsMenu } from "@/components/common/row-actions";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,8 +34,10 @@ import {
   createAiProvider,
   deactivateAiProvider,
   deleteAiProvider,
+  getAiPricingStatus,
   getAiSettings,
   listAiProviders,
+  refreshAiPricing,
   testAiProviderConnection,
   updateAiProvider,
   updateAiSettings,
@@ -89,7 +94,7 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
     formState: { errors },
   } = useForm<AiProviderFormValues>({
     resolver: zodResolver(aiProviderFormSchema),
-    defaultValues: { name: "", provider: "anthropic", model_name: "", base_url: "", api_key: "" },
+    defaultValues: { name: "", provider: "anthropic", model_name: "", base_url: "", api_key: "", input_cost: "", output_cost: "" },
     // Keeps the form synced to whichever row (or blank create) is being targeted -- same
     // idiom as the old single-settings form, keyed off `target` instead of query data.
     // api_key is always left blank: the raw/encrypted key is never returned by the backend.
@@ -101,8 +106,10 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
             model_name: target.provider.model_name ?? "",
             base_url: target.provider.base_url ?? "",
             api_key: "",
+            input_cost: target.provider.input_cost_per_million?.toString() ?? "",
+            output_cost: target.provider.output_cost_per_million?.toString() ?? "",
           }
-        : { name: "", provider: "anthropic", model_name: "", base_url: "", api_key: "" }
+        : { name: "", provider: "anthropic", model_name: "", base_url: "", api_key: "", input_cost: "", output_cost: "" }
       : undefined,
   });
 
@@ -175,6 +182,8 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
           model_name: values.model_name,
           base_url: values.base_url || undefined,
           api_key: values.api_key || undefined,
+          input_cost_per_million: toPrice(values.input_cost),
+          output_cost_per_million: toPrice(values.output_cost),
         },
       });
     } else {
@@ -184,6 +193,8 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
         model_name: values.model_name,
         base_url: values.base_url || undefined,
         api_key: values.api_key ?? "",
+        input_cost_per_million: toPrice(values.input_cost),
+        output_cost_per_million: toPrice(values.output_cost),
       });
     }
   }
@@ -267,7 +278,12 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
                 {...register("api_key")}
               />
               {errors.api_key && <p className="text-sm text-destructive">{errors.api_key.message}</p>}
+              <KeyVaultNote />
             </div>
+            <PricingOverrideFields idPrefix="ai-provider" input={register("input_cost")} output={register("output_cost")} />
+            {(errors.input_cost || errors.output_cost) && (
+              <p className="text-sm text-destructive">{(errors.input_cost ?? errors.output_cost)?.message}</p>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -344,6 +360,7 @@ function AiProvidersPanel() {
         </p>
         <Button onClick={() => setDialogTarget({ mode: "create" })}>Add provider</Button>
       </div>
+      <PricingStatus />
       <DataTableCard
         isLoading={isLoading}
         isError={false}
@@ -407,10 +424,10 @@ function AiProvidersPanel() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="flex justify-end gap-2">
-                    <Button
+                  <div className="flex items-center justify-end gap-1">
+                    <IconAction
                       variant="outline"
-                      size="sm"
+                      label={test.isPending && test.variables?.id === p.id ? "Testing…" : "Test connection"}
                       onClick={() =>
                         test.mutate({
                           id: p.id,
@@ -421,36 +438,33 @@ function AiProvidersPanel() {
                       }
                       disabled={test.isPending && test.variables?.id === p.id}
                     >
-                      {test.isPending && test.variables?.id === p.id ? "Testing…" : "Test"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDialogTarget({ mode: "edit", provider: p })}
-                    >
-                      Edit
-                    </Button>
-                    {p.is_active && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => deactivate.mutate()}
-                        disabled={deactivate.isPending}
+                      {test.isPending && test.variables?.id === p.id ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <PlugZap />
+                      )}
+                    </IconAction>
+                    <RowActionsMenu label={`Actions for ${p.name}`}>
+                      <DropdownMenuItem onClick={() => setDialogTarget({ mode: "edit", provider: p })}>
+                        <Pencil /> Edit
+                      </DropdownMenuItem>
+                      {p.is_active && (
+                        <DropdownMenuItem onClick={() => deactivate.mutate()} disabled={deactivate.isPending}>
+                          <PowerOff /> {deactivate.isPending ? "Deactivating…" : "Deactivate"}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => {
+                          setDeleteTarget(p);
+                          setDeleteOpen(true);
+                        }}
+                        disabled={remove.isPending && remove.variables === p.id}
                       >
-                        {deactivate.isPending ? "Deactivating…" : "Deactivate"}
-                      </Button>
-                    )}
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => {
-                        setDeleteTarget(p);
-                        setDeleteOpen(true);
-                      }}
-                      disabled={remove.isPending && remove.variables === p.id}
-                    >
-                      Delete
-                    </Button>
+                        <Trash2 /> Delete
+                      </DropdownMenuItem>
+                    </RowActionsMenu>
                   </div>
                 </TableCell>
               </TableRow>
@@ -527,6 +541,38 @@ function ProjectByokPanel() {
           project is visible under Admin → AI Analytics.
         </p>
       )}
+    </div>
+  );
+}
+
+/** Where the cost figures come from, so an admin can tell a live price list from a stale bundled
+ *  one -- the bundled copy is what silently priced newer models at $0 before. */
+function PricingStatus() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: queryKeys.ai.pricing(), queryFn: getAiPricingStatus });
+  const refresh = useMutation({
+    mutationFn: refreshAiPricing,
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(queryKeys.ai.pricing(), fresh);
+      if (fresh.source === "remote" && !fresh.fallback_reason) toast.success("Price list updated");
+      else toast.error("Could not download the live price list");
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to refresh prices"),
+  });
+  if (!data) return null;
+  const live = data.source === "remote" && !data.fallback_reason;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-hairline bg-card px-3 py-2 text-xs">
+      <p className={live ? "text-muted-foreground" : "text-severity-medium"}>
+        {live
+          ? `Costs are priced from the live price list (${data.models.toLocaleString()} models)`
+          : `Using the price list bundled with the backend (${data.models.toLocaleString()} models). Newer models may be unpriced${data.fallback_reason ? ` — ${data.fallback_reason}` : ""}`}
+        {data.refreshed_at ? `, loaded ${formatRelativeTime(data.refreshed_at)}.` : "."} Custom pricing on a provider
+        always takes precedence.
+      </p>
+      <Button size="xs" variant="outline" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+        {refresh.isPending ? "Refreshing…" : "Refresh prices"}
+      </Button>
     </div>
   );
 }

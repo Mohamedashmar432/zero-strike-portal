@@ -38,6 +38,12 @@ function setup() {
   );
 }
 
+// Secondary row actions live behind the "⋯" menu (components/common/row-actions.tsx).
+async function clickRowMenuItem(name: string | RegExp) {
+  fireEvent.click(await screen.findByRole("button", { name: /^Actions for/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("ProjectAiProviderCard", () => {
   afterEach(() => vi.clearAllMocks());
 
@@ -45,7 +51,7 @@ describe("ProjectAiProviderCard", () => {
     vi.mocked(deleteProjectAiProvider).mockResolvedValue(undefined);
     setup();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    await clickRowMenuItem("Remove");
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Remove this project's AI key?")).toBeTruthy();
     // The active key is the project's only provider, so the consequence must be spelled out.
@@ -59,7 +65,7 @@ describe("ProjectAiProviderCard", () => {
   test("cancelling the confirmation removes nothing", async () => {
     setup();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    await clickRowMenuItem("Remove");
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 

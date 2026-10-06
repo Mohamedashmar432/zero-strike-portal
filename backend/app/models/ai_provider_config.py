@@ -54,6 +54,10 @@ class AIProviderConfig(Document):
     api_key_encrypted: str | None = None
     base_url: str | None = None
     temperature: float = 0.0
+    # USD per 1M tokens. Either one set overrides litellm's price map for this config -- for
+    # negotiated rates, Azure deployment names and self-hosted models the map cannot know.
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
     # Exactly one document has is_active=True at a time (or none = AI analysis off). This
     # replaces the old boolean `enabled` field -- there is no separate "enabled" concept
     # anymore, only "the active provider" (or lack thereof).

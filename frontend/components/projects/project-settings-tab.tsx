@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { ProjectAiProviderCard } from "@/components/projects/project-ai-provider-card";
+import { ProjectAiBudgetCard } from "@/components/projects/project-ai-budget-card";
 import { ProjectPolicyCard } from "@/components/projects/project-policy-card";
 import { ReportTemplatePicker, type ReportTemplateValue } from "@/components/reports/report-template-picker";
 import { Button } from "@/components/ui/button";
@@ -116,6 +117,8 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
       </Card>
 
       <ProjectAiProviderCard projectId={projectId} canManage={canManage(project.my_role)} />
+
+      <ProjectAiBudgetCard projectId={projectId} canManage={canManage(project.my_role)} />
 
       <ProjectPolicyCard projectId={projectId} />
 

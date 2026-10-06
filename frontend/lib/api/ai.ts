@@ -19,7 +19,7 @@ export type AiProvider =
   | "gemini"
   | "deepseek";
 
-export type AiStatus = { enabled: boolean };
+export type AiStatus = { enabled: boolean; key_vault_enabled: boolean };
 
 export type AiProviderConfig = {
   id: string;
@@ -30,6 +30,9 @@ export type AiProviderConfig = {
   model_name: string | null;
   base_url: string | null;
   temperature: number;
+  // USD per 1M tokens; null = priced from litellm's price list.
+  input_cost_per_million: number | null;
+  output_cost_per_million: number | null;
   is_active: boolean;
   // The raw/encrypted API key is never returned -- this is the only signal any UI gets
   // about whether one is already configured server-side.
@@ -56,6 +59,9 @@ export type CreateAiProviderInput = {
   // Required on create -- there's no existing key to fall back to.
   api_key: string;
   temperature?: number;
+  // USD per 1M tokens. Always sent on update: null means "use the price list".
+  input_cost_per_million?: number | null;
+  output_cost_per_million?: number | null;
 };
 
 export type UpdateAiProviderInput = {
@@ -67,6 +73,9 @@ export type UpdateAiProviderInput = {
   api_key?: string;
   clear_api_key?: boolean;
   temperature?: number;
+  // USD per 1M tokens. Always sent on update: null means "use the price list".
+  input_cost_per_million?: number | null;
+  output_cost_per_million?: number | null;
 };
 
 export type TestAiProviderInput = {
@@ -213,6 +222,8 @@ export type AiUsageTotals = {
   completion_tokens: number;
   cost_usd: number;
   avg_duration_ms: number;
+  /** Successful calls nothing could price: their cost is missing from cost_usd, not zero. */
+  unpriced?: number;
 };
 
 /**
@@ -411,4 +422,49 @@ export function triggerScanAnalysis(scanId: string, opts: { force?: boolean } = 
     method: "POST",
     body: JSON.stringify(opts),
   });
+}
+
+// --- AI budgets and pricing (docs/AI_PRICING_AND_BUDGETS.md) ---
+
+export type AiBudgetInput = {
+  // null = no limit on that metric. Monthly = UTC calendar month.
+  usd_monthly: number | null;
+  tokens_monthly: number | null;
+  alert_percent: number;
+  hard_stop: boolean;
+};
+
+export type AiBudget = AiBudgetInput & {
+  period_start: string;
+  used_usd: number;
+  used_tokens: number;
+  requests: number;
+  unpriced_requests: number;
+};
+
+export function getProjectAiBudget(projectId: string) {
+  return apiFetch<AiBudget>(`/projects/${projectId}/ai-budget`);
+}
+
+export function updateProjectAiBudget(projectId: string, input: AiBudgetInput) {
+  return apiFetch<AiBudget>(`/projects/${projectId}/ai-budget`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export type AiPricingStatus = {
+  models: number;
+  source: "remote" | "local" | null;
+  url: string;
+  refreshed_at: string | null;
+  fallback_reason: string | null;
+};
+
+export function getAiPricingStatus() {
+  return apiFetch<AiPricingStatus>("/admin/ai-pricing");
+}
+
+export function refreshAiPricing() {
+  return apiFetch<AiPricingStatus>("/admin/ai-pricing/refresh", { method: "POST" });
 }

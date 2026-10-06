@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 class AIStatusResponse(BaseModel):
     enabled: bool
+    # Where a newly saved provider key will live, so the form can say so before it is saved.
+    key_vault_enabled: bool = False
 
 
 # --- Analysis trigger/status (per-finding insight + scan-level synthesis) ---

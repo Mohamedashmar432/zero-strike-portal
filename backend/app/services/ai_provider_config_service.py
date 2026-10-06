@@ -16,7 +16,7 @@ from structlog import get_logger
 from app.core import security
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider, AIProviderConfig
 from app.models.ai_usage_event import AIUsageEvent
-from app.services import report_template_service, secret_store
+from app.services import ai_budget_service, report_template_service, secret_store
 from app.services.secret_store import SecretStoreError
 
 logger = get_logger(__name__)
@@ -199,6 +199,8 @@ async def create_config(
     api_key: str | None,
     created_by: str | None,
     project_id: str | None = None,
+    input_cost_per_million: float | None = None,
+    output_cost_per_million: float | None = None,
 ) -> AIProviderConfig:
     """Auto-activates iff this scope was empty before the insert -- the first provider a project
     (or the portal) ever adds becomes active automatically; every subsequent one starts inactive."""
@@ -212,6 +214,8 @@ async def create_config(
         model_name=model_name,
         base_url=base_url,
         temperature=temperature,
+        input_cost_per_million=input_cost_per_million,
+        output_cost_per_million=output_cost_per_million,
         is_active=was_empty,
         created_at=now,
         updated_at=now,
@@ -235,6 +239,8 @@ async def update_config(
     clear_api_key: bool,
     updated_by: str | None,
     project_id: str | None = None,
+    input_cost_per_million: float | None = None,
+    output_cost_per_million: float | None = None,
 ) -> AIProviderConfig:
     """Applies the update payload's omitted-vs-clear api_key semantics:
     - api_key omitted (None) and clear_api_key falsy -> existing encrypted key untouched.
@@ -253,6 +259,9 @@ async def update_config(
     config.base_url = base_url
     if temperature is not None:
         config.temperature = temperature
+    # Full replace like the other fields: the forms always send both, null meaning "use the map".
+    config.input_cost_per_million = input_cost_per_million
+    config.output_cost_per_million = output_cost_per_million
 
     old_secret_name = None
     if clear_api_key:
@@ -311,6 +320,7 @@ async def record_usage(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     cost_usd: float = 0.0,
+    cost_known: bool = True,
     provider: str | None = None,
     model_name: str | None = None,
     project_id: str | None = None,
@@ -367,8 +377,11 @@ async def record_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_usd=cost_usd,
+        cost_known=cost_known,
         created_at=now,
     ).insert()
+    if success and project_id:
+        await ai_budget_service.check_thresholds(project_id)
 
 
 async def get_project_usage(project_id: str) -> dict:

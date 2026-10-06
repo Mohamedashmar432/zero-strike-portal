@@ -75,6 +75,9 @@ class AIUsageEvent(Document):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0
+    # False when nothing could price the call (no override, model not in the price map). cost_usd
+    # is then 0 but means "unknown", and analytics counts it as unpriced rather than free.
+    cost_known: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:

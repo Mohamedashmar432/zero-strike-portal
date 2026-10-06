@@ -19,7 +19,14 @@ from app.schemas.ai_analysis import (
     ScanAnalysisResponse,
     ScanInsight,
 )
-from app.services import ai_job_queue_service, ai_provider_config_service, audit_service, project_service, scan_service
+from app.services import (
+    ai_job_queue_service,
+    ai_provider_config_service,
+    audit_service,
+    project_service,
+    scan_service,
+    secret_store,
+)
 
 # Status endpoint lives under /ai; the trigger/status endpoints below are identified by
 # finding_id/scan_id path params, so they're a second, prefix-less router (mirrors
@@ -55,8 +62,10 @@ async def get_ai_status(project_id: str | None = Query(None), user: User = Depen
     admin screens are asking; project screens must pass their project_id to get the real answer.
     """
     if project_id is None and await ai_provider_config_service.byok_enabled():
-        return AIStatusResponse(enabled=True)
-    return AIStatusResponse(enabled=await ai_provider_config_service.ai_ready(project_id))
+        enabled = True
+    else:
+        enabled = await ai_provider_config_service.ai_ready(project_id)
+    return AIStatusResponse(enabled=enabled, key_vault_enabled=secret_store.enabled())
 
 
 # --- Analysis trigger/status ---

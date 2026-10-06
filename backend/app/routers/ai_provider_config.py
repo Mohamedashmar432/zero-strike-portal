@@ -38,6 +38,8 @@ async def create_ai_provider(payload: AIProviderConfigCreateRequest, user: User 
         model_name=payload.model_name,
         base_url=payload.base_url,
         temperature=payload.temperature,
+        input_cost_per_million=payload.input_cost_per_million,
+        output_cost_per_million=payload.output_cost_per_million,
         api_key=payload.api_key,
         created_by=str(user.id),
     )
@@ -68,6 +70,8 @@ async def update_ai_provider(
         model_name=payload.model_name,
         base_url=payload.base_url,
         temperature=payload.temperature,
+        input_cost_per_million=payload.input_cost_per_million,
+        output_cost_per_million=payload.output_cost_per_million,
         api_key=payload.api_key,
         clear_api_key=payload.clear_api_key,
         updated_by=str(user.id),

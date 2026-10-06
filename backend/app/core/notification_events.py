@@ -78,6 +78,14 @@ EVENTS: tuple[NotificationEvent, ...] = (
         audience="project",
     ),
     NotificationEvent(
+        key="ai.budget_threshold",
+        label="AI budget alert",
+        description="A project crossed its AI budget alert threshold or reached its monthly limit. "
+        "Sent to the project owner.",
+        audience="project",
+        default_email=True,
+    ),
+    NotificationEvent(
         key="autofix.quota_requested",
         label="Auto-fix allowance requested",
         description="Someone asked for extra auto-fix headroom and is waiting on a decision.",

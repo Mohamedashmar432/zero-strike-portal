@@ -50,6 +50,9 @@ def _no_real_llm_calls(monkeypatch):
         )
 
     monkeypatch.setattr(litellm, "acompletion", _offline_acompletion)
+    # The startup price-map refresh (pricing_service.refresh_loop) would otherwise download
+    # litellm's price list from GitHub on every TestClient. An empty map = "keep what we have".
+    monkeypatch.setattr(litellm, "get_model_cost_map", lambda url: {})
 
 
 @pytest.fixture()

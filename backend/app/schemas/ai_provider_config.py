@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.timeutils import as_utc
 from app.models.ai_provider_config import AIProvider
@@ -15,6 +15,9 @@ class AIProviderConfigCreateRequest(BaseModel):
     base_url: str | None = None
     temperature: float = 0.0
     api_key: str | None = None
+    # USD per 1M tokens; overrides litellm's price map for this config. Omitted/null = use the map.
+    input_cost_per_million: float | None = Field(None, ge=0)
+    output_cost_per_million: float | None = Field(None, ge=0)
 
 
 class AIProviderConfigUpdateRequest(BaseModel):
@@ -26,6 +29,9 @@ class AIProviderConfigUpdateRequest(BaseModel):
     # Omitted (None) = keep the existing encrypted key unchanged; clear_api_key=True explicitly wipes it.
     api_key: str | None = None
     clear_api_key: bool = False
+    # USD per 1M tokens; overrides litellm's price map for this config. Omitted/null = use the map.
+    input_cost_per_million: float | None = Field(None, ge=0)
+    output_cost_per_million: float | None = Field(None, ge=0)
 
 
 class AIProviderConfigResponse(BaseModel):
@@ -36,6 +42,8 @@ class AIProviderConfigResponse(BaseModel):
     model_name: str | None
     base_url: str | None
     temperature: float
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
     is_active: bool
     has_api_key: bool  # never the encrypted or raw key itself
     # Where the key lives. Read-only; the secret NAME is safe to show, the value never is.
@@ -70,6 +78,8 @@ class AIProviderConfigResponse(BaseModel):
             model_name=config.model_name,
             base_url=config.base_url,
             temperature=config.temperature,
+            input_cost_per_million=config.input_cost_per_million,
+            output_cost_per_million=config.output_cost_per_million,
             is_active=config.is_active,
             has_api_key=ai_provider_config_service.has_api_key(config),
             key_storage=key_storage,
@@ -105,3 +115,32 @@ class AISettingsResponse(BaseModel):
 
 class AISettingsUpdateRequest(BaseModel):
     project_byok_enabled: bool
+
+
+# --- AI budgets and pricing (docs/AI_PRICING_AND_BUDGETS.md) -------------------------------------
+
+
+class AIBudgetUpdateRequest(BaseModel):
+    # null = no limit on that metric.
+    usd_monthly: float | None = Field(None, gt=0)
+    tokens_monthly: int | None = Field(None, gt=0)
+    alert_percent: int = Field(80, ge=1, le=99)
+    hard_stop: bool = False
+
+
+class AIBudgetResponse(AIBudgetUpdateRequest):
+    # Month-to-date usage (UTC calendar month), so the page can show progress next to the limits.
+    period_start: datetime
+    used_usd: float
+    used_tokens: int
+    requests: int
+    # Calls nothing could price: their cost is missing from used_usd, not zero.
+    unpriced_requests: int
+
+
+class AIPricingStatusResponse(BaseModel):
+    models: int
+    source: str | None  # "remote" (live list) or "local" (the copy bundled with litellm)
+    url: str
+    refreshed_at: datetime | None
+    fallback_reason: str | None

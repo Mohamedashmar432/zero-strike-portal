@@ -15,6 +15,8 @@ class AiUsageTotals(BaseModel):
     completion_tokens: int
     cost_usd: float
     avg_duration_ms: int
+    # Successful calls nothing could price: their cost is missing from cost_usd, not zero.
+    unpriced: int = 0
 
 
 class AiUsageDayPoint(BaseModel):

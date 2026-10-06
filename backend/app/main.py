@@ -47,6 +47,7 @@ from app.services import (
     ai_job_queue_service,
     ai_remediation_queue_service,
     cloud_scan_service,
+    pricing_service,
     notification_service,
     compliance_queue_service,
     project_stats_service,
@@ -94,7 +95,9 @@ async def lifespan(app: FastAPI):
     ai_poll_task = asyncio.create_task(ai_job_queue_service.poll_loop())
     remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())
     compliance_poll_task = asyncio.create_task(compliance_queue_service.poll_loop())
+    pricing_task = asyncio.create_task(pricing_service.refresh_loop())
     yield
+    pricing_task.cancel()
     poll_task.cancel()
     ai_poll_task.cancel()
     remediation_poll_task.cancel()
@@ -156,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_provider_config.router, prefix="/api/v1")
     app.include_router(ai_provider_config.settings_router, prefix="/api/v1")
     app.include_router(admin_ai_analytics.router, prefix="/api/v1")
+    app.include_router(admin_ai_analytics.pricing_router, prefix="/api/v1")
     app.include_router(ai_remediation.router, prefix="/api/v1")
     app.include_router(remediation_settings.router, prefix="/api/v1")
     app.include_router(compliance.router, prefix="/api/v1")

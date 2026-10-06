@@ -35,6 +35,7 @@ export const queryKeys = {
     scanActivity: (projectId: string) => ["projects", projectId, "scan-activity"] as const,
     aiUsage: (projectId: string) => ["projects", projectId, "ai-usage"] as const,
     aiProviders: (projectId: string) => ["projects", projectId, "ai-provider"] as const,
+    aiBudget: (projectId: string) => ["projects", projectId, "ai-budget"] as const,
     aiAnalytics: (projectId: string, days: number) =>
       ["projects", projectId, "ai-analytics", days] as const,
     aiEvents: (projectId: string, filters: Record<string, unknown>) =>
@@ -82,6 +83,7 @@ export const queryKeys = {
     // entry with the portal-level one.
     status: (projectId?: string) => ["ai", "status", projectId ?? ""] as const,
     settings: () => ["ai", "settings"] as const,
+    pricing: () => ["ai", "pricing"] as const,
     portalAnalytics: (days: number, projectId?: string) =>
       ["ai", "portal-analytics", days, projectId ?? ""] as const,
     portalEvents: (filters: Record<string, unknown>) => ["ai", "portal-events", filters] as const,

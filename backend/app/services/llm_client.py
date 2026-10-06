@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.retry import retry_transient
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider
-from app.services import ai_provider_config_service
+from app.services import ai_budget_service, ai_provider_config_service, pricing_service
 from app.services.secret_store import SecretStoreError
 
 logger = structlog.get_logger(__name__)
@@ -217,6 +217,7 @@ async def _record_usage_safe(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     cost_usd: float = 0.0,
+    cost_known: bool = True,
     project_id: str | None = None,
     scan_id: str | None = None,
     feature: str = "unknown",
@@ -236,6 +237,7 @@ async def _record_usage_safe(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             cost_usd=cost_usd,
+            cost_known=cost_known,
             provider=config.provider,
             model_name=config.model_name,
             project_id=project_id,
@@ -297,6 +299,9 @@ async def get_completion(
     candidates = await _failover_candidates(project_id=project_id)
     if not candidates:
         raise await _not_configured_error(project_id)
+    # Before any provider is called, so a refused call costs nothing.
+    if project_id and (refusal := await ai_budget_service.hard_stop_reason(project_id)):
+        raise LLMPermanentError(refusal)
 
     last_transient: LLMTransientError | None = None
     for index, config in enumerate(candidates):
@@ -396,11 +401,7 @@ async def _completion_with_config(
     usage = getattr(response, "usage", None)
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-    try:
-        cost_usd = litellm.completion_cost(completion_response=response)
-    except Exception:
-        logger.warning("failed to compute llm completion cost", exc_info=True)
-        cost_usd = 0.0
+    cost = pricing_service.cost_of(config, response, prompt_tokens, completion_tokens)
 
     # The provider call succeeded and was billed regardless of what we do with the content
     # below -- record success now, before attempting to parse it.
@@ -409,7 +410,8 @@ async def _completion_with_config(
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        cost_usd=cost_usd,
+        cost_usd=cost or 0.0,
+        cost_known=cost is not None,
         duration_ms=duration_ms,
         **attribution,
     )
@@ -517,6 +519,9 @@ async def get_tool_completion(
     candidates = await _failover_candidates(tool_capable_only=True, project_id=project_id)
     if not candidates:
         raise await _not_configured_error(project_id)
+    # Before any provider is called, so a refused call costs nothing.
+    if project_id and (refusal := await ai_budget_service.hard_stop_reason(project_id)):
+        raise LLMPermanentError(refusal)
 
     last_transient: LLMTransientError | None = None
     for index, config in enumerate(candidates):
@@ -609,16 +614,14 @@ async def _tool_completion_with_config(
     usage = getattr(response, "usage", None)
     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-    try:
-        cost_usd = litellm.completion_cost(completion_response=response)
-    except Exception:
-        cost_usd = 0.0
+    cost = pricing_service.cost_of(config, response, prompt_tokens, completion_tokens)
     await _record_usage_safe(
         config,
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        cost_usd=cost_usd,
+        cost_usd=cost or 0.0,
+        cost_known=cost is not None,
         duration_ms=_ms(started),
         **attribution,
     )

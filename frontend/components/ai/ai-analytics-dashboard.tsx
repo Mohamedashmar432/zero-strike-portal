@@ -262,7 +262,11 @@ function KpiRow({ totals, isLoading }: { totals?: AiUsageTotals; isLoading: bool
       <StatCard
         label="Total spend"
         value={t ? usd(t.cost_usd) : "$0.00"}
-        caption="Estimated from provider pricing"
+        caption={
+          t?.unpriced
+            ? `Excludes ${compact(t.unpriced)} unpriced ${t.unpriced === 1 ? "call" : "calls"}. Set custom pricing on the provider.`
+            : "Estimated from provider pricing"
+        }
         isLoading={isLoading}
       />
       <StatCard

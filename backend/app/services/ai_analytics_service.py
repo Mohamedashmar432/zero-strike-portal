@@ -40,6 +40,7 @@ def _totals_projection(row: dict) -> dict:
         "completion_tokens": row.get("completion_tokens", 0),
         "cost_usd": round(row.get("cost_usd", 0.0), 6),
         "avg_duration_ms": int(row.get("avg_duration_ms") or 0),
+        "unpriced": row.get("unpriced", 0),
     }
 
 
@@ -50,6 +51,8 @@ _SUMS = {
     "completion_tokens": {"$sum": "$completion_tokens"},
     "cost_usd": {"$sum": "$cost_usd"},
     "avg_duration_ms": {"$avg": "$duration_ms"},
+    # Rows written before cost_known existed have no field and count as priced, as they were.
+    "unpriced": {"$sum": {"$cond": [{"$eq": ["$cost_known", False]}, 1, 0]}},
 }
 
 

@@ -251,3 +251,20 @@ def test_legacy_ciphertext_still_readable_with_vault_on(vault):
         assert await svc.is_ready(config)
 
     asyncio.run(run())
+
+
+def _status_key_vault_flag(client):
+    from tests.test_auth_flow import register_and_login
+
+    tokens = register_and_login(client, "kv-status@example.com")
+    r = client.get("/api/v1/ai/status", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert r.status_code == 200
+    return r.json()["key_vault_enabled"]
+
+
+def test_ai_status_reports_key_vault_on(vault, client):
+    assert _status_key_vault_flag(client) is True
+
+
+def test_ai_status_reports_key_vault_off(client):
+    assert _status_key_vault_flag(client) is False

@@ -103,6 +103,14 @@ never falls back to the portal's. Every LLM call — success or failure — writ
 back by `ai_analytics_service` at two scopes: per-project (`/projects/{id}/ai-analytics`,
 member-gated) and portal-wide (`/admin/ai-analytics`, admin-gated).
 
+**AI cost and budgets** (`services/pricing_service.py`, `services/ai_budget_service.py`; see
+`docs/AI_PRICING_AND_BUDGETS.md`): tokens come from the provider's `usage` block; cost is a
+provider config's `input/output_cost_per_million` override, else litellm's price map (re-downloaded
+daily), else **unknown** — `AIUsageEvent.cost_known=False`, never a silent `$0`. A failed download
+must not merge litellm's bundled fallback over newer prices. Project budgets (monthly USD/tokens,
+owner/admin-set) email the project **owner** once per (month, metric, threshold) via an atomic
+`$addToSet` claim; `hard_stop` is checked in `llm_client` *before* any provider call.
+
 **Compliance audits** (`core/compliance_catalog.py`, `services/compliance_audit_service.py`;
 see `docs/CORE_FEATURE_GAP_HARDENING.md`): a deterministic evaluator maps scanner findings to
 framework controls. `evaluate()` is pure — no Mongo, no LLM — and is the *only* thing that sets a

@@ -41,6 +41,15 @@ class Project(Document):
     auto_fix_enabled: bool | None = None
     auto_fix_confidence_threshold: float | None = None
 
+    # AI budget (docs/AI_PRICING_AND_BUDGETS.md). Limits are per calendar month (UTC); None = no
+    # limit. A project limit can only add a stop, never grant spend, so owners/admins set it.
+    ai_budget_usd_monthly: float | None = None
+    ai_budget_tokens_monthly: int | None = None
+    ai_budget_alert_percent: int = 80
+    ai_budget_hard_stop: bool = False
+    # "YYYY-MM:<metric>:<threshold>" keys already alerted, so each threshold emails once a month.
+    ai_budget_alerts_sent: list[str] = []
+
     created_at: datetime
     updated_at: datetime
 

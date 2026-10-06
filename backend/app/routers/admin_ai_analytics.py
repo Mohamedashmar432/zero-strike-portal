@@ -9,9 +9,22 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import require_admin
 from app.schemas.ai_analytics import AiAnalyticsResponse, AiUsageEventPage
-from app.services import ai_analytics_service
+from app.schemas.ai_provider_config import AIPricingStatusResponse
+from app.services import ai_analytics_service, pricing_service
 
 router = APIRouter(prefix="/admin/ai-analytics", tags=["admin"], dependencies=[Depends(require_admin)])
+# Where the cost figures above come from (docs/AI_PRICING_AND_BUDGETS.md).
+pricing_router = APIRouter(prefix="/admin/ai-pricing", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+@pricing_router.get("", response_model=AIPricingStatusResponse)
+async def get_ai_pricing_status():
+    return pricing_service.status()
+
+
+@pricing_router.post("/refresh", response_model=AIPricingStatusResponse)
+async def refresh_ai_pricing():
+    return await pricing_service.refresh()
 
 
 @router.get("", response_model=AiAnalyticsResponse)
