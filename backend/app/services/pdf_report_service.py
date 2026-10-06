@@ -12,6 +12,7 @@ Docker image and on a bare Windows dev machine.
 import asyncio
 import io
 import re
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -39,39 +40,17 @@ _KIND_LABELS = {
     "config": "Configuration",
 }
 
-_ZWSP = "​"
-_SOFTBREAK_CHARS = "/\\_.-"
-
-
-def _softbreak(value: str | None, chunk: int = 40) -> str:
-    """Insert zero-width-space break points into long unbroken tokens.
-
-    xhtml2pdf (ReportLab's Paragraph under the hood) only wraps on whitespace and
-    ignores CSS word-break/overflow-wrap entirely, so a long URL, file path, or
-    snippet with no spaces overflows the page/table width instead of wrapping.
-    Prefer breaking right after a path/URL separator (invisible either way); only
-    fall back to a fixed-width chunk split for a token with no separators at all.
-    """
-    if not value:
-        return value or ""
-    out_words = []
-    for word in value.split(" "):
-        if len(word) <= chunk:
-            out_words.append(word)
-            continue
-        if any(c in word for c in _SOFTBREAK_CHARS):
-            softened = "".join(c + _ZWSP if c in _SOFTBREAK_CHARS else c for c in word)
-        else:
-            softened = _ZWSP.join(word[i : i + chunk] for i in range(0, len(word), chunk))
-        out_words.append(softened)
-    return " ".join(out_words)
-
-
+# Templates are written for xhtml2pdf's CSS subset, not a browser: no flex/grid/
+# gradients/rgba, and a div's border/background is copied onto every child block,
+# so cards are single bordered elements or tables. Long paths/URLs/snippets wrap via
+# the `.wrap` class (`-pdf-word-wrap: CJK`, break anywhere) — xhtml2pdf ignores
+# word-break/overflow-wrap, and a zero-width space neither breaks nor has a glyph in
+# the built-in Helvetica (it rendered as a black box).
 _env = Environment(
     loader=FileSystemLoader(Path(__file__).parent.parent / "reporting" / "templates"),
     autoescape=select_autoescape(["html", "j2"]),
 )
-_env.filters["softbreak"] = _softbreak
+_env.filters["dedent"] = lambda s: textwrap.dedent(s or "").strip("\n")
 
 
 def _severity_sort_key(finding: Finding) -> tuple[int, str]:

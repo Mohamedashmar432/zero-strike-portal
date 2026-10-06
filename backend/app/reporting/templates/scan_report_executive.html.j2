@@ -3,188 +3,126 @@
 <head>
 <meta charset="UTF-8">
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1a1a2e; background: #fff; }
+/* xhtml2pdf subset: solid colours only, no flex/grid/rgba/gradients, and a div's
+   border/background is copied onto each child block — so cards are tables. */
+@page { size: A4; margin: 1.6cm 1.5cm; }
+body { font-family: Helvetica, sans-serif; font-size: 10pt; color: #1a1a2e; }
+.wrap { -pdf-word-wrap: CJK; }
 
-.cover {
-  page-break-after: always;
-  background: linear-gradient(150deg, #0d1b2a 0%, #1b2838 50%, #0f3460 100%);
-  color: #fff;
-  min-height: 100vh;
-  padding: 72px 64px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.cover-eyebrow { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #7ec8e3; margin-bottom: 12px; }
-.cover-title { font-size: 44px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1; margin-bottom: 8px; }
-.cover-subtitle { font-size: 16px; color: #a8dadc; font-weight: 400; margin-bottom: 48px; }
-
-.cover-meta { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 40px; }
-.cover-meta td { width: 50%; padding: 0 40px 20px 0; vertical-align: top; }
-.meta-item label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #7ec8e3; display: block; margin-bottom: 4px; }
-.meta-item span { font-size: 15px; font-weight: 600; }
-
-.cover-stats { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 40px; }
-.cover-stats td { width: 16.66%; padding: 0 5px; }
-.stat-box { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 14px 10px; text-align: center; }
-.stat-box .num { font-size: 28px; font-weight: 800; display: block; }
-.stat-box .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #a8dadc; margin-top: 4px; display: block; }
-.stat-total .num { color: #fff; }
-.stat-crit .num  { color: #ff4d6d; }
-.stat-high .num  { color: #ff9a3c; }
-.stat-med .num   { color: #ffd166; }
-.stat-low .num   { color: #06d6a0; }
-.stat-info .num  { color: #8ab4ff; }
-
-.risk-banner { display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 700; font-size: 14px; }
-.risk-CRITICAL { background: #e63946; color: #fff; }
+.cover { width: 100%; background: #0d1b2a; color: #ffffff; }
+.cover td { vertical-align: top; }
+.cover td.cover-body { padding-top: 36px; padding-bottom: 32px; }
+.cover-eyebrow { font-size: 8pt; letter-spacing: 2px; text-transform: uppercase; color: #7ec8e3; }
+.cover-title { font-size: 32pt; font-weight: bold; color: #ffffff; line-height: 1.1; margin-top: 10px; }
+.cover-subtitle { font-size: 12pt; color: #a8dadc; margin-top: 6px; margin-bottom: 26px; }
+.cover-meta { width: 100%; margin-bottom: 16px; }
+.cover-meta td { padding: 0 16px 14px 0; vertical-align: top; color: #ffffff; }
+.meta-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 1px; color: #7ec8e3; }
+.meta-value { font-size: 11pt; font-weight: bold; color: #ffffff; margin-top: 3px; }
+.scanner-pill { font-size: 9pt; color: #ffffff; }
+.cover-stats { width: 100%; margin-top: 18px; margin-bottom: 20px; }
+.cover-stats td { background: #1b2838; border: 1px solid #2c3e55; padding: 10px 4px; text-align: center; }
+.stat-num { font-size: 20pt; font-weight: bold; }
+.stat-lbl { font-size: 7pt; text-transform: uppercase; letter-spacing: 1px; color: #a8dadc; margin-top: 2px; }
+.risk-banner { padding: 10px 16px; font-weight: bold; font-size: 12pt; }
+.risk-CRITICAL { background: #e63946; color: #ffffff; }
 .risk-HIGH     { background: #f4a261; color: #1a1a2e; }
 .risk-MEDIUM   { background: #e9c46a; color: #1a1a2e; }
-.risk-LOW      { background: #2a9d8f; color: #fff; }
-.risk-NONE     { background: #2a9d8f; color: #fff; }
+.risk-LOW      { background: #2a9d8f; color: #ffffff; }
+.risk-NONE     { background: #2a9d8f; color: #ffffff; }
 
-.page { padding: 48px 56px; }
 .page-break { page-break-before: always; }
+h2 { font-size: 15pt; font-weight: bold; color: #0f3460; border-bottom: 2px solid #e63946; padding-bottom: 5px; margin-top: 22px; margin-bottom: 10px; }
+p  { line-height: 1.5; margin-bottom: 8px; color: #333333; }
 
-h2 { font-size: 20px; font-weight: 700; color: #0f3460; border-bottom: 3px solid #e63946; padding-bottom: 8px; margin-bottom: 20px; margin-top: 40px; }
-h3 { font-size: 14px; font-weight: 700; color: #16213e; margin-bottom: 8px; margin-top: 20px; }
-p  { line-height: 1.7; margin-bottom: 10px; color: #333; }
-
-.summary-grid { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 28px; }
-.summary-grid td { width: 20%; padding: 0 5px; }
-.summary-card { border-radius: 8px; padding: 16px 10px; text-align: center; }
-.summary-card .count { font-size: 30px; font-weight: 800; display: block; }
-.summary-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; display: block; }
+.summary-grid { width: 100%; margin-bottom: 16px; }
+.summary-grid td { padding: 10px 4px; text-align: center; border: 2px solid #ffffff; }
+.summary-count { font-size: 20pt; font-weight: bold; }
+.summary-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
 .card-critical { background: #fde8ea; color: #e63946; }
 .card-high     { background: #fdf0e4; color: #e76f51; }
-.card-medium   { background: #fdf8e4; color: #e9a825; }
+.card-medium   { background: #fdf8e4; color: #c98a10; }
 .card-low      { background: #e4f5f3; color: #2a9d8f; }
 .card-info     { background: #eef2ff; color: #6366f1; }
 
-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; }
-th { background: #0f3460; color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; }
-td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
-tr:nth-child(even) td { background: #f8f9fa; }
+table.data { width: 100%; margin-bottom: 14px; font-size: 9pt; }
+table.data th { background: #0f3460; color: #ffffff; padding: 6px 8px; text-align: left; font-weight: bold; }
+table.data td { padding: 5px 8px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
 
-.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.badge { font-size: 8pt; font-weight: bold; }
 .badge-CRITICAL { background: #fde8ea; color: #e63946; }
 .badge-HIGH     { background: #fdf0e4; color: #e76f51; }
-.badge-MEDIUM   { background: #fdf8e4; color: #e9a825; }
+.badge-MEDIUM   { background: #fdf8e4; color: #c98a10; }
 .badge-LOW      { background: #e4f5f3; color: #2a9d8f; }
 .badge-INFO     { background: #eef2ff; color: #6366f1; }
-.pass-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #e4f5f3; color: #2a9d8f; }
-.fail-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #fde8ea; color: #e63946; }
+.pass { color: #2a9d8f; font-weight: bold; }
+.fail { color: #e63946; font-weight: bold; }
 
-.finding-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 20px; margin-bottom: 16px; page-break-inside: avoid; }
-.finding-card.sev-CRITICAL { border-left: 4px solid #e63946; }
-.finding-card.sev-HIGH     { border-left: 4px solid #e76f51; }
-.finding-card.sev-MEDIUM   { border-left: 4px solid #e9a825; }
-.finding-card.sev-LOW      { border-left: 4px solid #2a9d8f; }
-.finding-card.sev-INFO     { border-left: 4px solid #6366f1; }
-.finding-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-.finding-title  { font-weight: 700; font-size: 14px; color: #1a1a2e; flex: 1; margin-right: 12px; }
-.finding-meta   { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; margin-bottom: 10px; }
-.finding-meta span   { color: #666; }
-.finding-meta strong { color: #1a1a2e; }
-.finding-loc { grid-column: 1 / -1; font-family: 'Courier New', monospace; font-size: 11px; background: #f0f4ff; padding: 4px 8px; border-radius: 4px; color: #2c3e6b; }
-.rec { background: #f0f7ff; border-left: 3px solid #0f3460; padding: 10px 14px; border-radius: 0 6px 6px 0; font-size: 12px; line-height: 1.6; color: #333; margin-top: 10px; }
-pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.6; padding: 14px 16px; border-radius: 6px; overflow-x: auto; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
+.finding-head { width: 100%; margin-top: 14px; }
+.finding-head td { background: #f4f6fb; padding: 6px 8px; border-top: 2px solid #0f3460; vertical-align: middle; }
+.finding-title { font-weight: bold; font-size: 11pt; color: #1a1a2e; }
+.finding-meta { font-size: 8.5pt; color: #666666; margin-top: 4px; }
+.finding-meta b { color: #1a1a2e; }
+.finding-loc { font-family: Courier, monospace; font-size: 8pt; background: #f0f4ff; color: #2c3e6b; padding: 3px 6px; margin-top: 4px; }
+.finding-msg { font-size: 9.5pt; margin-top: 5px; margin-bottom: 0; }
+pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, monospace; font-size: 8pt; padding: 6px 8px; margin-top: 5px; }
+.rec { background: #f0f7ff; border-left: 3px solid #0f3460; padding: 6px 10px; font-size: 9pt; color: #333333; margin-top: 5px; }
 
-.owasp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
-.owasp-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
-.owasp-card.fail-card { border-left: 4px solid #e63946; background: #fff8f8; }
-.owasp-card.pass-card { border-left: 4px solid #2a9d8f; background: #f8fffd; }
-.owasp-name { font-weight: 700; font-size: 12px; color: #1a1a2e; }
-.owasp-code { font-size: 11px; color: #666; margin-top: 2px; }
-.owasp-right { text-align: right; }
-.owasp-count { font-size: 13px; font-weight: 700; color: #e63946; }
-
-.conclusion { background: linear-gradient(135deg, #1a1a2e, #0f3460); color: #fff; border-radius: 10px; padding: 28px 32px; margin-top: 32px; }
-.conclusion p { color: #a8dadc; margin-bottom: 8px; }
-
-@page { margin: 0; size: A4; }
-@media print {
-  .cover                { min-height: 297mm; page-break-after: always; }
-  .page-break           { page-break-before: always; }
-  .finding-card         { page-break-inside: avoid; }
-  pre.code-block        { page-break-inside: avoid; white-space: pre-wrap; word-break: break-all; overflow-wrap: break-word; max-width: 100%; }
-  h2                    { page-break-after: avoid; }
-  h3                    { page-break-after: avoid; }
-  .owasp-grid           { display: block; }
-  .owasp-card           { display: flex; page-break-inside: avoid; margin-bottom: 8px; }
-  td, th                { word-break: break-word; overflow-wrap: break-word; }
-  table                 { table-layout: fixed; width: 100%; }
-  .finding-meta         { display: block; }
-  .finding-meta > div   { margin-bottom: 3px; }
-  .finding-loc          { display: block; margin-top: 4px; word-break: break-all; }
-  .cover-stats          { grid-template-columns: repeat(6, 1fr); gap: 6px; }
-  .stat-box             { padding: 10px 6px; }
-  .stat-box .num        { font-size: 22px; }
-  .summary-grid         { grid-template-columns: repeat(5, 1fr); }
-  .conclusion           { page-break-inside: avoid; }
-}
+.conclusion { width: 100%; margin-top: 22px; }
+.conclusion td { background: #1a1a2e; color: #a8dadc; padding: 16px 20px; font-size: 9pt; line-height: 1.5; }
 </style>
 </head>
 <body>
 
-<div class="cover">
-  <div>
-    <div class="cover-eyebrow">thinkShield Security Assessment Report</div>
-    <div class="cover-title">Security<br>Assessment</div>
-    <div class="cover-subtitle">Static Application Security Testing</div>
+<table class="cover"><tr><td width="6%"></td><td class="cover-body" width="88%">
+  <div class="cover-eyebrow">thinkShield Security Assessment Report</div>
+  <div class="cover-title">Security Assessment</div>
+  <div class="cover-subtitle">Static Application Security Testing</div>
 
-    <table class="cover-meta">
-      <tr>
-        <td class="meta-item"><label>Project</label><span>{{ project_name }}</span></td>
-        <td class="meta-item"><label>Repository</label><span>{{ (scan.repo_url or report.root_path or "—") | softbreak }}</span></td>
-      </tr>
-      <tr>
-        <td class="meta-item"><label>Branch</label><span>{{ (report.branch or scan.branch or "—") | softbreak }}</span></td>
-        <td class="meta-item"><label>Scan Date</label><span>{{ report.started_at.strftime('%Y-%m-%d') if report.started_at else "—" }}</span></td>
-      </tr>
-      <tr>
-        <td class="meta-item"><label>AI Provider</label><span>Not tracked</span></td>
-        <td class="meta-item"><label>Scan ID</label><span style="font-size:11px;font-family:monospace;">{{ (scan.id | string)[:8] }}</span></td>
-      </tr>
-    </table>
+  <table class="cover-meta">
+    <tr>
+      <td width="50%"><div class="meta-label">Project</div><div class="meta-value wrap">{{ project_name }}</div></td>
+      <td width="50%"><div class="meta-label">Repository</div><div class="meta-value wrap">{{ scan.repo_url or report.root_path or "—" }}</div></td>
+    </tr>
+    <tr>
+      <td><div class="meta-label">Branch</div><div class="meta-value wrap">{{ report.branch or scan.branch or "—" }}</div></td>
+      <td><div class="meta-label">Scan Date</div><div class="meta-value">{{ report.started_at.strftime('%Y-%m-%d') if report.started_at else "—" }}</div></td>
+    </tr>
+    <tr>
+      <td><div class="meta-label">AI Provider</div><div class="meta-value">Not tracked</div></td>
+      <td><div class="meta-label">Scan ID</div><div class="meta-value">{{ (scan.id | string)[:8] }}</div></td>
+    </tr>
+  </table>
 
-    <div class="cover-scanners">
-      <label style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#7ec8e3;display:block;margin-bottom:10px;">Scanners Executed</label>
-      {% for s in scanners_used %}
-      <span class="scanner-pill" style="display:inline-block;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:20px;padding:5px 14px;font-size:12px;margin-right:8px;margin-bottom:6px;">{{ s }}</span>
-      {% endfor %}
-    </div>
+  <div class="meta-label">Scanners Executed</div>
+  <div class="scanner-pill">{{ scanners_used | join("  ·  ") if scanners_used else "—" }}</div>
 
-    <table class="cover-stats">
-      <tr>
-        <td><div class="stat-box stat-total"><span class="num">{{ total_findings }}</span><span class="lbl">Total</span></div></td>
-        <td><div class="stat-box stat-crit"><span class="num">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="lbl">Critical</span></div></td>
-        <td><div class="stat-box stat-high"><span class="num">{{ report.stats.by_severity.get('high', 0) }}</span><span class="lbl">High</span></div></td>
-        <td><div class="stat-box stat-med"><span class="num">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="lbl">Medium</span></div></td>
-        <td><div class="stat-box stat-low"><span class="num">{{ report.stats.by_severity.get('low', 0) }}</span><span class="lbl">Low</span></div></td>
-        <td><div class="stat-box stat-info"><span class="num">{{ report.stats.by_severity.get('info', 0) }}</span><span class="lbl">Info</span></div></td>
-      </tr>
-    </table>
-  </div>
+  <table class="cover-stats">
+    <tr>
+      <td><div class="stat-num" style="color:#ffffff;">{{ total_findings }}</div><div class="stat-lbl">Total</div></td>
+      <td><div class="stat-num" style="color:#ff4d6d;">{{ report.stats.by_severity.get('critical', 0) }}</div><div class="stat-lbl">Critical</div></td>
+      <td><div class="stat-num" style="color:#ff9a3c;">{{ report.stats.by_severity.get('high', 0) }}</div><div class="stat-lbl">High</div></td>
+      <td><div class="stat-num" style="color:#ffd166;">{{ report.stats.by_severity.get('medium', 0) }}</div><div class="stat-lbl">Medium</div></td>
+      <td><div class="stat-num" style="color:#06d6a0;">{{ report.stats.by_severity.get('low', 0) }}</div><div class="stat-lbl">Low</div></td>
+      <td><div class="stat-num" style="color:#8ab4ff;">{{ report.stats.by_severity.get('info', 0) }}</div><div class="stat-lbl">Info</div></td>
+    </tr>
+  </table>
 
-  <div class="risk-banner risk-{{ overall_risk }}">
-    Overall Risk: {{ overall_risk }}
-  </div>
-</div>
+  <div class="risk-banner risk-{{ overall_risk }}">Overall Risk: {{ overall_risk }}</div>
+</td><td width="6%"></td></tr></table>
 
-<div class="page page-break">
+<div class="page-break"></div>
 
 <h2>1. Executive Summary</h2>
 <p>{{ executive_summary }}</p>
 
 <table class="summary-grid">
   <tr>
-    <td><div class="summary-card card-critical"><span class="count">{{ report.stats.by_severity.get('critical', 0) }}</span><span class="label">Critical</span></div></td>
-    <td><div class="summary-card card-high"><span class="count">{{ report.stats.by_severity.get('high', 0) }}</span><span class="label">High</span></div></td>
-    <td><div class="summary-card card-medium"><span class="count">{{ report.stats.by_severity.get('medium', 0) }}</span><span class="label">Medium</span></div></td>
-    <td><div class="summary-card card-low"><span class="count">{{ report.stats.by_severity.get('low', 0) }}</span><span class="label">Low</span></div></td>
-    <td><div class="summary-card card-info"><span class="count">{{ report.stats.by_severity.get('info', 0) }}</span><span class="label">Info</span></div></td>
+    <td class="card-critical"><div class="summary-count">{{ report.stats.by_severity.get('critical', 0) }}</div><div class="summary-label">Critical</div></td>
+    <td class="card-high"><div class="summary-count">{{ report.stats.by_severity.get('high', 0) }}</div><div class="summary-label">High</div></td>
+    <td class="card-medium"><div class="summary-count">{{ report.stats.by_severity.get('medium', 0) }}</div><div class="summary-label">Medium</div></td>
+    <td class="card-low"><div class="summary-count">{{ report.stats.by_severity.get('low', 0) }}</div><div class="summary-label">Low</div></td>
+    <td class="card-info"><div class="summary-count">{{ report.stats.by_severity.get('info', 0) }}</div><div class="summary-label">Info</div></td>
   </tr>
 </table>
 
@@ -192,23 +130,22 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <p>Technology stack detection was not performed.</p>
 
 <h2>3. Findings by Kind</h2>
-<table>
-  <tr><th>Kind</th><th>Findings</th></tr>
+<table class="data">
+  <tr><th width="70%">Kind</th><th width="30%">Findings</th></tr>
   {% for kind, label in [('sast','Static Analysis (SAST)'), ('secret','Secrets'), ('sca','Dependencies (SCA)'), ('config','Configuration')] %}
   {% if report.stats.by_kind.get(kind) %}
-  <tr><td><strong>{{ label }}</strong></td><td>{{ report.stats.by_kind.get(kind) }}</td></tr>
+  <tr><td><b>{{ label }}</b></td><td>{{ report.stats.by_kind.get(kind) }}</td></tr>
   {% endif %}
   {% endfor %}
 </table>
 
-</div>
-
-<div class="page page-break">
+<div class="page-break"></div>
 
 <h2>4. OWASP Top 10 Compliance</h2>
 
 {% set ns = namespace(total_fail=0) %}
-<div class="owasp-grid">
+<table class="data">
+  <tr><th width="48%">Category</th><th width="14%">Code</th><th width="11%">Status</th><th width="11%">Findings</th><th width="16%">Max Severity</th></tr>
 {% for code, name in owasp_all %}
   {% set cat_findings = [] %}
   {% for f in findings %}
@@ -218,31 +155,20 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
   {% endfor %}
   {% set fail = cat_findings | length > 0 %}
   {% if fail %}{% set ns.total_fail = ns.total_fail + 1 %}{% endif %}
-  <div class="owasp-card {{ 'fail-card' if fail else 'pass-card' }}">
-    <div>
-      <div class="owasp-name">{{ name }}</div>
-      <div class="owasp-code">{{ code }}</div>
-    </div>
-    <div class="owasp-right">
-      {% if fail %}
-        <div><span class="fail-badge">FAIL</span></div>
-        <div class="owasp-count">{{ cat_findings | length }} finding{{ 's' if cat_findings | length != 1 else '' }}</div>
-        {% set sevs = cat_findings | map(attribute='severity') | list %}
-        {% if 'critical' in sevs %}<div style="margin-top:4px;"><span class="badge badge-CRITICAL">CRITICAL</span></div>
-        {% elif 'high' in sevs %}<div style="margin-top:4px;"><span class="badge badge-HIGH">HIGH</span></div>
-        {% elif 'medium' in sevs %}<div style="margin-top:4px;"><span class="badge badge-MEDIUM">MEDIUM</span></div>
-        {% else %}<div style="margin-top:4px;"><span class="badge badge-LOW">LOW</span></div>{% endif %}
-      {% else %}
-        <div><span class="pass-badge">PASS</span></div>
-        <div style="font-size:11px;color:#2a9d8f;margin-top:4px;">No findings</div>
-      {% endif %}
-    </div>
-  </div>
+  {% set sevs = cat_findings | map(attribute='severity') | list %}
+  {% set top = 'CRITICAL' if 'critical' in sevs else 'HIGH' if 'high' in sevs else 'MEDIUM' if 'medium' in sevs else 'LOW' %}
+  <tr>
+    <td><b>{{ name }}</b></td>
+    <td>{{ code }}</td>
+    <td>{% if fail %}<span class="fail">FAIL</span>{% else %}<span class="pass">PASS</span>{% endif %}</td>
+    <td>{{ cat_findings | length }}</td>
+    <td>{% if fail %}<span class="badge badge-{{ top }}">&nbsp;{{ top }}&nbsp;</span>{% else %}—{% endif %}</td>
+  </tr>
 {% endfor %}
-</div>
+</table>
 
-<p style="margin-top:12px;color:#333;">
-  <strong>OWASP Summary:</strong>
+<p>
+  <b>OWASP Summary:</b>
   {{ ns.total_fail }} of 10 categories have findings.
   {% if ns.total_fail == 0 %}No OWASP Top 10 violations detected.
   {% elif ns.total_fail <= 3 %}Low OWASP exposure — address findings by priority.
@@ -250,9 +176,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
   {% else %}High OWASP exposure — security remediation required before release.{% endif %}
 </p>
 
-</div>
-
-<div class="page page-break">
+<div class="page-break"></div>
 
 {% set section_num = namespace(n=5) %}
 {% for severity in ['critical', 'high', 'medium', 'low', 'info'] %}
@@ -261,26 +185,23 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <h2>{{ section_num.n }}. {{ severity | title }} Findings ({{ sev_findings | length }})</h2>
 {% set section_num.n = section_num.n + 1 %}
 {% for f in sev_findings %}
-<div class="finding-card sev-{{ f.severity | upper }}">
-  <div class="finding-header">
-    <div class="finding-title">{{ (f.rule_name or f.rule_id or "Untitled finding") | softbreak }}</div>
-    <span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span>
-  </div>
-  <div class="finding-meta">
-    <div><span>Kind: </span><strong>{{ f.kind or "—" }}</strong></div>
-    <div><span>Priority: </span><strong>{{ f.priority_score if f.priority_score is not none else "—" }}/10</strong></div>
-    {% if f.cwe %}<div><span>CWE: </span><strong>{{ f.cwe | join(", ") }}</strong></div>{% endif %}
-    {% if f.owasp %}<div style="grid-column:1/-1"><span>OWASP: </span><strong>{{ f.owasp | join(", ") }}</strong></div>{% endif %}
-    {% if f.location.file %}
-    <div class="finding-loc">{{ f.location.file | softbreak }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
-    {% endif %}
-  </div>
-  <p style="font-size:12px;margin-bottom:8px;">{{ f.message | softbreak }}</p>
-  {% if f.evidence and f.evidence[0].snippet %}
-  <pre class="code-block">{{ f.evidence[0].snippet | e | softbreak(60) }}</pre>
-  {% endif %}
-  {% if f.remediation %}<div class="rec"><strong>Recommendation:</strong> {{ f.remediation | softbreak }}</div>{% endif %}
+<table class="finding-head"><tr>
+  <td width="84%"><span class="finding-title">{{ f.rule_name or f.rule_id or "Untitled finding" }}</span></td>
+  <td width="16%" align="right"><span class="badge badge-{{ f.severity | upper }}">&nbsp;{{ f.severity | upper }}&nbsp;</span></td>
+</tr></table>
+<div class="finding-meta">
+  Kind: <b>{{ f.kind or "—" }}</b> &nbsp;&middot;&nbsp; Priority: <b>{{ f.priority_score if f.priority_score is not none else "—" }}/10</b>
+  {% if f.cwe %} &nbsp;&middot;&nbsp; CWE: <b>{{ f.cwe | join(", ") }}</b>{% endif %}
+  {% if f.owasp %} &nbsp;&middot;&nbsp; OWASP: <b>{{ f.owasp | join(", ") }}</b>{% endif %}
 </div>
+{% if f.location.file %}
+<div class="finding-loc wrap">{{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
+{% endif %}
+<p class="finding-msg">{{ f.message }}</p>
+{% if f.evidence and f.evidence[0].snippet %}
+<pre class="code-block wrap">{{ f.evidence[0].snippet | dedent }}</pre>
+{% endif %}
+{% if f.remediation %}<div class="rec"><b>Recommendation:</b> {{ f.remediation }}</div>{% endif %}
 {% endfor %}
 {% endif %}
 {% endfor %}
@@ -289,15 +210,15 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <h2>{{ section_num.n }}. Secrets &amp; Sensitive Data Exposure</h2>
 {% set section_num.n = section_num.n + 1 %}
 {% if secret_findings %}
-<p style="color:#e63946;font-weight:700;margin-bottom:12px;">{{ secret_findings | length }} secret(s) / sensitive value(s) detected. Rotate all exposed credentials immediately.</p>
-<table>
-  <tr><th>Rule</th><th>File</th><th>Line</th><th>Severity</th></tr>
+<p style="color:#e63946;font-weight:bold;">{{ secret_findings | length }} secret(s) / sensitive value(s) detected. Rotate all exposed credentials immediately.</p>
+<table class="data">
+  <tr><th width="30%">Rule</th><th width="44%">File</th><th width="10%">Line</th><th width="16%">Severity</th></tr>
   {% for f in secret_findings %}
   <tr>
     <td>{{ f.rule_name or f.rule_id or "—" }}</td>
-    <td style="font-family:monospace;font-size:11px;word-break:break-all;">{{ f.location.file | softbreak }}</td>
+    <td class="wrap" style="font-family:Courier,monospace;font-size:8pt;">{{ f.location.file }}</td>
     <td>{{ f.location.start_line or "N/A" }}</td>
-    <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
+    <td><span class="badge badge-{{ f.severity | upper }}">&nbsp;{{ f.severity | upper }}&nbsp;</span></td>
   </tr>
   {% endfor %}
 </table>
@@ -309,13 +230,13 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <h2>{{ section_num.n }}. Dependency Risks</h2>
 {% set section_num.n = section_num.n + 1 %}
 {% if dep_findings %}
-<table>
-  <tr><th>Vulnerability</th><th>Severity</th><th>Manifest File</th></tr>
+<table class="data">
+  <tr><th width="40%">Vulnerability</th><th width="16%">Severity</th><th width="44%">Manifest File</th></tr>
   {% for f in dep_findings %}
   <tr>
     <td>{{ f.rule_name or f.rule_id or "—" }}</td>
-    <td><span class="badge badge-{{ f.severity | upper }}">{{ f.severity | upper }}</span></td>
-    <td style="font-family:monospace;font-size:11px;">{{ (f.dependency.manifest if f.dependency else f.location.file) | softbreak }}</td>
+    <td><span class="badge badge-{{ f.severity | upper }}">&nbsp;{{ f.severity | upper }}&nbsp;</span></td>
+    <td class="wrap" style="font-family:Courier,monospace;font-size:8pt;">{{ f.dependency.manifest if f.dependency else f.location.file }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -326,13 +247,13 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 {% if cwe_summary %}
 <h2>{{ section_num.n }}. CWE Mapping</h2>
 {% set section_num.n = section_num.n + 1 %}
-<table>
-  <tr><th>CWE</th><th>Count</th><th>Max Severity</th></tr>
+<table class="data">
+  <tr><th width="40%">CWE</th><th width="30%">Count</th><th width="30%">Max Severity</th></tr>
   {% for row in cwe_summary %}
   <tr>
-    <td><strong>{{ row.cwe }}</strong></td>
+    <td><b>{{ row.cwe }}</b></td>
     <td>{{ row.count }}</td>
-    <td><span class="badge badge-{{ row.max_severity | upper }}">{{ row.max_severity | upper }}</span></td>
+    <td><span class="badge badge-{{ row.max_severity | upper }}">&nbsp;{{ row.max_severity | upper }}&nbsp;</span></td>
   </tr>
   {% endfor %}
 </table>
@@ -342,15 +263,15 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 {% set rem_findings = remediation_findings %}
 {% if rem_findings %}
 <p>Findings are ordered by priority score (highest first).</p>
-<table>
-  <tr><th>#</th><th>Finding</th><th>Priority</th><th>OWASP</th><th>Action</th></tr>
+<table class="data">
+  <tr><th width="6%">#</th><th width="30%">Finding</th><th width="12%">Priority</th><th width="14%">OWASP</th><th width="38%">Action</th></tr>
   {% for f in rem_findings %}
   <tr>
     <td>{{ loop.index }}</td>
     <td>{{ (f.rule_name or f.rule_id or "Untitled finding") | truncate(55) }}</td>
-    <td><strong>{{ f.priority_score if f.priority_score is not none else "—" }}/10</strong></td>
-    <td style="font-size:11px;">{{ (f.owasp | join(", ")) | truncate(20) if f.owasp else "—" }}</td>
-    <td style="font-size:11px;">{{ (f.remediation or "—") | truncate(100) }}</td>
+    <td><b>{{ f.priority_score if f.priority_score is not none else "—" }}/10</b></td>
+    <td style="font-size:8pt;">{{ (f.owasp | join(", ")) | truncate(20) if f.owasp else "—" }}</td>
+    <td style="font-size:8pt;">{{ (f.remediation or "—") | truncate(100) }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -358,13 +279,11 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: 'Courier New'
 <p>No remediation actions required.</p>
 {% endif %}
 
-<div class="conclusion">
-  <p>This report was generated by the thinkShield Portal's SAST scan engine. All findings should be reviewed by a qualified security engineer before remediation. This report reflects a point-in-time snapshot and does not replace a full manual penetration test.</p>
-  <p style="margin-top:12px;font-size:11px;color:#6c7a8d;">
-    Scan ID: {{ scan.id }} &nbsp;|&nbsp; Generated: {{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') if report.generated_at else "—" }}
-  </p>
-</div>
+<table class="conclusion"><tr><td>
+  This report was generated by the thinkShield Portal's SAST scan engine. All findings should be reviewed by a qualified security engineer before remediation. This report reflects a point-in-time snapshot and does not replace a full manual penetration test.
+  <br/><br/>
+  <span style="font-size:8pt;color:#8a99ad;">Scan ID: {{ scan.id }} &nbsp;|&nbsp; Generated: {{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') if report.generated_at else "—" }}</span>
+</td></tr></table>
 
-</div>
 </body>
 </html>

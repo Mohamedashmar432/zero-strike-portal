@@ -226,3 +226,29 @@ def test_build_report_filename_falls_back_to_root_path_for_local_scans():
     filename = build_report_filename(scan, report, "Demo")
     assert filename.startswith("demo-my-app-")
     assert filename.endswith(".pdf")
+
+
+def test_long_paths_wrap_via_css_not_zero_width_spaces():
+    # xhtml2pdf's built-in Helvetica has no U+200B glyph — it rendered as a black box in
+    # every path/URL — and doesn't break on it either. Long tokens must wrap via the
+    # `.wrap` class (-pdf-word-wrap: CJK) instead.
+    from datetime import datetime, timezone
+
+    from app.models.finding import Finding, LocationEmbedded
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services import pdf_report_service
+
+    now = datetime.now(timezone.utc)
+    long_path = "/tmp/zs-clones/zs-clone-abc/Some.Very.Long/Namespace/Path/To/AVeryLongFileName.cs"
+    scan = Scan(project_id="p1", scan_type="cloud", created_at=now, updated_at=now, repo_url="https://example.com/org/repo.git")
+    report = Report(scan_id="s1", project_id="p1", stats=ScanStatsEmbedded(by_severity={"high": 1}), json_uploaded_at=now)
+    findings = [
+        Finding(scan_id="s1", project_id="p1", rule_id="R-1", severity="high", message="m",
+                location=LocationEmbedded(file=long_path))
+    ]
+    for template in ("standard", "executive"):
+        html = pdf_report_service.render_scan_report_html(scan, report, findings, template)
+        assert "​" not in html
+        assert long_path in html
+        assert "-pdf-word-wrap: CJK" in html
