@@ -678,7 +678,13 @@ def connection_error_message(exc: Exception) -> str:
         return "The provider is rate-limiting or out of quota for this key. Try again later."
     if isinstance(exc, LLMTransientError):
         return "Couldn't reach the provider. Check the base URL and network, then try again."
-    return "The provider rejected the request. Check the provider, model and key."
+    if "credit balance" in lowered:
+        return "The provider says this account has no credit left. Add credit and try again."
+    # Fixed "pong" prompt and the provider masks keys in its errors, so its one-line reason is safe
+    # to show -- and it is the only thing that tells a person *which* field to fix.
+    reason = re.search(r'"message"\s*:\s*"([^"]{1,200})"', str(exc))
+    detail = f" Provider said: {reason.group(1)}" if reason else ""
+    return f"The provider rejected the request. Check the provider, model and key.{detail}"
 
 
 async def test_connection(

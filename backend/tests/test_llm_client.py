@@ -755,3 +755,14 @@ def test_model_catalog_gives_provider_native_ids():
     # What the dropdown stores must route to the right backend once the prefix is re-added.
     model, _ = llm_client._resolve_model_and_base("gemini", catalog["gemini"][0], None)
     assert model.startswith("gemini/")
+
+
+def test_connection_error_message_includes_provider_reason():
+    exc = llm_client.LLMPermanentError(
+        'litellm.BadRequestError: AnthropicException - {"type":"error","error":{"type":"invalid_request_error",'
+        '"message":"Something odd about this request."},"request_id":"req_1"}'
+    )
+    msg = llm_client.connection_error_message(exc)
+    assert msg.endswith("Provider said: Something odd about this request.")
+    credit = llm_client.LLMPermanentError('{"message":"Your credit balance is too low to access the API."}')
+    assert "no credit" in llm_client.connection_error_message(credit)
