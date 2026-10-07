@@ -23,6 +23,7 @@ async def update_settings(
     max_findings_per_job: int | None = None,
     auto_fix_findings_per_scan: int | None = None,
     blocking_severities: list[str] | None = None,
+    rescan_validation_enabled: bool | None = None,
 ) -> RemediationSettings:
     cfg = await get_settings()
     if enabled is not None:
@@ -35,6 +36,8 @@ async def update_settings(
         cfg.auto_fix_findings_per_scan = auto_fix_findings_per_scan
     if blocking_severities is not None:
         cfg.blocking_severities = blocking_severities
+    if rescan_validation_enabled is not None:
+        cfg.rescan_validation_enabled = rescan_validation_enabled
     cfg.updated_at = datetime.now(timezone.utc)
     cfg.updated_by = updated_by
     await cfg.save()

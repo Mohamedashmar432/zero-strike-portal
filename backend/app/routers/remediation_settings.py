@@ -23,6 +23,7 @@ def _to_response(cfg: RemediationSettings) -> RemediationSettingsResponse:
         max_findings_per_job=cfg.max_findings_per_job,
         auto_fix_findings_per_scan=cfg.auto_fix_findings_per_scan,
         blocking_severities=cfg.blocking_severities,
+        rescan_validation_enabled=cfg.rescan_validation_enabled,
     )
 
 

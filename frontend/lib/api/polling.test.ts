@@ -53,7 +53,7 @@ describe("refetchWhileAutoFixActive", () => {
 
   // The reason this helper exists: the propose job finishes, then a *separate* apply job drives
   // approved -> applying -> pr_open. Stopping at "completed" would freeze the UI on "Applying…".
-  test.each(["approved", "applying"])("keeps polling a completed job while a proposal is %s", (review_state) => {
+  test.each(["approved", "applying", "validated"])("keeps polling a completed job while a proposal is %s", (review_state) => {
     expect(check(q({ status: "completed", insight: { proposals: [{ review_state }] } }))).toBe(3000);
   });
 

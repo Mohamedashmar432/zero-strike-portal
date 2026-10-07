@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { type AiFixProposal, approveFixBatch } from "@/lib/api/auto-fix";
 import { ApiError } from "@/lib/api/client";
+import { queryKeys } from "@/lib/api/query-keys";
 
 /**
  * The toast's "what got left out" line. Exported so it can be tested: the only way to see it in a
@@ -69,6 +70,7 @@ export function BatchApproveBar({
       setConfirm(false);
       onClear();
       qc.invalidateQueries({ queryKey: invalidateKey });
+      qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.activity(scanId) });
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Something went wrong"),
   });
@@ -116,8 +118,9 @@ export function BatchApproveBar({
           {/* The apply job re-scans the combined diff. Saying so up front is what makes a partial
               result readable later instead of looking like a silent failure. */}
           <p className="rounded-md border border-severity-medium/30 bg-severity-medium/5 px-3 py-2 text-sm">
-            Each patch is re-scanned before the PR is opened. Any fix that fails that check is left out of
-            the PR and sent back for manual review — it does not block the others.
+            Unless re-scan is turned off in Auto-Fix settings, each patch is re-scanned before the PR is
+            opened. Any fix that fails that check is left out of the PR and sent back for manual review —
+            it does not block the others.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirm(false)}>

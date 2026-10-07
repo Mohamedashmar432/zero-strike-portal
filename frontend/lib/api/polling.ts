@@ -58,7 +58,8 @@ export function refetchWhileAnyScanOrAiActive<TItem extends ScanLike>(intervalMs
 // "completed" while an individual proposal is still mid-apply (approved -> applying -> pr_open,
 // driven by a separate apply job). Without this the page would sit on "Applying…" until something
 // else triggered a refetch, and the PR link would never appear.
-const APPLYING_STATES = new Set(["approved", "applying"]);
+// "validated" is mid-apply too: the re-scan passed but the push/PR has not happened yet.
+const APPLYING_STATES = new Set(["approved", "applying", "validated"]);
 
 /** Auto-fix job for one scan: poll while the propose job is active OR any proposal is mid-apply. */
 export function refetchWhileAutoFixActive<

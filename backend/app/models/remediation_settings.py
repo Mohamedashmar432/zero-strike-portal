@@ -22,6 +22,10 @@ class RemediationSettings(Document):
     # mirrors ai_remediation_apply_service._BLOCKING_SEVERITIES — which new-finding severities
     # abort a PR during the apply re-scan.
     blocking_severities: list[str] = Field(default_factory=lambda: ["critical", "high", "medium"])
+    # Clone + baseline scan + post-patch scan before a PR is opened. Off = the PR rests on the AI
+    # triage/critic alone (the scope check still runs). Admin-only, no project twin: a project
+    # override could only re-enable it.
+    rescan_validation_enabled: bool = True
 
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by: str | None = None

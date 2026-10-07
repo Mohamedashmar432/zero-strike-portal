@@ -104,6 +104,9 @@ def _validation_lines(validation: dict | None) -> list[str]:
     if not validation:
         return []
     out = ["", "**Scanner validation**", ""]
+    if validation.get("skipped"):
+        out.append("- Skipped — re-scan disabled in Auto-Fix settings. The PR was opened on AI review alone.")
+        return out
     cleared = validation.get("target_cleared")
     out.append(
         f"- Target finding resolved on re-scan: **{'yes' if cleared else 'no'}**"
@@ -112,7 +115,9 @@ def _validation_lines(validation: dict | None) -> list[str]:
     )
     new_count = validation.get("new_finding_count")
     if new_count is not None:
-        out.append(f"- New findings introduced: **{new_count}**")
+        sev = validation.get("new_finding_severities") or {}
+        breakdown = f" ({', '.join(f'{n} {s}' for s, n in sev.items())})" if cleared and new_count and sev else ""
+        out.append(f"- New findings introduced: **{new_count}**{breakdown}")
     if validation.get("scope_ok") is not None:
         out.append(f"- Changed only the proposed file: **{'yes' if validation['scope_ok'] else 'no'}**")
     for label, key in (("Baseline findings", "baseline_count"), ("Post-patch findings", "post_count")):

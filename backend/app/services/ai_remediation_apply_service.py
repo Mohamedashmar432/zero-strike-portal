@@ -178,7 +178,8 @@ async def _drop(
     await audit_service.record(
         "AI Fix Marked Manual Review", actor_user_id=job.approver_user_id,
         project_id=proposal.project_id, target_type="ai_fix_proposal",
-        target_id=str(proposal.id), metadata={"reason": reason, "batch_job_id": str(job.id)},
+        target_id=str(proposal.id),
+        metadata={"reason": reason, "batch_job_id": str(job.id), "finding_id": proposal.finding_id},
     )
 
 
@@ -218,6 +219,17 @@ async def _stage_patches(workdir: str, items: list[_Item], job: RemediationJob, 
     return applied
 
 
+async def _check_scope(workdir: str, items: list[_Item]) -> str | None:
+    """The patches may touch exactly the files the proposals name. Not optional: it costs one
+    `git diff` and is what stops a patch reaching files nobody reviewed, re-scan on or off."""
+    rc, changed_out, _err = await git_workspace.git(["diff", "--name-only"], workdir)
+    changed = sorted(line.strip() for line in changed_out.splitlines() if line.strip())
+    expected = sorted({it.proposal.file_path for it in items})
+    if changed != expected:
+        return f"The patches modified unexpected files: {changed or 'none'}."
+    return None
+
+
 async def _rescan_and_judge(
     workdir: str, items: list[_Item], baseline_fps: set[str], blocking: set[str]
 ) -> tuple[list[_Item], list[tuple[_Item, str]], str | None]:
@@ -226,11 +238,10 @@ async def _rescan_and_judge(
     Stamps each item's `validation` artifact, so a reviewer sees the same evidence a
     single-proposal apply produced. Does not touch review_state -- the caller decides, because
     a first-round drop is retried before it becomes a verdict."""
-    rc, changed_out, _err = await git_workspace.git(["diff", "--name-only"], workdir)
-    changed = sorted(line.strip() for line in changed_out.splitlines() if line.strip())
+    bad_scope = await _check_scope(workdir, items)
+    if bad_scope:
+        return [], [], bad_scope
     expected = sorted({it.proposal.file_path for it in items})
-    if changed != expected:
-        return [], [], f"The patches modified unexpected files: {changed or 'none'}."
 
     post_report, _ = await git_workspace.run_scanner(workdir)
     post_fps = _fingerprints(post_report)
@@ -238,6 +249,11 @@ async def _rescan_and_judge(
     blamed, unattributed = _blame(post_report, new_fps, blocking, expected)
     ran_at = datetime.now(timezone.utc).isoformat()
     sev_label = "/".join(sorted(blocking))
+    new_severities: dict[str, int] = {}
+    for f in post_report.findings:
+        if f.fingerprint in new_fps:
+            sev = (f.severity or "unknown").lower()
+            new_severities[sev] = new_severities.get(sev, 0) + 1
 
     survivors: list[_Item] = []
     dropped: list[tuple[_Item, str]] = []
@@ -248,6 +264,8 @@ async def _rescan_and_judge(
             "target_cleared": cleared,
             "new_finding_count": len(new_fps),
             "new_finding_fingerprints": sorted(new_fps)[:50],
+            "new_finding_severities": new_severities,
+            "blocking_severities": sorted(blocking),
             "baseline_count": len(baseline_fps),
             "post_count": len(post_fps),
             "scanner_version": post_report.scanner_version,
@@ -337,28 +355,41 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
         git_workspace.validate_repo_url(scan.repo_url)
         await git_workspace.clone_repo(scan.repo_url, base, workdir, token, git_scheme)
 
-        # One clone, one baseline, for the whole batch -- the per-proposal path re-cloned and
-        # re-scanned the same tree once per finding.
-        baseline_report, _ = await git_workspace.run_scanner(workdir)
-        baseline_fps = _fingerprints(baseline_report)
-        live: list[_Item] = []
-        for it in items:
-            if it.finding.fingerprint not in baseline_fps:
-                await _drop(it.proposal, it.finding,
-                            "The finding no longer reproduces on a fresh clone; the source may have changed.",
-                            job, left_out)
-            else:
-                live.append(it)
-        if not live:
-            return
-
         cfg = await remediation_settings_service.get_settings()
         blocking = {s.lower() for s in cfg.blocking_severities} or _BLOCKING_SEVERITIES
+        rescan = cfg.rescan_validation_enabled
+
+        # One clone, one baseline, for the whole batch -- the per-proposal path re-cloned and
+        # re-scanned the same tree once per finding. Skipped with the re-scan gate: the baseline
+        # only exists to be diffed against the post-patch scan.
+        baseline_fps: set[str] = set()
+        live: list[_Item] = []
+        if rescan:
+            baseline_report, _ = await git_workspace.run_scanner(workdir)
+            baseline_fps = _fingerprints(baseline_report)
+            for it in items:
+                if it.finding.fingerprint not in baseline_fps:
+                    await _drop(it.proposal, it.finding,
+                                "The finding no longer reproduces on a fresh clone; the source may have changed.",
+                                job, left_out)
+                else:
+                    live.append(it)
+        else:
+            live = items
+        if not live:
+            return
 
         live = await _stage_patches(workdir, live, job, left_out)
         if not live:
             return
-        survivors, dropped, fatal = await _rescan_and_judge(workdir, live, baseline_fps, blocking)
+        if rescan:
+            survivors, dropped, fatal = await _rescan_and_judge(workdir, live, baseline_fps, blocking)
+        else:
+            survivors, dropped, fatal = live, [], await _check_scope(workdir, live)
+            ran_at = datetime.now(timezone.utc).isoformat()
+            for it in survivors:
+                it.proposal.validation = {"skipped": True, "scope_ok": True, "ran_at": ran_at,
+                                          "batch_size": len(survivors)}
         if fatal:
             raise _ManualReview(fatal)
         if dropped:
@@ -385,10 +416,12 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
             it.proposal.review_state = "validated"
             await _save(it.proposal)
             await audit_service.record(
-                "AI Fix Validation Passed", actor_user_id=job.approver_user_id,
+                "AI Fix Validation Passed" if rescan else "AI Fix Validation Skipped",
+                actor_user_id=job.approver_user_id,
                 project_id=it.proposal.project_id, target_type="ai_fix_proposal",
                 target_id=str(it.proposal.id),
-                metadata={"target_cleared": True, "batch_size": len(survivors)},
+                metadata={"target_cleared": rescan, "batch_size": len(survivors),
+                          "finding_id": it.proposal.finding_id},
             )
 
         first = survivors[0]
@@ -442,7 +475,8 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
             await audit_service.record(
                 "AI Fix Branch Pushed", actor_user_id=job.approver_user_id,
                 project_id=it.proposal.project_id, target_type="ai_fix_proposal",
-                target_id=str(it.proposal.id), metadata={"branch": branch_name, "commit": commit_sha},
+                target_id=str(it.proposal.id), metadata={"branch": branch_name, "commit": commit_sha,
+                                                    "finding_id": it.proposal.finding_id},
             )
 
         # Same renderer as the downloadable remediation brief (one definition of "how we describe a
@@ -490,7 +524,8 @@ async def _apply(job: RemediationJob, proposals: list[AIFixProposal]) -> None:
                 "AI Fix PR Opened", actor_user_id=job.approver_user_id, project_id=p.project_id,
                 target_type="ai_fix_proposal", target_id=str(p.id),
                 metadata={"pr_url": pr["pr_url"], "pr_number": pr["pr_number"], "branch": branch_name,
-                          "base": base, "credential": source, "batch_size": len(survivors)},
+                          "base": base, "credential": source, "batch_size": len(survivors),
+                          "finding_id": p.finding_id},
             )
             # Remember it: this patch cleared the scanner re-scan gate AND a human approved it, so
             # it's the strongest example available for the next occurrence of this rule in this
@@ -546,8 +581,22 @@ async def run_job(job: RemediationJob) -> None:
             await audit_service.record(
                 "AI Fix Marked Manual Review", actor_user_id=job.approver_user_id,
                 project_id=proposal.project_id, target_type="ai_fix_proposal",
-                target_id=str(proposal.id), metadata={"reason": str(mr)},
+                target_id=str(proposal.id),
+                metadata={"reason": str(mr), "finding_id": proposal.finding_id},
             )
+        # The job ran, the write was refused: status stays "completed", but the outcome must not be
+        # silent -- surface it on the job and tell the project, once per batch.
+        job.error_message = str(mr)[:2000]
+        from app.services import notification_service
+
+        await notification_service.notify(
+            "autofix.apply_failed",
+            project_id=job.project_id,
+            title="Auto-fix pull request was not opened",
+            body=str(mr)[:500],
+            link=f"/projects/{job.project_id}/auto-fix/{job.scan_id}",
+            severity="error",
+        )
     except Exception as exc:
         logger.exception("remediation apply job failed", job_id=str(job.id))
         reason = git_workspace.sanitize(str(exc), None)[:1000]

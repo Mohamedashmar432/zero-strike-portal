@@ -2,7 +2,7 @@
 gate + branch/commit/push/PR orchestration is exercised without real git or network."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -235,6 +235,8 @@ def test_reconcile_marks_stranded_applying_proposal_failed(client, monkeypatch):
         # Simulate a crash mid-apply: proposal stuck "applying", its apply job no longer active.
         proposal.review_state = "applying"
         await proposal.save()
+        # Past the 120 s grace window the reconciler allows for the approve route's two-step write.
+        await proposal.set({AIFixProposal.updated_at: datetime.now(timezone.utc) - timedelta(minutes=5)})
         job.status = "failed"
         await job.save()
         await q.reconcile_stranded_proposals()
@@ -261,5 +263,152 @@ def test_apply_source_changed_is_manual_review(client, monkeypatch):
         reloaded = await AIFixProposal.get(proposal.id)
         assert reloaded.review_state == "manual_review"
         assert "Source changed" in reloaded.manual_review_reason
+
+    asyncio.run(run())
+
+
+async def _audit_actions():
+    from app.models.audit_log import AuditLog
+
+    return [a.action for a in await AuditLog.find_all().to_list()]
+
+
+def test_reconcile_leaves_non_lead_batch_proposal_and_fresh_approved_alone(client):
+    from app.services import ai_remediation_queue_service as q
+
+    async def run():
+        lead, job = await _seed()
+        other = AIFixProposal(
+            finding_id="f2", scan_id=lead.scan_id, project_id="p", can_fix=True, confidence_score=95,
+            file_path="b.py", review_state="applying",
+        )
+        await other.insert()
+        fresh = AIFixProposal(
+            finding_id="f3", scan_id=lead.scan_id, project_id="p", can_fix=True, confidence_score=95,
+            file_path="c.py", review_state="approved",
+        )
+        await fresh.insert()
+        old = datetime.now(timezone.utc) - timedelta(minutes=5)
+        await other.set({AIFixProposal.updated_at: old})
+        await job.set({RemediationJob.status: "running", RemediationJob.proposal_ids: [str(lead.id), str(other.id)]})
+        await q.reconcile_stranded_proposals()
+        # Covered by proposal_ids of a running job, and inside the grace window, respectively.
+        assert (await AIFixProposal.get(other.id)).review_state == "applying"
+        assert (await AIFixProposal.get(fresh.id)).review_state == "approved"
+
+    asyncio.run(run())
+
+
+def test_reconcile_fails_a_stranded_validated_proposal(client):
+    from app.services import ai_remediation_queue_service as q
+
+    async def run():
+        proposal, job = await _seed()
+        await proposal.set({AIFixProposal.review_state: "validated",
+                            AIFixProposal.updated_at: datetime.now(timezone.utc) - timedelta(minutes=5)})
+        await job.set({RemediationJob.status: "failed"})
+        await q.reconcile_stranded_proposals()
+        assert (await AIFixProposal.get(proposal.id)).review_state == "failed"
+
+    asyncio.run(run())
+
+
+def _count_scanner_calls(monkeypatch):
+    calls = {"n": 0}
+    real = git_workspace.run_scanner
+
+    async def counting(workdir):
+        calls["n"] += 1
+        return await real(workdir)
+
+    monkeypatch.setattr(git_workspace, "run_scanner", counting)
+    return calls
+
+
+def test_apply_with_rescan_disabled_skips_the_scanner_and_opens_pr(client, monkeypatch):
+    from app.services import remediation_settings_service
+
+    _install_git_mocks(monkeypatch, post_findings=[])
+    calls = _count_scanner_calls(monkeypatch)
+
+    async def run():
+        await remediation_settings_service.update_settings(rescan_validation_enabled=False)
+        proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "pr_open"
+        assert reloaded.validation["skipped"] is True
+        assert reloaded.validation["scope_ok"] is True
+        assert calls["n"] == 0
+        actions = await _audit_actions()
+        assert "AI Fix Validation Skipped" in actions
+        assert "AI Fix Validation Passed" not in actions
+
+    asyncio.run(run())
+
+
+def test_apply_with_rescan_disabled_still_enforces_the_scope_check(client, monkeypatch):
+    from app.services import remediation_settings_service
+
+    _install_git_mocks(monkeypatch, post_findings=[], diff_files="app.py,other.py")
+    calls = _count_scanner_calls(monkeypatch)
+
+    async def run():
+        await remediation_settings_service.update_settings(rescan_validation_enabled=False)
+        proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "manual_review"
+        assert "unexpected files" in reloaded.manual_review_reason
+        assert calls["n"] == 0
+
+    asyncio.run(run())
+
+
+def test_apply_records_severities_of_new_findings_below_the_blocking_bar(client, monkeypatch):
+    _install_git_mocks(monkeypatch, post_findings=[_fp("n1", "low"), _fp("n2", "LOW"), _fp("n3", None)])
+
+    async def run():
+        proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "pr_open"
+        assert reloaded.validation["new_finding_count"] == 3
+        assert reloaded.validation["new_finding_severities"] == {"low": 2, "unknown": 1}
+        assert "high" in reloaded.validation["blocking_severities"]
+
+    asyncio.run(run())
+
+
+def test_pr_step_refusal_sets_job_error_notifies_and_audits_the_finding(client, monkeypatch):
+    from app.services import notification_service
+    from app.services.repo_write import RepoWriteError
+
+    _install_git_mocks(monkeypatch, post_findings=[])
+
+    async def failing_pr(token, owner, repo, *, head, base, title, body):
+        raise RepoWriteError("GitHub PR creation failed (422): Validation Failed")
+
+    monkeypatch.setattr(gh_write, "open_pull_request", failing_pr)
+    sent = []
+
+    async def fake_notify(key, **kw):
+        sent.append((key, kw))
+        return 0
+
+    monkeypatch.setattr(notification_service, "notify", fake_notify)
+
+    async def run():
+        from app.models.audit_log import AuditLog
+
+        proposal, job = await _seed()
+        await apply_svc.run_job(job)
+        job_reloaded = await RemediationJob.get(job.id)
+        assert job_reloaded.status == "completed"
+        assert "no PR was opened" in job_reloaded.error_message
+        assert [k for k, _ in sent] == ["autofix.apply_failed"]
+        assert sent[0][1]["title"] == "Auto-fix pull request was not opened"
+        rows = await AuditLog.find(AuditLog.action == "AI Fix Marked Manual Review").to_list()
+        assert rows and rows[0].metadata["finding_id"] == proposal.finding_id
 
     asyncio.run(run())

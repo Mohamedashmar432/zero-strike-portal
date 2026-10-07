@@ -125,17 +125,35 @@ function CritiqueStep({ critique }: { critique: FixCritique }) {
 }
 
 function ValidationStep({ validation }: { validation: FixValidation }) {
+  if (validation.skipped) {
+    return (
+      <Step label="Scanner validation" tone="warn" headline="skipped — re-scan is disabled in Auto-Fix settings">
+        <p className="text-xs text-muted-foreground">
+          No re-scan ran for this fix: the pull request rests on the AI review alone. Only the changed-files check ran.
+        </p>
+      </Step>
+    );
+  }
   const cleared = validation.target_cleared;
   const newCount = validation.new_finding_count ?? 0;
-  const tone: Tone = cleared && newCount === 0 ? "ok" : "bad";
+  const batchWide = (validation.batch_size ?? 1) > 1;
+  const severities = Object.entries(validation.new_finding_severities ?? {})
+    .map(([sev, n]) => `${n} ${sev}`)
+    .join(", ");
+  const tone: Tone = !cleared ? "bad" : newCount > 0 ? "warn" : "ok";
+  const headline = !cleared
+    ? "the finding was NOT resolved on re-scan"
+    : newCount > 0
+      ? `the finding is resolved, but ${newCount} new finding${newCount === 1 ? "" : "s"} appeared below the blocking severity`
+      : "the finding is resolved on re-scan";
   return (
-    <Step
-      label="Scanner validation"
-      tone={tone}
-      headline={cleared ? "the finding is resolved on re-scan" : "the finding was NOT resolved on re-scan"}
-    >
+    <Step label="Scanner validation" tone={tone} headline={headline}>
       <ul className="space-y-0.5 text-sm text-muted-foreground">
-        <li>New findings introduced: {newCount}</li>
+        <li>
+          New findings introduced: {newCount}
+          {newCount > 0 && severities && ` (${severities})`}
+          {newCount > 0 && batchWide && " (across the whole PR)"}
+        </li>
         {validation.scope_ok !== undefined && (
           <li>Changed only the proposed file: {validation.scope_ok ? "yes" : "no"}</li>
         )}
@@ -151,6 +169,37 @@ function ValidationStep({ validation }: { validation: FixValidation }) {
       </p>
     </Step>
   );
+}
+
+// The outcome of the push/PR step, from the proposal alone — so it reads the same while polling.
+function PullRequestStep({ proposal }: { proposal: AiFixProposal }) {
+  const rs = proposal.review_state;
+  if (rs === "approved" || rs === "applying" || rs === "validated") {
+    return <Step label="Pull request" tone="idle" headline="creating the pull request…" />;
+  }
+  if (rs === "pr_open" && proposal.pr_url) {
+    return (
+      <Step label="Pull request" tone="ok" headline="opened">
+        <a
+          href={proposal.pr_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm underline underline-offset-4"
+        >
+          #{proposal.pr_number ?? "PR"}
+        </a>
+      </Step>
+    );
+  }
+  const reason = rs === "manual_review" ? proposal.manual_review_reason : rs === "failed" ? proposal.failure_reason : null;
+  if (reason) {
+    return (
+      <Step label="Pull request" tone="bad" headline={rs === "failed" ? "failed" : "not opened"}>
+        <p className="text-sm text-muted-foreground">{reason}</p>
+      </Step>
+    );
+  }
+  return null;
 }
 
 export function FixStagePanel({ proposal }: { proposal: AiFixProposal }) {
@@ -171,7 +220,7 @@ export function FixStagePanel({ proposal }: { proposal: AiFixProposal }) {
         <Step
           label="Scanner validation"
           tone="idle"
-          headline="runs when you create the pull request"
+          headline="runs when you create the pull request, unless disabled in Auto-Fix settings"
         >
           <p className="text-xs text-muted-foreground">
             The patch is applied to a fresh clone and re-scanned; the PR is only opened if the finding
@@ -179,6 +228,7 @@ export function FixStagePanel({ proposal }: { proposal: AiFixProposal }) {
           </p>
         </Step>
       )}
+      <PullRequestStep proposal={proposal} />
     </ol>
   );
 }

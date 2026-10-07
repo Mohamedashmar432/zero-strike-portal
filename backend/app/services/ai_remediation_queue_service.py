@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from beanie.operators import In
+from beanie.operators import In, Or
 
 from app.core.config import settings
 from app.core.job_queue import claim_next, drain_lock, reap_stuck
@@ -96,12 +96,20 @@ async def reconcile_stranded_proposals() -> None:
     dies mid-apply, reap_stuck dead-letters the JOB (apply has max_attempts=1) but never touches
     the proposal -- it would sit "applying" forever, un-actionable in the UI. Mark any "applying"
     proposal whose apply job is no longer queued/running as failed so it can be dismissed/retried."""
-    stuck = await AIFixProposal.find(AIFixProposal.review_state == "applying").to_list()
+    # "approved" and "validated" strand too (the approve route sets "approved" just before it inserts
+    # the job, hence the grace window). A batch job lists its proposals in proposal_ids, so cover
+    # check both fields -- matching only the lead's singular proposal_id flipped the rest mid-run.
+    grace = datetime.now(timezone.utc) - timedelta(seconds=120)
+    stuck = await AIFixProposal.find(
+        In(AIFixProposal.review_state, ["approved", "applying", "validated"]),
+        AIFixProposal.updated_at < grace,
+    ).to_list()
     for proposal in stuck:
+        pid = str(proposal.id)
         active = await RemediationJob.find(
             RemediationJob.kind == "apply",
-            RemediationJob.proposal_id == str(proposal.id),
             In(RemediationJob.status, ["queued", "running"]),
+            Or(RemediationJob.proposal_id == pid, In(RemediationJob.proposal_ids, [pid])),
         ).first_or_none()
         if active is None:
             proposal.review_state = "failed"

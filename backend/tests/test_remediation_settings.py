@@ -30,6 +30,7 @@ def test_get_returns_lazy_created_defaults(client):
         # AutoFixQuotaRequest (see test_auto_fix_quota.py).
         "auto_fix_findings_per_scan": 10,
         "blocking_severities": ["critical", "high", "medium"],
+        "rescan_validation_enabled": True,
     }
 
 
@@ -122,3 +123,11 @@ def test_confidence_threshold_rebuckets_proposals(client, monkeypatch):
         "summary"
     ]
     assert (summ2["needs_review_on_fix"], summ2["ai_fixable"]) == (0, 1)
+
+
+def test_rescan_validation_toggle_round_trips(client):
+    admin = _admin_headers(client, email="rs-admin-rescan@zs.dev")
+    r = client.put(SETTINGS_URL, json={"rescan_validation_enabled": False}, headers=admin)
+    assert r.status_code == 200
+    assert r.json()["rescan_validation_enabled"] is False
+    assert client.get(SETTINGS_URL, headers=admin).json()["rescan_validation_enabled"] is False

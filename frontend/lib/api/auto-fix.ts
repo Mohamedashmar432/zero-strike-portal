@@ -27,6 +27,12 @@ export type FixValidation = {
   post_count?: number;
   scanner_version?: string | null;
   ran_at?: string;
+  /** Re-scan was disabled in Auto-Fix settings; only the scope check ran. */
+  skipped?: boolean;
+  batch_size?: number;
+  /** Severity -> count of the new findings (batch-wide when batch_size > 1). */
+  new_finding_severities?: Record<string, number>;
+  blocking_severities?: string[];
 };
 
 // Deterministic pre-LLM triage (backend remediation_triage). eligible=false means no agent ever
@@ -192,6 +198,8 @@ export type RemediationSettings = {
    */
   auto_fix_findings_per_scan: number;
   blocking_severities: string[]; // subset of critical/high/medium/low/info
+  /** Clone + re-scan before opening a PR. Off = the PR rests on the AI review alone. */
+  rescan_validation_enabled: boolean;
 };
 
 export function getRemediationSettings() {

@@ -166,6 +166,23 @@ function AutoFixPolicyCard() {
           </p>
         </div>
 
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={form.rescan_validation_enabled}
+            onChange={(e) => setForm({ ...form, rescan_validation_enabled: e.target.checked })}
+          />
+          <span>
+            <span className="block text-sm font-medium">Re-scan before opening a PR</span>
+            <span className="block text-xs text-muted-foreground">
+              Clones the repo and runs the thinkShield scanner before and after the patch; the PR is only
+              opened if the finding clears and no new blocking finding appears. Turning this off opens the
+              PR on AI review alone.
+            </span>
+          </span>
+        </label>
+
         <Button onClick={() => save.mutate(form)} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save settings"}
         </Button>

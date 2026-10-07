@@ -12,7 +12,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, GitPullRequest, MessageSquare, Package, Sparkles, Wand2, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { IconAction } from "@/components/common/row-actions";
@@ -33,6 +33,7 @@ import {
   reviseFixProposal,
 } from "@/lib/api/auto-fix";
 import { ApiError } from "@/lib/api/client";
+import { queryKeys } from "@/lib/api/query-keys";
 import { cn } from "@/lib/utils";
 
 /**
@@ -67,14 +68,15 @@ export function fixCapabilities(proposal: AiFixProposal, canApprove: boolean) {
     hasPatch,
     manualReason,
     failedReason,
-    inFlight: rs === "approved" || rs === "applying",
+    // "validated" is transient: the re-scan passed, the push/PR is still running.
+    inFlight: rs === "approved" || rs === "applying" || rs === "validated",
     canDismiss: rs !== "dismissed" && rs !== "pr_open",
-    canRevise: rs === "proposed" || rs === "manual_review" || rs === "validated" || rs === "failed",
+    canRevise: rs === "proposed" || rs === "manual_review" || rs === "failed",
     // A human owner/admin can create the PR for any reviewable proposal that has a patch —
     // confidence only gates *auto*-approval, not a human who has read the diff. The apply job still
     // re-scans and refuses to push anything that introduces new findings.
     canCreatePr:
-      canApprove && proposal.can_fix && hasPatch && (rs === "proposed" || rs === "validated" || rs === "failed"),
+      canApprove && proposal.can_fix && hasPatch && (rs === "proposed" || rs === "failed"),
     // manual_review means the write already failed (e.g. no connected repo) — show it disabled with why.
     prBlocked:
       canApprove && proposal.can_fix && hasPatch && rs === "manual_review"
@@ -180,9 +182,29 @@ export function CreatePrButton({
     onSuccess: () => {
       toast.success("Approved — creating the pull request…");
       qc.invalidateQueries({ queryKey: invalidateKey });
+      qc.invalidateQueries({ queryKey: queryKeys.ai.autofix.activity(proposal.scan_id) });
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Something went wrong"),
   });
+
+  // The apply job runs in the background; announce how it ended when polling sees the state move.
+  const prevState = useRef(proposal.review_state);
+  useEffect(() => {
+    const prev = prevState.current;
+    const now = proposal.review_state;
+    prevState.current = now;
+    if (prev === now || !(prev === "approved" || prev === "applying" || prev === "validated")) return;
+    if (now === "pr_open") {
+      const url = proposal.pr_url;
+      toast.success("Pull request opened", {
+        action: url ? { label: "View PR", onClick: () => window.open(url, "_blank", "noopener,noreferrer") } : undefined,
+      });
+    } else if (now === "manual_review" || now === "failed") {
+      toast.error("Pull request was not opened", {
+        description: (now === "failed" ? proposal.failure_reason : proposal.manual_review_reason) ?? undefined,
+      });
+    }
+  }, [proposal.review_state, proposal.pr_url, proposal.failure_reason, proposal.manual_review_reason]);
 
   const lowConfidence = proposal.confidence_score < threshold;
 

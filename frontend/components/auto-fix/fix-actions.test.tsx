@@ -36,6 +36,17 @@ describe("fixCapabilities", () => {
     expect(caps.failedReason).toBe("git clone failed");
   });
 
+  // "validated" is mid-apply (re-scan passed, push/PR not done): in flight, not actionable.
+  test("validated is in flight and offers neither Create PR nor revise", () => {
+    const caps = fixCapabilities(
+      proposal({ review_state: "validated", can_fix: true, original_code: "a", patched_code: "b" }),
+      true
+    );
+    expect(caps.inFlight).toBe(true);
+    expect(caps.canCreatePr).toBe(false);
+    expect(caps.canRevise).toBe(false);
+  });
+
   test("a reason left over from an earlier failure is not shown once the state moves on", () => {
     const caps = fixCapabilities(
       proposal({ review_state: "pr_open", failure_reason: "git clone failed" }),

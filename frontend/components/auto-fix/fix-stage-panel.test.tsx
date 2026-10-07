@@ -135,6 +135,51 @@ describe("FixStagePanel", () => {
     expect(text(container)).toContain("runs when you create the pull request");
   });
 
+  test("a cleared finding with new findings is a warning, not a clean bill of health", () => {
+    const { container } = render(
+      <FixStagePanel
+        proposal={proposal({
+          validation: {
+            target_cleared: true,
+            new_finding_count: 4,
+            new_finding_severities: { low: 3, info: 1 },
+            batch_size: 2,
+          },
+        })}
+      />
+    );
+    const t = text(container);
+    expect(t).toContain("resolved, but 4 new findings appeared below the blocking severity");
+    expect(t).toContain("(3 low, 1 info)");
+    expect(t).toContain("(across the whole PR)");
+    expect(t).not.toContain("the finding is resolved on re-scan");
+  });
+
+  test("a skipped re-scan says so and does not claim the finding was resolved", () => {
+    const { container } = render(
+      <FixStagePanel proposal={proposal({ validation: { skipped: true, scope_ok: true } })} />
+    );
+    expect(text(container)).toContain("skipped — re-scan is disabled in Auto-Fix settings");
+    expect(text(container)).not.toContain("resolved");
+  });
+
+  test("the pull request step follows the proposal's state", () => {
+    const withTriage = { triage: { eligible: true } } as const;
+    const view = (o: Partial<AiFixProposal>) =>
+      render(<FixStagePanel proposal={proposal({ ...withTriage, ...o })} />).container;
+
+    expect(text(view({ review_state: "validated" }))).toContain("creating the pull request…");
+    const opened = view({ review_state: "pr_open", pr_url: "https://github.com/o/r/pull/7", pr_number: 7 });
+    expect(text(opened)).toContain("opened");
+    expect(opened.querySelector("a")?.getAttribute("href")).toBe("https://github.com/o/r/pull/7");
+    expect(text(opened)).toContain("#7");
+    expect(text(view({ review_state: "manual_review", manual_review_reason: "PR refused" }))).toContain(
+      "not opened"
+    );
+    expect(text(view({ review_state: "failed", failure_reason: "clone broke" }))).toContain("clone broke");
+    expect(text(view({ review_state: "proposed" }))).not.toContain("Pull request");
+  });
+
   test("a proposal with no recorded stages says so instead of rendering an empty list", () => {
     const { container } = render(<FixStagePanel proposal={proposal()} />);
     expect(text(container)).toContain("No pipeline details");

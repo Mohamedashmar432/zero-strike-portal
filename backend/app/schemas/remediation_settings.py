@@ -9,6 +9,7 @@ class RemediationSettingsResponse(BaseModel):
     max_findings_per_job: int
     auto_fix_findings_per_scan: int
     blocking_severities: list[str]
+    rescan_validation_enabled: bool
 
 
 class RemediationSettingsUpdateRequest(BaseModel):
@@ -19,6 +20,7 @@ class RemediationSettingsUpdateRequest(BaseModel):
     max_findings_per_job: int | None = Field(default=None, ge=1, le=100)
     auto_fix_findings_per_scan: int | None = Field(default=None, ge=1, le=500)
     blocking_severities: list[str] | None = None
+    rescan_validation_enabled: bool | None = None
 
     @field_validator("blocking_severities")
     @classmethod

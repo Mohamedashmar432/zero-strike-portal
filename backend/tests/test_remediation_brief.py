@@ -387,3 +387,29 @@ def test_repo_controlled_path_and_message_cannot_inject_markdown(client):
 def test_inline_code_pads_edge_backticks():
     assert brief._inline_code("`x") == "`` `x ``"
     assert brief._inline_code("plain.py") == "`plain.py`"
+
+
+def test_skipped_validation_is_rendered_as_skipped_not_as_a_pass(client):
+    async def run():
+        project, scan = await _scan()
+        f = await _finding(scan)
+        await _proposal(scan, f, validation={"skipped": True, "scope_ok": True})
+        out = await brief.render_scan_brief(str(scan.id), generated_at=FIXED_AT)
+        assert "Skipped — re-scan disabled in Auto-Fix settings" in out
+        assert "resolved on re-scan" not in out
+
+    asyncio.run(run())
+
+
+def test_new_finding_severity_breakdown_is_rendered(client):
+    async def run():
+        project, scan = await _scan()
+        f = await _finding(scan)
+        await _proposal(
+            scan, f,
+            validation={"target_cleared": True, "new_finding_count": 4, "new_finding_severities": {"low": 3, "info": 1}},
+        )
+        out = await brief.render_scan_brief(str(scan.id), generated_at=FIXED_AT)
+        assert "New findings introduced: **4** (3 low, 1 info)" in out
+
+    asyncio.run(run())
