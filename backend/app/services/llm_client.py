@@ -7,6 +7,7 @@ kimi/nvidia_nim/openrouter/custom) -- this module deliberately does not build a 
 """
 
 import json
+import re
 import time
 
 import litellm
@@ -29,7 +30,11 @@ logger = structlog.get_logger(__name__)
 # "openai" against a custom api_base). Without this, litellm raises "LLM Provider NOT
 # provided" for a bare model name like "kimi-k2.6" -- it has no way to guess which backend
 # that string belongs to.
-_NATIVE_PREFIX_PROVIDERS = {"nvidia_nim", "openrouter", "groq", "gemini", "deepseek"}
+#
+# anthropic is in here too: litellm only infers it from model names in its own price map, so a
+# newer or aliased id ("claude-3-5-sonnet-latest", a just-released model) fails with "LLM Provider
+# NOT provided" -- which the connection test flattens to "check the provider, model and key".
+_NATIVE_PREFIX_PROVIDERS = {"anthropic", "nvidia_nim", "openrouter", "groq", "gemini", "deepseek"}
 _OPENAI_COMPATIBLE_PROVIDERS = {"lmstudio", "kimi", "custom", "commandcode"}
 # Kimi/Moonshot's and Command Code's endpoints are fixed and well-known, so admins don't need
 # to type them themselves (mirrors why they aren't in the frontend's SELF_HOSTED_PROVIDERS
@@ -201,7 +206,16 @@ def classify_error(exc: BaseException) -> str:
 
 @retry_transient(_TRANSIENT_EXCEPTIONS, max_attempts=3)
 async def _call_acompletion(**kwargs):
-    return await litellm.acompletion(**kwargs)
+    try:
+        return await litellm.acompletion(**kwargs)
+    except litellm.BadRequestError as exc:
+        # Newer Anthropic models (e.g. Opus 5.5) 400 on any `temperature` ("is deprecated for this
+        # model"). litellm's param tables lag new models, so retry once without it rather than
+        # keeping a model list here.
+        if "temperature" in kwargs and "temperature" in str(exc).lower() and "deprecated" in str(exc).lower():
+            kwargs.pop("temperature")
+            return await litellm.acompletion(**kwargs)
+        raise
 
 
 def _ms(started: float) -> int:
@@ -701,3 +715,31 @@ async def test_connection(
         # See get_completion: unmapped base APIError (e.g. a 403 "upgrade_required") -> permanent,
         # so the test surfaces the real reason rather than a raw 500.
         raise LLMPermanentError(str(exc)) from exc
+
+
+# Providers the model dropdown is offered for, as litellm names them in its price map. The portal
+# stores the id the provider's own API expects; _resolve_model_and_base re-adds litellm's routing
+# prefix at call time, so the prefix litellm keys some of these under is stripped here.
+_CATALOG_PROVIDERS = ("anthropic", "openai", "gemini", "groq", "openrouter", "deepseek")
+
+
+# Entries the price map files under mode "chat" that are classifiers, tool-use stubs or media
+# models -- selecting one for security analysis would only ever fail.
+_NOT_A_CHAT_PICK = re.compile(r"guard|safeguard|computer-use|robotics|deep-research|realtime|lyria|container|tts|image")
+
+
+def model_catalog() -> dict[str, list[str]]:
+    """Chat models per provider, from litellm's price map (so it moves with the daily price
+    refresh instead of a list someone has to remember to edit). A provider with no entry here
+    (custom, commandcode) takes a typed model id."""
+    out: dict[str, set[str]] = {p: set() for p in _CATALOG_PROVIDERS}
+    for key, info in litellm.model_cost.items():
+        provider = info.get("litellm_provider")
+        if provider not in out or info.get("mode") != "chat":
+            continue
+        model = key.removeprefix(f"{provider}/")
+        # Fine-tune stubs and ":batch"/":free"-style routing variants are not ids a person picks.
+        if model.startswith("ft:") or ":" in model or _NOT_A_CHAT_PICK.search(model):
+            continue
+        out[provider].add(model)
+    return {p: sorted(ms) for p, ms in out.items()}

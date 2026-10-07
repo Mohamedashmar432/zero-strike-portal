@@ -189,7 +189,7 @@ def test_get_completion_resolves_active_config_when_two_exist(client, monkeypatc
 
         result = await llm_client.get_completion([{"role": "user", "content": "hi"}])
         assert result == {"ok": True}
-        assert captured_kwargs["model"] == "claude-haiku-4-5"
+        assert captured_kwargs["model"] == "anthropic/claude-haiku-4-5"
         assert captured_kwargs["api_key"] == "sk-second"
         assert captured_kwargs["timeout"] == settings.ai_llm_request_timeout_seconds
 
@@ -330,7 +330,8 @@ def test_connection_fails_with_transient_error_after_retries(client, monkeypatch
     "provider,model_in,base_in,model_out,base_out",
     [
         # anthropic/openai: litellm resolves these natively from the bare name -- untouched.
-        ("anthropic", "claude-haiku-4-5", None, "claude-haiku-4-5", None),
+        ("anthropic", "claude-haiku-4-5", None, "anthropic/claude-haiku-4-5", None),
+        ("anthropic", "anthropic/claude-haiku-4-5", None, "anthropic/claude-haiku-4-5", None),
         ("openai", "gpt-4o", None, "gpt-4o", None),
         # nvidia_nim/openrouter: litellm's own provider-prefix convention.
         ("nvidia_nim", "meta/llama-3.1-70b-instruct", None, "nvidia_nim/meta/llama-3.1-70b-instruct", None),
@@ -725,3 +726,32 @@ def test_failover_rows_read_as_one_chain(client, monkeypatch):
         assert events[0].error_code == "rate_limited"
 
     asyncio.run(run())
+
+
+def test_call_retries_without_temperature_when_model_rejects_it(monkeypatch):
+    calls = []
+
+    async def fake(**kwargs):
+        calls.append(dict(kwargs))
+        if "temperature" in kwargs:
+            raise litellm.BadRequestError(
+                message="`temperature` is deprecated for this model.", model="m", llm_provider="anthropic"
+            )
+        return "ok"
+
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    assert asyncio.run(llm_client._call_acompletion(model="m", temperature=0.0)) == "ok"
+    assert "temperature" in calls[0] and "temperature" not in calls[1]
+
+
+def test_model_catalog_gives_provider_native_ids():
+    catalog = llm_client.model_catalog()
+    assert "claude-sonnet-5-5" in catalog["anthropic"]
+    # litellm files these under "gemini/<id>"; the provider's own API wants the bare id.
+    assert all(not m.startswith("gemini/") for m in catalog["gemini"])
+    assert all(not m.startswith("ft:") and ":" not in m for ms in catalog.values() for m in ms)
+    # No list for these: the form falls back to a text box.
+    assert "custom" not in catalog and "commandcode" not in catalog
+    # What the dropdown stores must route to the right backend once the prefix is re-added.
+    model, _ = llm_client._resolve_model_and_base("gemini", catalog["gemini"][0], None)
+    assert model.startswith("gemini/")

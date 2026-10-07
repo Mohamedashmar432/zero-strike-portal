@@ -20,6 +20,7 @@ import {
   type AiProviderConfig,
 } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
+import { AiModelSelect } from "@/components/common/ai-model-select";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { KeyStorageBadge, KeyVaultNote } from "@/components/common/key-storage-badge";
 import { PricingOverrideFields, toPrice } from "@/components/common/pricing-override-fields";
@@ -44,11 +45,8 @@ const PROVIDERS: { value: AiProvider; label: string; keyless?: boolean }[] = [
   { value: "gemini", label: "Google Gemini" },
   { value: "groq", label: "Groq" },
   { value: "openrouter", label: "OpenRouter" },
-  { value: "nvidia_nim", label: "NVIDIA NIM" },
-  { value: "kimi", label: "Kimi (Moonshot)" },
   { value: "commandcode", label: "CommandCode" },
   { value: "deepseek", label: "DeepSeek" },
-  { value: "lmstudio", label: "LM Studio (self-hosted)", keyless: true },
   { value: "custom", label: "Custom OpenAI-compatible", keyless: true },
 ];
 
@@ -270,7 +268,7 @@ export function ProjectAiProviderCard({
                 <Label htmlFor="byok-provider">Provider</Label>
                 <Select
                   value={form.provider}
-                  onValueChange={(v) => v && setForm({ ...form, provider: v as AiProvider })}
+                  onValueChange={(v) => v && setForm({ ...form, provider: v as AiProvider, model_name: "" })}
                 >
                   <SelectTrigger id="byok-provider">
                     <SelectValue>
@@ -288,11 +286,11 @@ export function ProjectAiProviderCard({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="byok-model">Model</Label>
-                <Input
+                <AiModelSelect
                   id="byok-model"
+                  provider={form.provider}
                   value={form.model_name}
-                  placeholder="claude-sonnet-4-5"
-                  onChange={(e) => setForm({ ...form, model_name: e.target.value })}
+                  onChange={(m) => setForm({ ...form, model_name: m })}
                 />
               </div>
               <div className="space-y-2">

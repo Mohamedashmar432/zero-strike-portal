@@ -4,9 +4,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Pencil, PlugZap, PowerOff, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { RequireRole } from "@/components/auth/require-role";
+import { AiModelSelect } from "@/components/common/ai-model-select";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { EmptyState } from "@/components/common/empty-state";
@@ -55,9 +56,6 @@ import { aiProviderFormSchema, type AiProviderFormValues } from "@/lib/validatio
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
-  { value: "lmstudio", label: "LM Studio" },
-  { value: "kimi", label: "Kimi" },
-  { value: "nvidia_nim", label: "NVIDIA NIM" },
   { value: "openrouter", label: "OpenRouter" },
   { value: "custom", label: "Custom" },
   { value: "commandcode", label: "Command Code AI" },
@@ -91,6 +89,7 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
     setError,
     clearErrors,
     reset,
+    control,
     formState: { errors },
   } = useForm<AiProviderFormValues>({
     resolver: zodResolver(aiProviderFormSchema),
@@ -112,6 +111,8 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
         : { name: "", provider: "anthropic", model_name: "", base_url: "", api_key: "", input_cost: "", output_cost: "" }
       : undefined,
   });
+
+  const model = useWatch({ control, name: "model_name" });
 
   // Mirrors the RHF-registered `provider` field so the Select can be controlled without
   // react-hook-form's `watch()` (same pattern as the old single-settings form and
@@ -228,6 +229,8 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
                   const next = value as AiProvider;
                   setProvider(next);
                   setValue("provider", next, { shouldValidate: true });
+                  // Model ids belong to one provider; carrying one across is always wrong.
+                  if (next !== provider) setValue("model_name", "");
                 }}
               >
                 <SelectTrigger id="ai-provider-select" className="w-full">
@@ -244,11 +247,11 @@ function AiProviderDialog({ target, onClose }: { target: DialogTarget | null; on
             </div>
             <div className="space-y-2">
               <Label htmlFor="ai-provider-model">Model name</Label>
-              <Input
+              <AiModelSelect
                 id="ai-provider-model"
-                autoComplete="off"
-                placeholder="e.g. claude-sonnet-5"
-                {...register("model_name")}
+                provider={provider}
+                value={model ?? ""}
+                onChange={(m) => setValue("model_name", m, { shouldValidate: true })}
               />
               {errors.model_name && <p className="text-sm text-destructive">{errors.model_name.message}</p>}
             </div>

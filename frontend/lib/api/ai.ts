@@ -468,3 +468,9 @@ export function getAiPricingStatus() {
 export function refreshAiPricing() {
   return apiFetch<AiPricingStatus>("/admin/ai-pricing/refresh", { method: "POST" });
 }
+
+/** Chat model ids per provider, in the form the provider's own API expects. Providers absent from
+ *  the map (custom, commandcode) take a typed id. */
+export function getAiModelCatalog() {
+  return apiFetch<Record<string, string[]>>("/ai/models");
+}

@@ -204,6 +204,13 @@ async def get_ai_settings(user: User = Depends(get_current_user)):
     return AISettingsResponse(project_byok_enabled=await ai_provider_config_service.byok_enabled())
 
 
+@settings_router.get("/models", response_model=dict[str, list[str]])
+async def list_ai_models(user: User = Depends(get_current_user)):
+    """Model ids per provider for the provider forms' dropdown. Any signed-in user: a project
+    owner adding a BYOK key needs it, and it is public price-map data, not a credential."""
+    return llm_client.model_catalog()
+
+
 @settings_router.put("/settings", response_model=AISettingsResponse)
 async def update_ai_settings(payload: AISettingsUpdateRequest, user: User = Depends(require_admin)):
     """Flipping this changes which key every AI call in the portal runs on, so it is audited like

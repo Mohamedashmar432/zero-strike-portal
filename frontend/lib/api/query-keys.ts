@@ -86,6 +86,7 @@ export const queryKeys = {
     // entry with the portal-level one.
     status: (projectId?: string) => ["ai", "status", projectId ?? ""] as const,
     settings: () => ["ai", "settings"] as const,
+    models: () => ["ai", "models"] as const,
     pricing: () => ["ai", "pricing"] as const,
     portalAnalytics: (days: number, projectId?: string) =>
       ["ai", "portal-analytics", days, projectId ?? ""] as const,
