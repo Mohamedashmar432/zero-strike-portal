@@ -438,7 +438,7 @@ async def ask_about_fix(proposal: AIFixProposal, finding: Finding | None, questi
         {
             "role": "user",
             "content": json.dumps(
-                {"untrusted_context": context, "developer_question": question}, default=str
+                {"untrusted_context": context, "developer_question": question}, default=str, ensure_ascii=False
             ),
         },
     ]

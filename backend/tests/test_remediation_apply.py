@@ -262,7 +262,7 @@ def test_apply_source_changed_is_manual_review(client, monkeypatch):
         await apply_svc.run_job(job)
         reloaded = await AIFixProposal.get(proposal.id)
         assert reloaded.review_state == "manual_review"
-        assert "Source changed" in reloaded.manual_review_reason
+        assert "original code was not found" in reloaded.manual_review_reason
 
     asyncio.run(run())
 

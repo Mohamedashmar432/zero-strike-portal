@@ -113,7 +113,7 @@ def _assistant_message(resp: llm_client.LLMToolResponse) -> dict:
 
 
 def _tool_message(tool_call_id: str, result: dict) -> dict:
-    return {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(result)}
+    return {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(result, ensure_ascii=False)}
 
 
 def _bail(ctx: ToolContext, reason: str) -> SubmitFixProposalArgs:
@@ -135,6 +135,18 @@ def _finalize(parsed: SubmitFixProposalArgs, ctx: ToolContext) -> SubmitFixPropo
     parsed.finding_id = fc.get("finding_id", parsed.finding_id)
     if parsed.can_fix and parsed.file_path not in ctx.allowed_paths:
         raise ValueError(f"file_path {parsed.file_path!r} is outside the allowed scope {ctx.allowed_paths}")
+    # The apply step replaces original_code by exact match, so check it against the real file now,
+    # while the model can still repair it. A paraphrased quote (a backslash-u escape for a literal emoji,
+    # re-indented lines) otherwise only surfaces at PR time as a misleading "source changed".
+    if parsed.can_fix and parsed.original_code and ctx.workdir:
+        target = remediation_tools._resolve_in_workdir(ctx.workdir, parsed.file_path)
+        text = target.read_text(encoding="utf-8", errors="replace") if target and target.is_file() else ""
+        hits = text.count(parsed.original_code)
+        if hits != 1:
+            raise ValueError(
+                f"original_code occurs {hits} times in {parsed.file_path}; it must be copied verbatim "
+                "from read_file (same characters, whitespace and line breaks) and occur exactly once"
+            )
     return parsed
 
 
@@ -180,7 +192,7 @@ async def run_agent(
 ) -> SubmitFixProposalArgs:
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps({"untrusted_finding_context": issue_bundle}, default=str)},
+        {"role": "user", "content": json.dumps({"untrusted_finding_context": issue_bundle}, default=str, ensure_ascii=False)},
     ]
     # A revision request comes from an authenticated reviewer (not repo content), so it IS trusted
     # and may steer the fix — kept in its own message, never merged into the untrusted context above.

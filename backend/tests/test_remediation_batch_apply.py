@@ -178,7 +178,7 @@ def test_batch_drops_the_drifted_fix_and_ships_the_rest(client, monkeypatch):
         await apply_svc.run_job(job)
         a, b, c = await _reload(proposals)
         assert b.review_state == "manual_review"
-        assert "Source changed" in b.manual_review_reason
+        assert "original code was not found" in b.manual_review_reason
         assert a.review_state == c.review_state == "pr_open"
         assert a.pr_url == c.pr_url
         assert len(state["prs"]) == 1

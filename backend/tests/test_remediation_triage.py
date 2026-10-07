@@ -52,7 +52,7 @@ def test_patch_spanning_a_redacted_secret_cannot_apply(tmp_path):
 
     with pytest.raises(_ManualReview) as exc:
         _apply_patch(str(tmp_path), "conf.py", agent_original, 'API_KEY = os.environ["API_KEY"]')
-    assert "Source changed" in str(exc.value)
+    assert "original code was not found" in str(exc.value)
 
 
 def test_patch_not_spanning_the_secret_still_applies(tmp_path):

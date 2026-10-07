@@ -141,7 +141,7 @@ async def critique(
         {
             "role": "user",
             "content": json.dumps(
-                {"untrusted_context": _payload(finding_bundle, draft, file_excerpt)}, default=str
+                {"untrusted_context": _payload(finding_bundle, draft, file_excerpt)}, default=str, ensure_ascii=False
             ),
         },
     ]

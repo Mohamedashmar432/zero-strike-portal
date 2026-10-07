@@ -171,3 +171,31 @@ def test_dispatch_reads_real_worktree_when_set(tmp_path):
     assert "AKIA1234567890ABCDEF" not in flagged["content"]  # secret redacted on the way out
     assert "error" in escape  # `..` escape rejected even with a workdir
     assert "error" in absolute  # absolute path rejected
+
+
+def test_finalize_rejects_original_code_not_verbatim_in_cloned_file(tmp_path):
+    r"""Regression: the model saw json.dumps-escaped content and quoted "\u26a0" for a literal "⚠";
+    apply then failed at PR time with a misleading "source changed". Must be caught at submit."""
+    import pytest
+
+    from app.services.ai_remediation_agent import _finalize
+    from app.services.remediation_tools import SubmitFixProposalArgs
+
+    (tmp_path / "a.ts").write_text("const badge = '⚠ High-risk site';\n", encoding="utf-8")
+    ctx = ToolContext(provider="github", repo_full_name="o/r", branch="main", allowed_paths=["a.ts"],
+                      project_id="p", scan_id="s", trace_id="t", finding_context={"finding_id": "f"},
+                      workdir=str(tmp_path))
+
+    def submit(original):
+        return SubmitFixProposalArgs(finding_id="f", can_fix=True, confidence_score=90, file_path="a.ts",
+                                     original_code=original, patched_code="x", explanation="e")
+
+    with pytest.raises(ValueError, match="verbatim"):
+        _finalize(submit(r"const badge = '\u26a0 High-risk site';"), ctx)
+    assert _finalize(submit("const badge = '⚠ High-risk site';"), ctx).can_fix
+
+
+def test_tool_message_keeps_non_ascii_verbatim():
+    from app.services.ai_remediation_agent import _tool_message
+
+    assert "⚠" in _tool_message("id", {"content": "'⚠ x'"})["content"]

@@ -94,7 +94,10 @@ def _apply_patch(workdir: str, file_path: str, original_code: str, patched_code:
     text = target.read_text(encoding="utf-8", errors="replace")
     count = text.count(original_code)
     if count == 0:
-        raise _ManualReview("Source changed since the scan; regenerate the proposal.")
+        raise _ManualReview(
+            f"The proposal's original code was not found in {file_path}: the file changed since the scan, "
+            "or the AI quoted it inexactly. Regenerate the proposal."
+        )
     if count > 1:
         raise _ManualReview("The original code is not unique in the file; cannot apply deterministically.")
     target.write_text(text.replace(original_code, patched_code, 1), encoding="utf-8")
