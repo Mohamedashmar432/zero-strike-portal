@@ -433,6 +433,13 @@ async def _completion_with_config(
     )
 
     content = response.choices[0].message.content or ""
+    if getattr(response.choices[0], "finish_reason", None) == "length":
+        # Cut off at max_tokens. Without this the caller sees "no JSON object: ''" (JSON mode can
+        # return nothing at all for a truncated answer) and goes hunting for a provider problem.
+        raise LLMMalformedResponseError(
+            f"The model's answer was cut off at the {max_tokens}-token output limit; "
+            "reduce the batch size or raise the limit."
+        )
     return _extract_json(content)
 
 

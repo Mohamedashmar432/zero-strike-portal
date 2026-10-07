@@ -773,3 +773,19 @@ def test_connection_error_message_includes_provider_reason():
     assert msg.endswith("Provider said: Something odd about this request.")
     credit = llm_client.LLMPermanentError('{"message":"Your credit balance is too low to access the API."}')
     assert "no credit" in llm_client.connection_error_message(credit)
+
+
+def test_truncated_answer_reports_the_token_limit_not_an_empty_reply(client, monkeypatch):
+    async def fake_acompletion(**kwargs):
+        resp = _FakeResponse("")
+        resp.choices[0].finish_reason = "length"
+        return resp
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    async def run():
+        await _create_active_config(name="A", model_name="claude-haiku-4-5", api_key="sk-a")
+        with pytest.raises(llm_client.LLMMalformedResponseError, match="cut off at the 4000-token"):
+            await llm_client.get_completion([{"role": "user", "content": "hi"}], max_tokens=4000)
+
+    asyncio.run(run())

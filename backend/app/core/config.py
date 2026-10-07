@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     ai_queue_stuck_multiplier: int = 3
     # Per-attempt cap passed to litellm.acompletion — without this, a hung/slow provider
     # connection blocks the request indefinitely (litellm/httpx default to no timeout).
-    ai_llm_request_timeout_seconds: int = 60
+    # A 6000-token answer takes ~70s at hosted-model speeds (~90 tok/s), so 60s timed out the tail.
+    ai_llm_request_timeout_seconds: int = 120
     # Bounds concurrent per-rule-group LLM calls within a single job (ai_analysis_service).
     ai_analysis_concurrency: int = 3
     # Caps how many of a scan's findings (sorted by priority_score desc) get analyzed per scan-level job.
@@ -61,11 +62,14 @@ class Settings(BaseSettings):
     # Smaller for local providers — shorter prompt = faster, more reliable local response (mirrors
     # zero-strike-cli's SecurityAgentRunner batch sizing).
     ai_analysis_local_batch_size: int = 8
-    ai_analysis_cloud_batch_size: int = 40
+    # Each rule group needs ~500 output tokens from a hosted model (measured on Claude: 8 groups
+    # already overran 4000), so a batch of 40 can never fit in one answer. Keep batches small enough
+    # that the answer fits under ai_analysis_max_output_tokens within the request timeout.
+    ai_analysis_cloud_batch_size: int = 6
     # Caps the LLM's output on an enrichment call so a small local model doesn't run past its own
     # (often tiny) default output limit mid-JSON and truncate the response — the root cause of
     # findings silently going un-enriched. Generous: one enrichment object per rule in a batch.
-    ai_analysis_max_output_tokens: int = 4000
+    ai_analysis_max_output_tokens: int = 6000
     # Providers served by a local, resource-constrained runtime (LM Studio / a custom self-hosted
     # endpoint) — get the smaller batch size above.
     ai_analysis_local_providers: set[str] = {"lmstudio", "custom"}
