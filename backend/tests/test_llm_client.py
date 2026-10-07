@@ -728,14 +728,21 @@ def test_failover_rows_read_as_one_chain(client, monkeypatch):
     asyncio.run(run())
 
 
-def test_call_retries_without_temperature_when_model_rejects_it(monkeypatch):
+@pytest.mark.parametrize(
+    "message",
+    [
+        "`temperature` is deprecated for this model.",
+        "claude-opus-5-5 does not support temperature=0.0. Only temperature=1 is supported.",
+    ],
+)
+def test_call_retries_without_temperature_when_model_rejects_it(monkeypatch, message):
     calls = []
 
     async def fake(**kwargs):
         calls.append(dict(kwargs))
         if "temperature" in kwargs:
             raise litellm.BadRequestError(
-                message="`temperature` is deprecated for this model.", model="m", llm_provider="anthropic"
+                message=message, model="m", llm_provider="anthropic"
             )
         return "ok"
 

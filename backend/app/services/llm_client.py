@@ -212,7 +212,9 @@ async def _call_acompletion(**kwargs):
         # Newer Anthropic models (e.g. Opus 5.5) 400 on any `temperature` ("is deprecated for this
         # model"). litellm's param tables lag new models, so retry once without it rather than
         # keeping a model list here.
-        if "temperature" in kwargs and "temperature" in str(exc).lower() and "deprecated" in str(exc).lower():
+        # Two wordings in the wild: Anthropic's "`temperature` is deprecated for this model" and
+        # litellm's own pre-flight "does not support temperature=0.0. Only temperature=1 ...".
+        if "temperature" in kwargs and "temperature" in str(exc).lower():
             kwargs.pop("temperature")
             return await litellm.acompletion(**kwargs)
         raise
