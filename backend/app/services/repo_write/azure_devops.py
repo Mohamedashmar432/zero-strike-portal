@@ -10,6 +10,16 @@ import httpx
 from app.services.repo_write import RepoWriteError
 
 API_VERSION = "7.1"
+# Azure DevOps rejects a PR whose description exceeds 4000 chars (GitHub allows ~65k). A batch PR's
+# summary table + per-fix sections passes that easily, which left a pushed branch with no PR.
+MAX_DESCRIPTION = 4000
+_TRUNCATED_NOTE = "\n\n_…description truncated to Azure DevOps' 4000-character limit; see the thinkShield portal._"
+
+
+def _fit_description(text: str) -> str:
+    if len(text) <= MAX_DESCRIPTION:
+        return text
+    return text[: MAX_DESCRIPTION - len(_TRUNCATED_NOTE)] + _TRUNCATED_NOTE
 
 
 def _headers(token: str, auth_scheme: str) -> dict:
@@ -54,7 +64,7 @@ async def open_pull_request(
         "sourceRefName": f"refs/heads/{source_branch}",
         "targetRefName": f"refs/heads/{target_branch}",
         "title": title,
-        "description": description,
+        "description": _fit_description(description),
     }
     async with httpx.AsyncClient() as client:
         resp = await client.post(

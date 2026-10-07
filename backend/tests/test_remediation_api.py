@@ -506,6 +506,13 @@ def test_revise_enqueues_propose_with_note_and_records_conversation(client, monk
     job = asyncio.run(_job())
     assert job is not None
     assert job.finding_ids == [fid]
+    # Regression: without force the propose worker skipped the finding ("already has a proposal")
+    # and the revision silently did nothing.
+    assert job.force is True
+    # The scan view must report the per-finding job as active, or the page stops polling and the
+    # regenerated proposal never appears without a reload.
+    s = client.get(f"/api/v1/scans/{scan_id}/auto-fix", headers=_headers(owner))
+    assert s.json()["status"] in ("queued", "in_progress")
 
     g = client.get(f"/api/v1/fix-proposals/{pid}/conversation", headers=_headers(owner))
     msgs = g.json()["messages"]

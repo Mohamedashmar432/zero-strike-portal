@@ -450,7 +450,15 @@ async def trigger_scan_auto_fix(
 @router.get("/scans/{scan_id}/auto-fix", response_model=ScanAutoFixResponse)
 async def get_scan_auto_fix(scan_id: str, user: User = Depends(get_current_user)):
     await _get_scan_or_404_and_authorize(scan_id, user)
-    job = await _latest_job(f"{scan_id}:propose")
+    # A single-finding generate/revise runs under its own scope key ("{scan}:propose:{finding}"),
+    # so report it while it runs: the page polls on this status, and without it a regenerated
+    # proposal never appeared until a manual reload.
+    active = await RemediationJob.find(
+        RemediationJob.scan_id == scan_id,
+        RemediationJob.kind == "propose",
+        In(RemediationJob.status, ["queued", "running"]),
+    ).first_or_none()
+    job = active or await _latest_job(f"{scan_id}:propose")
     return await _scan_response(scan_id, job)
 
 
@@ -585,6 +593,9 @@ async def trigger_finding_auto_fix(
         project_id=finding.project_id,
         scan_id=finding.scan_id,
         finding_ids=[str(finding.id)],
+        # A one-finding request is an explicit redraft; the "already has a proposal" skip is for
+        # the scan-wide trigger only. Without this a re-request silently did nothing.
+        force=True,
         scope_key=scope_key,
         trace_id=uuid.uuid4().hex,
         created_by=str(user.id),
@@ -950,6 +961,7 @@ async def revise_fix_proposal(
         scan_id=proposal.scan_id,
         finding_ids=[proposal.finding_id],
         revision_note=instruction,
+        force=True,  # a revision always redrafts; see trigger_finding_auto_fix
         scope_key=scope_key,
         trace_id=uuid.uuid4().hex,
         created_by=str(user.id),

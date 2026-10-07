@@ -412,3 +412,56 @@ def test_pr_step_refusal_sets_job_error_notifies_and_audits_the_finding(client, 
         assert rows and rows[0].metadata["finding_id"] == proposal.finding_id
 
     asyncio.run(run())
+
+
+def test_apply_azure_devops_opens_pr_with_description_within_ado_limit(client, monkeypatch):
+    """The ADO path end to end through the real ADO client (HTTP mocked): repo GUID lookup, PR
+    create, PAT as Basic auth, PR link built from the response -- and a description that would
+    exceed ADO's 4000-char cap is truncated rather than failing the PR after the branch is pushed."""
+    import json
+
+    import httpx
+
+    from app.services.repo_write import azure_devops as ado_write
+
+    _install_git_mocks(monkeypatch, post_findings=[])
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "repo-guid"})
+        return httpx.Response(201, json={
+            "pullRequestId": 7,
+            "repository": {"webUrl": "https://dev.azure.com/org/proj/_git/repo"},
+        })
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(ado_write.httpx, "AsyncClient",
+                        lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+
+    async def run():
+        proposal, job = await _seed(pat="ado-pat", provider="azure_devops", repo_full_name="proj/repo")
+        repo = await ProjectRepo.get((await Scan.get(proposal.scan_id)).project_repo_id)
+        repo.organization, repo.ado_project = "org", "proj"
+        await repo.save()
+        proposal.explanation = "x" * 6000  # renders into the PR body
+        await proposal.save()
+
+        await apply_svc.run_job(job)
+        reloaded = await AIFixProposal.get(proposal.id)
+        assert reloaded.review_state == "pr_open", reloaded.manual_review_reason
+        assert reloaded.pr_url == "https://dev.azure.com/org/proj/_git/repo/pullrequest/7"
+        assert reloaded.pr_number == 7 and reloaded.pr_provider == "azure_devops"
+
+        lookup, create = calls
+        assert lookup.url.path == "/org/proj/_apis/git/repositories/repo"
+        assert create.url.path == "/org/proj/_apis/git/repositories/repo-guid/pullrequests"
+        assert create.headers["authorization"].startswith("Basic ")
+        body = json.loads(create.content)
+        assert body["targetRefName"] == "refs/heads/main"
+        assert body["sourceRefName"] == f"refs/heads/{reloaded.branch_name}"
+        assert len(body["description"]) <= ado_write.MAX_DESCRIPTION
+        assert "truncated" in body["description"]
+
+    asyncio.run(run())
