@@ -14,7 +14,7 @@ from beanie.operators import In
 
 from app.core.compliance_catalog import SUPPORTED_FRAMEWORK_KEYS
 from app.core.config import settings
-from app.core.job_queue import claim_next, reap_stuck
+from app.core.job_queue import claim_next, drain_lock, reap_stuck
 from app.models.compliance_audit import ComplianceAudit
 from app.models.project import Project
 from app.models.scan import Scan
@@ -46,12 +46,13 @@ async def _capacity() -> int:
 
 async def drain_queue() -> None:
     """Claim and start as many queued audits as current capacity allows."""
-    capacity = await _capacity()
-    for _ in range(capacity):
-        audit = await claim_next(ComplianceAudit, queued_status="queued", running_status="running")
-        if audit is None:
-            break
-        _track(asyncio.create_task(compliance_audit_service.run_job(audit)))
+    async with drain_lock("compliance"):
+        capacity = await _capacity()
+        for _ in range(capacity):
+            audit = await claim_next(ComplianceAudit, queued_status="queued", running_status="running")
+            if audit is None:
+                break
+            _track(asyncio.create_task(compliance_audit_service.run_job(audit)))
 
 
 async def reap_stuck_audits() -> None:

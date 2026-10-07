@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
+import { QueueNotice } from "@/components/queue/queue-notice";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -345,7 +346,7 @@ export function FindingItem({
                   </h6>
                   {/* Progress for single-finding analysis: QUEUED → ANALYZING → (self-hides).
                       Mirrors the bulk badge so the user sees it's working, not stuck. */}
-                  <AiStatusBadge status={analysis?.status} startedAt={analysis?.started_at} />
+                  <AiStatusBadge status={analysis?.status} startedAt={analysis?.started_at} refId={finding.fingerprint} />
                 </div>
                 {isAnalyzing && (
                   <div className="space-y-2">
@@ -601,8 +602,9 @@ export default function ScanDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">{scan.scan_label || "Scan"}</h1>
             <ScanTypeBadge scanType={scan.scan_type} />
-            <ScanStatusBadge status={scan.status} />
+            <ScanStatusBadge status={scan.status} scanId={scan.id} />
             <AiStatusBadge
+              refId={scanId}
               status={scanAnalysis?.status}
               startedAt={scanAnalysis?.started_at}
               progressCompleted={scanAnalysis?.progress_completed}
@@ -676,7 +678,9 @@ export default function ScanDetailPage() {
         </Alert>
       )}
 
-      {!completed && scan.status !== "failed" && (
+      {scan.status === "queued" && <QueueNotice kind="cloud_scan" refId={scan.id} />}
+
+      {!completed && scan.status !== "failed" && scan.status !== "queued" && (
         <Alert>
           <AlertTitle>{scan.status === "running" ? "Scan in progress" : "Waiting for the scanner"}</AlertTitle>
           <AlertDescription>
@@ -743,13 +747,17 @@ export default function ScanDetailPage() {
                 <CardTitle className="text-sm font-normal text-muted-foreground">AI Analysis</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {scanAnalysisLoading && (
-                  <Alert>
-                    <AlertTitle>Analyzing findings…</AlertTitle>
-                    <AlertDescription>
-                      This runs in the background — this page updates automatically.
-                    </AlertDescription>
-                  </Alert>
+                {scanAnalysisStatus === "queued" ? (
+                  <QueueNotice kind="ai_analysis" refId={scanId} />
+                ) : (
+                  scanAnalysisLoading && (
+                    <Alert>
+                      <AlertTitle>Analyzing findings…</AlertTitle>
+                      <AlertDescription>
+                        This runs in the background — this page updates automatically.
+                      </AlertDescription>
+                    </Alert>
+                  )
                 )}
                 {scanAnalysisStatus === "completed" && scanAnalysis.insight && (
                   <>

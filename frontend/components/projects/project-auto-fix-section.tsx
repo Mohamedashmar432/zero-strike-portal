@@ -5,6 +5,7 @@ import { Download, MessageSquare, Wand2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { QueueNotice } from "@/components/queue/queue-notice";
 import { ActivityTimeline } from "@/components/auto-fix/activity-timeline";
 import { AutoFixQuotaMeter } from "@/components/auto-fix/auto-fix-quota-meter";
 import { AutoFixWorkspace } from "@/components/auto-fix/auto-fix-workspace";
@@ -168,6 +169,7 @@ export function ProjectAutoFixSection({
           )}
           <AiStatusBadge
             kind="autofix"
+            refId={scanId}
             status={status}
             startedAt={data?.started_at}
             progressCompleted={data?.progress_completed}
@@ -210,7 +212,9 @@ export function ProjectAutoFixSection({
           <AlertDescription>{data?.error_message ?? "Please try again."}</AlertDescription>
         </Alert>
       )}
-      {active && (
+      {status === "queued" ? (
+        <QueueNotice kind="remediation" refId={scanId} />
+      ) : active && (
         <Alert>
           <AlertTitle>Generating fixes…</AlertTitle>
           <AlertDescription>This runs in the background — the page updates automatically.</AlertDescription>

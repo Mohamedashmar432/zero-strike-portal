@@ -1,4 +1,6 @@
+import { QueueTag } from "@/components/queue/queue-tag";
 import type { AiAnalysisStatus } from "@/lib/api/ai";
+import type { QueueKind } from "@/lib/api/operations";
 import { cn } from "@/lib/utils";
 
 // Only the states worth surfacing as a tag next to a scan. "completed"/"not_requested" show
@@ -11,6 +13,12 @@ const CLASS: Record<"queued" | "in_progress" | "failed", string> = {
 };
 
 type BadgeKind = "analysis" | "autofix" | "audit";
+
+const QUEUE_KIND: Record<BadgeKind, QueueKind> = {
+  analysis: "ai_analysis",
+  autofix: "remediation",
+  audit: "compliance",
+};
 
 const LABEL: Record<BadgeKind, Record<"queued" | "in_progress" | "failed", string>> = {
   analysis: { queued: "AI QUEUED", in_progress: "AI ANALYZING", failed: "AI FAILED" },
@@ -48,6 +56,7 @@ export function AiStatusBadge({
   progressCompleted = 0,
   progressTotal = 0,
   kind = "analysis",
+  refId,
   className,
 }: {
   status: AiAnalysisStatus | null | undefined;
@@ -57,6 +66,9 @@ export function AiStatusBadge({
   // Swaps the label set: "analysis" (default), "autofix" (fix-generation job) or
   // "audit" (compliance audit job).
   kind?: BadgeKind;
+  // What the job belongs to — the scan id (analysis, autofix), the audit id (audit), or a finding's
+  // fingerprint (single-finding analysis). Given, a queued badge adds "· #2 · 1:23".
+  refId?: string | null;
   className?: string;
 }) {
   if (status !== "queued" && status !== "in_progress" && status !== "failed") return null;
@@ -72,6 +84,7 @@ export function AiStatusBadge({
       {status === "in_progress" && <span className="size-1.5 animate-pulse rounded-sm bg-current" />}
       {LABEL[kind][status]}
       {progress && <span className="normal-case opacity-80">· {progress}</span>}
+      {status === "queued" && refId && <QueueTag kind={QUEUE_KIND[kind]} refId={refId} />}
     </span>
   );
 }

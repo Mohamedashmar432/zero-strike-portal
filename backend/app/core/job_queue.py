@@ -11,9 +11,29 @@ reimplementing atomic claim + crash-recovery reap:
   timeout: requeue if there's retry budget left, otherwise terminally fail (dead-letter).
 """
 
+import asyncio
+import weakref
 from datetime import datetime, timedelta, timezone
 
 from pymongo import ReturnDocument
+
+_drain_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def drain_lock(queue: str) -> asyncio.Lock:
+    """Serializes one queue's drain within this process. A drain reads free capacity, then claims —
+    read-then-write — and is called from the poll loop *and* whenever a job finishes or is created,
+    so two overlapping drains could both see the same free slot and push the queue past its cap.
+
+    Keyed by event loop because an asyncio.Lock binds to the loop it first waits on (tests run one
+    loop per test).
+    ponytail: per-process lock — exact on our single replica. Several replicas would need a
+    Mongo-side slot counter ($inc guarded by $lt cap) instead.
+    """
+    locks = _drain_locks.setdefault(asyncio.get_running_loop(), {})
+    return locks.setdefault(queue, asyncio.Lock())
 
 
 async def claim_next(model, queued_status: str, running_status: str, extra_unset: dict | None = None):

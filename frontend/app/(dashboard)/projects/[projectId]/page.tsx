@@ -37,6 +37,7 @@ import {
   type InviteMemberInput,
 } from "@/lib/validation/project.schema";
 import { reauthRepoSchema, type ReauthRepoInput } from "@/lib/validation/repo-credential.schema";
+import { QueueTag } from "@/components/queue/queue-tag";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { RelativeTime } from "@/components/common/relative-time";
 import { EmptyState } from "@/components/common/empty-state";
@@ -544,8 +545,9 @@ function ScansTab({ projectId }: { projectId: string }) {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
-                      <ScanStatusBadge status={s.status} />
+                      <ScanStatusBadge status={s.status} scanId={s.id} />
                       <AiStatusBadge
+                        refId={s.id}
                         status={s.ai_analysis_status}
                         startedAt={s.ai_analysis_started_at}
                         progressCompleted={s.ai_analysis_progress_completed}
@@ -900,6 +902,10 @@ function RepositoriesTab({
                     <Badge variant="secondary" className="ml-2 font-mono uppercase">
                       Behind
                     </Badge>
+                  )}
+                  {/* A sync waiting for a cloud-scan slot says so, with its place and countdown. */}
+                  {r.sync_state === "syncing" && r.active_scan_id && (
+                    <QueueTag kind="cloud_scan" refId={r.active_scan_id} standalone className="ml-2" />
                   )}
                 </TableCell>
                 <TableCell className="text-xs">

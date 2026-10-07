@@ -365,8 +365,9 @@ export default function DashboardPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <ScanStatusBadge status={scan.status} />
+                        <ScanStatusBadge status={scan.status} scanId={scan.scan_id} />
                         <AiStatusBadge
+                          refId={scan.scan_id}
                           status={scan.ai_analysis_status}
                           startedAt={scan.ai_analysis_started_at}
                           progressCompleted={scan.ai_analysis_progress_completed}

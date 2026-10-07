@@ -11,7 +11,7 @@ from datetime import timedelta
 import structlog
 
 from app.core.config import settings
-from app.core.job_queue import claim_next, reap_stuck
+from app.core.job_queue import claim_next, drain_lock, reap_stuck
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.services import ai_analysis_service
 
@@ -47,13 +47,14 @@ async def _claim_next() -> AIAnalysisJob | None:
 
 async def drain_queue() -> None:
     """Claim and start as many queued AI jobs as current capacity allows."""
-    capacity = await _capacity()
-    for _ in range(capacity):
-        job = await _claim_next()
-        if job is None:
-            break
-        task = asyncio.create_task(ai_analysis_service.run_job(job))
-        _track(task)
+    async with drain_lock("ai_analysis"):
+        capacity = await _capacity()
+        for _ in range(capacity):
+            job = await _claim_next()
+            if job is None:
+                break
+            task = asyncio.create_task(ai_analysis_service.run_job(job))
+            _track(task)
 
 
 async def reap_stuck_ai_jobs() -> None:

@@ -177,6 +177,7 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
           </p>
           <AiStatusBadge
             kind="audit"
+            refId={active.id}
             status={active.status}
             startedAt={active.started_at}
             progressCompleted={active.progress_completed}
@@ -325,6 +326,7 @@ export function ProjectComplianceFrameworksSection({ projectId }: { projectId: s
                 <div className="flex shrink-0 items-center gap-2">
                   <AiStatusBadge
                     kind="audit"
+                    refId={audit.id}
                     status={audit.status}
                     startedAt={audit.started_at}
                     progressCompleted={audit.progress_completed}

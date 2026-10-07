@@ -27,6 +27,7 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
+import { QueueNotice } from "@/components/queue/queue-notice";
 import { ControlStatusBadge } from "@/components/compliance/control-status-badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -1015,6 +1016,7 @@ export default function ComplianceAuditPage() {
             {audit && (
               <AiStatusBadge
                 kind="audit"
+                refId={audit.id}
                 status={audit.status}
                 startedAt={audit.started_at}
                 progressCompleted={audit.progress_completed}
@@ -1037,6 +1039,8 @@ export default function ComplianceAuditPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {audit?.status === "queued" && <QueueNotice kind="compliance" refId={auditId} />}
 
       <DataTableCard
         bare

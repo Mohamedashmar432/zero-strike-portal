@@ -102,6 +102,7 @@ export function ProjectAutoFixList({ projectId }: { projectId: string }) {
                 <TableCell>
                   <AiStatusBadge
                     kind="autofix"
+                    refId={item.scan_id}
                     status={item.status}
                     startedAt={item.started_at}
                     progressCompleted={item.progress_completed}

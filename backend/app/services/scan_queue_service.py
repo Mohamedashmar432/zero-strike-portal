@@ -15,7 +15,7 @@ from datetime import timedelta
 import structlog
 
 from app.core.config import settings
-from app.core.job_queue import claim_next, reap_stuck
+from app.core.job_queue import claim_next, drain_lock, reap_stuck
 from app.models.scan import Scan
 from app.services import cloud_scan_service, workdir_hygiene
 
@@ -62,15 +62,16 @@ async def _claim_next() -> Scan | None:
 
 async def drain_queue() -> None:
     """Claim and start as many queued cloud scans as current capacity allows."""
-    capacity = await _capacity()
-    for _ in range(capacity):
-        scan = await _claim_next()
-        if scan is None:
-            break
-        task = asyncio.create_task(
-            cloud_scan_service.run_cloud_scan(str(scan.id), scan.repo_token, scan.repo_token_auth_scheme)
-        )
-        _track(task)
+    async with drain_lock("cloud_scan"):
+        capacity = await _capacity()
+        for _ in range(capacity):
+            scan = await _claim_next()
+            if scan is None:
+                break
+            task = asyncio.create_task(
+                cloud_scan_service.run_cloud_scan(str(scan.id), scan.repo_token, scan.repo_token_auth_scheme)
+            )
+            _track(task)
 
 
 async def reap_stuck_scans() -> None:

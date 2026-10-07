@@ -1,3 +1,4 @@
+import { NextQueuedTag } from "@/components/queue/queue-tag";
 import { cn } from "@/lib/utils";
 import type { ScanStatusCounts } from "@/lib/api/projects";
 import type { ScanStatus } from "@/lib/api/scans";
@@ -14,7 +15,8 @@ const STATUS_PILL_CLASS: Record<ScanStatus, string> = {
 
 // Only shows non-zero, non-"completed" buckets by default — a pile of completed scans
 // isn't interesting on a list page; in-flight/failed scans are what need attention.
-export function ScanStatusSummaryPills({ counts }: { counts: ScanStatusCounts }) {
+// projectId, when given, lets the queued pill say when that project's next cloud scan should start.
+export function ScanStatusSummaryPills({ counts, projectId }: { counts: ScanStatusCounts; projectId?: string }) {
   const nonZero = STATUS_ORDER.filter((status) => counts[status] > 0);
   if (nonZero.length === 0) {
     return <span className="text-xs text-muted-foreground">{counts.completed > 0 ? `${counts.completed} completed` : "No scans"}</span>;
@@ -31,6 +33,7 @@ export function ScanStatusSummaryPills({ counts }: { counts: ScanStatusCounts })
           )}
         >
           {counts[status]} {status}
+          {status === "queued" && projectId && <NextQueuedTag kind="cloud_scan" projectId={projectId} />}
         </span>
       ))}
     </div>

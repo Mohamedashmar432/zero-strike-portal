@@ -171,7 +171,7 @@ function ProjectsPageContent() {
                           {s.current_findings}
                           <span className="legend ml-1.5 text-muted-foreground">open findings</span>
                         </span>
-                        <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                        <ScanStatusSummaryPills counts={s.scan_status_counts} projectId={s.project_id} />
                       </div>
                       <SeveritySpectrum counts={s.current_findings_by_severity} />
                       <SeverityCountPills counts={s.current_findings_by_severity} />
@@ -243,7 +243,7 @@ function ProjectsPageContent() {
                       </TableCell>
                       <TableCell className="readout text-foreground">{s.current_findings}</TableCell>
                       <TableCell>
-                        <ScanStatusSummaryPills counts={s.scan_status_counts} />
+                        <ScanStatusSummaryPills counts={s.scan_status_counts} projectId={s.project_id} />
                       </TableCell>
                       <TableCell>
                         {s.risk_repo_count > 0 ? (

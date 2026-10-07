@@ -1,4 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
+import { QueueTag } from "@/components/queue/queue-tag";
 import { cn } from "@/lib/utils";
 
 const scanStatusBadgeVariants = cva(
@@ -19,15 +20,18 @@ const scanStatusBadgeVariants = cva(
 
 type ScanStatusBadgeProps = VariantProps<typeof scanStatusBadgeVariants> & {
   className?: string;
+  // Given, a queued (cloud) scan also shows its place in line and start countdown: "QUEUED · #2 · 1:23".
+  scanId?: string;
 };
 
-export function ScanStatusBadge({ status = "pending", className }: ScanStatusBadgeProps) {
+export function ScanStatusBadge({ status = "pending", className, scanId }: ScanStatusBadgeProps) {
   return (
     <span className={cn(scanStatusBadgeVariants({ status }), className)}>
       {/* Running gets a breathing halo rather than a spinner — a spinner in a
           table cell implies "this row is loading", which is a different fact. */}
       {status === "running" && <span className="pulse-signal size-1.5 rounded-full bg-current" />}
       {status}
+      {status === "queued" && scanId && <QueueTag kind="cloud_scan" refId={scanId} />}
     </span>
   );
 }

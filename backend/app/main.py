@@ -31,6 +31,7 @@ from app.routers import (
     dashboard,
     downloads,
     notifications,
+    operations,
     projects,
     public_repos,
     repo_lookup,
@@ -168,6 +169,8 @@ def create_app() -> FastAPI:
     app.include_router(workspace_settings.router, prefix="/api/v1")
     app.include_router(workspace_settings.project_router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")
+    app.include_router(operations.router, prefix="/api/v1")
+    app.include_router(operations.queue_router, prefix="/api/v1")
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

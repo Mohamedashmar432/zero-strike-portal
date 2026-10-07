@@ -192,6 +192,17 @@ Emission sites sit alongside existing `audit_service.record` calls. Email routes
 `email_service`, which no-ops while `smtp_host` is unset (the default everywhere today) — the
 notifications page says so rather than implying mail is going out.
 
+**Operations: queue positions and load** (`services/operations_service.py`, `services/system_metrics.py`;
+see `docs/OPERATIONS_AND_QUEUEING.md`): a read-only view over all four queues (cloud scan, AI analysis,
+auto-fix, compliance). It never claims or changes a job. `estimate_starts()` is the pure function behind every
+"starts in ~m:ss" countdown, from each queue's recent average run (runs under 1s ignored, a fixed default
+until 3 real ones exist). Two surfaces: `GET /queue` (the caller's projects, all for an admin; feeds the
+"QUEUED · #2 · 1:23" tag that `ScanStatusBadge scanId=…` / `AiStatusBadge refId=…` render anywhere a job
+can be queued — pass the id on any new list) and `GET /admin/operations` (admins; plus cgroup-v2
+CPU/memory and 24h failures). Every queue's `drain_queue()` holds `job_queue.drain_lock(name)`: capacity-read-then-claim
+raced between the poll loop and job completion and overshot the cap. The lock is per-process, which is exact
+on the single replica we run.
+
 **Scanner binary distribution** (self-hosted, so bootstrapping a CI runner needs no
 portal credentials): `download_service.py` + `models/scanner_binary.py` store built
 `zerostrike` binaries in MongoDB GridFS (bucket `scanner_binaries`); `routers/downloads.py`
