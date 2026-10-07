@@ -17,8 +17,11 @@ async def validate_pat(provider: str, pat: str, organization: str, ado_project: 
     """Raises RepoPatError if the token can't actually list repos for this provider/org."""
     if provider == "github":
         await github.list_repos(pat)
-    else:
+    elif ado_project:
         await azure_devops.list_repos(pat, organization, ado_project)
+    else:
+        # Org-wide credential: the project is picked per connection, so prove org access instead.
+        await azure_devops.list_projects(pat, organization)
 
 
 async def create_credential(
@@ -70,18 +73,45 @@ def decrypt_pat(credential: RepoCredential) -> str:
     return security.decrypt_secret(credential.pat_encrypted)
 
 
-async def list_repos(user: User, credential_id: str, *, query: str | None = None, page: int = 1) -> list[dict]:
+def _ado_project(credential: RepoCredential, ado_project: str | None) -> str:
+    """The caller's pick wins; a legacy credential saved against one project falls back to it."""
+    project = ado_project or credential.ado_project
+    if not project:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose an Azure DevOps project first")
+    return project
+
+
+async def list_projects(user: User, credential_id: str) -> list[dict]:
+    credential = await get_own_credential_or_404(user, credential_id)
+    if credential.provider != "azure_devops":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only Azure DevOps credentials have projects")
+    try:
+        return await azure_devops.list_projects(decrypt_pat(credential), credential.organization)
+    except RepoPatError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+
+
+async def list_repos(
+    user: User,
+    credential_id: str,
+    *,
+    query: str | None = None,
+    page: int = 1,
+    ado_project: str | None = None,
+) -> list[dict]:
     credential = await get_own_credential_or_404(user, credential_id)
     pat = decrypt_pat(credential)
     try:
         if credential.provider == "github":
             return await github.list_repos(pat, query, page)
-        return await azure_devops.list_repos(pat, credential.organization, credential.ado_project)
+        return await azure_devops.list_repos(pat, credential.organization, _ado_project(credential, ado_project))
     except RepoPatError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 
 
-async def list_branches(user: User, credential_id: str, repo_id: str) -> list[dict]:
+async def list_branches(
+    user: User, credential_id: str, repo_id: str, *, ado_project: str | None = None
+) -> list[dict]:
     """repo_id means "owner/repo" for GitHub, or the repo GUID for Azure DevOps."""
     credential = await get_own_credential_or_404(user, credential_id)
     pat = decrypt_pat(credential)
@@ -89,6 +119,8 @@ async def list_branches(user: User, credential_id: str, repo_id: str) -> list[di
         if credential.provider == "github":
             owner, _, repo = repo_id.partition("/")
             return await github.list_branches(pat, owner, repo)
-        return await azure_devops.list_branches(pat, credential.organization, credential.ado_project, repo_id)
+        return await azure_devops.list_branches(
+            pat, credential.organization, _ado_project(credential, ado_project), repo_id
+        )
     except RepoPatError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))

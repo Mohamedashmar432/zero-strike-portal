@@ -4,6 +4,7 @@ from app.core.deps import get_current_user
 from app.models.repo_credential import RepoCredential
 from app.models.user import User
 from app.schemas.repo_credential import (
+    AdoProjectResponse,
     BranchResponse,
     RepoCredentialCreateRequest,
     RepoCredentialResponse,
@@ -58,18 +59,31 @@ async def delete_credential(credential_id: str, user: User = Depends(get_current
     )
 
 
+@router.get("/{credential_id}/projects", response_model=list[AdoProjectResponse])
+async def list_projects(credential_id: str, user: User = Depends(get_current_user)):
+    return [AdoProjectResponse(**p) for p in await repo_credential_service.list_projects(user, credential_id)]
+
+
 @router.get("/{credential_id}/repos", response_model=list[RepoResponse])
 async def list_repos(
     credential_id: str,
     query: str | None = Query(None),
     page: int = Query(1, ge=1),
+    ado_project: str | None = Query(None),
     user: User = Depends(get_current_user),
 ):
-    repos = await repo_credential_service.list_repos(user, credential_id, query=query, page=page)
+    repos = await repo_credential_service.list_repos(
+        user, credential_id, query=query, page=page, ado_project=ado_project
+    )
     return [RepoResponse(**r) for r in repos]
 
 
 @router.get("/{credential_id}/repos/{repo_id:path}/branches", response_model=list[BranchResponse])
-async def list_branches(credential_id: str, repo_id: str, user: User = Depends(get_current_user)):
-    branches = await repo_credential_service.list_branches(user, credential_id, repo_id)
+async def list_branches(
+    credential_id: str,
+    repo_id: str,
+    ado_project: str | None = Query(None),
+    user: User = Depends(get_current_user),
+):
+    branches = await repo_credential_service.list_branches(user, credential_id, repo_id, ado_project=ado_project)
     return [BranchResponse(**b) for b in branches]

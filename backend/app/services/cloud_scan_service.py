@@ -118,6 +118,11 @@ def git_hardening_entries(repo_url: str, ips: list[str] | None) -> list[tuple[st
         ("protocol.https.allow", "always"),
         ("protocol.http.allow", "always"),
         ("http.followRedirects", "false"),
+        # An empty value resets the helper list. Without it the host's helper (Git Credential Manager
+        # on Windows) answered a 401: it popped a sign-in dialog nobody would ever click, holding a
+        # scan slot until the timeout, and could have handed the host's stored credentials to a URL a
+        # portal user chose. GIT_TERMINAL_PROMPT=0 only silences terminal prompts, not helpers.
+        ("credential.helper", ""),
     ]
     if ips:
         parsed = urlparse(repo_url)
@@ -125,6 +130,24 @@ def git_hardening_entries(repo_url: str, ips: list[str] | None) -> list[tuple[st
         ip = f"[{ips[0]}]" if ":" in ips[0] else ips[0]
         entries.append(("http.curloptResolve", f"{parsed.hostname}:{port}:{ip}"))
     return entries
+
+
+_CLONE_HINTS = [
+    # git asks for a username when the server answered 401/404 to an anonymous clone — which is what
+    # GitHub and Azure DevOps both do for a private repo *and* for one that does not exist.
+    (("could not read username", "authentication failed", "repository not found", "terminal prompts disabled"),
+     "Repository not found, or it is private and needs an access token with read access. "),
+    (("remote branch", "not found in upstream"), "That branch does not exist in the repository. "),
+]
+
+
+def clone_failure_hint(git_stderr: str) -> str:
+    """A plain-language cause put in front of git's own message, which stays for diagnosis."""
+    low = git_stderr.lower()
+    for needles, hint in _CLONE_HINTS:
+        if any(n in low for n in needles):
+            return hint
+    return ""
 
 
 def _sanitize(message: str, repo_token: str | None) -> str:
@@ -279,7 +302,7 @@ async def _clone(
             message = err.decode(errors="replace")
             if _is_transient_git_error(message):
                 raise _TransientCloneError(f"git clone failed (exit {rc}): {message}")
-            raise CloudScanError(f"git clone failed (exit {rc}): {message}")
+            raise CloudScanError(f"{clone_failure_hint(message)}git clone failed (exit {rc}): {message}")
 
     await _do_clone()
 

@@ -62,14 +62,71 @@ def test_create_github_credential_validates_and_stores_encrypted(client, monkeyp
     asyncio.run(_check())
 
 
-def test_create_azure_devops_credential_requires_ado_project(client):
+def test_org_wide_azure_devops_credential_browses_project_then_repo_then_branch(client, monkeypatch):
+    """Org + PAT is enough: the credential validates by listing projects, and the project is
+    chosen per request — then carried onto the connected repo."""
+
+    async def _fake_projects(pat, org):
+        assert (pat, org) == ("ado-pat", "myorg")
+        return [{"id": "p1", "name": "Alpha", "description": None}, {"id": "p2", "name": "Beta Team"}]
+
+    async def _fake_ado_branches(pat, org, project, repo_id):
+        assert (project, repo_id) == ("Beta Team", "guid-1")
+        return [{"name": "main"}]
+
+    monkeypatch.setattr(azure_devops, "list_projects", _fake_projects)
+    monkeypatch.setattr(azure_devops, "list_repos", _fake_azure_list_repos)
+    monkeypatch.setattr(azure_devops, "list_branches", _fake_ado_branches)
     owner = register_and_login(client, email="pat2@zerostrike.dev")
+    h = _headers(owner)
+
     r = client.post(
         "/api/v1/repo-credentials",
         json={"provider": "azure_devops", "pat": "ado-pat", "organization": "myorg"},
-        headers=_headers(owner),
+        headers=h,
     )
-    assert r.status_code == 422
+    assert r.status_code == 201
+    cred = r.json()
+    assert cred["ado_project"] is None
+
+    projects = client.get(f"/api/v1/repo-credentials/{cred['id']}/projects", headers=h).json()
+    assert [p["name"] for p in projects] == ["Alpha", "Beta Team"]
+
+    # No project picked and none saved on the credential: a readable 400, not a call to ADO.
+    assert client.get(f"/api/v1/repo-credentials/{cred['id']}/repos", headers=h).status_code == 400
+
+    base = f"/api/v1/repo-credentials/{cred['id']}/repos"
+    repos = client.get(base, params={"ado_project": "Beta Team"}, headers=h).json()
+    assert repos[0]["full_name"] == "Beta Team/repo"
+    branches = client.get(f"{base}/guid-1/branches", params={"ado_project": "Beta Team"}, headers=h).json()
+    assert branches == [{"name": "main"}]
+
+    project = client.post("/api/v1/projects", json={"name": "ado-proj"}, headers=h).json()
+    connect = {
+        "credential_id": cred["id"],
+        "repo_full_name": repos[0]["full_name"],
+        "clone_url": repos[0]["clone_url"],
+        "selected_branch": "main",
+    }
+    r = client.post(f"/api/v1/projects/{project['id']}/repos", json=connect, headers=h)
+    assert r.status_code == 400  # an org-wide credential must say which project
+    r = client.post(
+        f"/api/v1/projects/{project['id']}/repos", json={**connect, "ado_project": "Beta Team"}, headers=h
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["ado_project"] == "Beta Team"
+
+
+def test_projects_endpoint_is_azure_devops_only(client, monkeypatch):
+    monkeypatch.setattr(github, "list_repos", _fake_github_list_repos)
+    owner = register_and_login(client, email="pat2b@zerostrike.dev")
+    cred = client.post(
+        "/api/v1/repo-credentials",
+        json={"provider": "github", "pat": "ghp_secret", "organization": "octocat"},
+        headers=_headers(owner),
+    ).json()
+    r = client.get(f"/api/v1/repo-credentials/{cred['id']}/projects", headers=_headers(owner))
+    assert r.status_code == 400
 
 
 def test_create_credential_bad_pat_is_400(client, monkeypatch):

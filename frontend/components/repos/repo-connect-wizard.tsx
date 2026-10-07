@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApiError } from "@/lib/api/client";
 import { addProjectRepo, type ProjectRepo } from "@/lib/api/project-repos";
@@ -21,6 +22,7 @@ import { lookupGithubRepo } from "@/lib/api/repo-lookup";
 import { queryKeys } from "@/lib/api/query-keys";
 import {
   listCredentialBranches,
+  listCredentialProjects,
   listCredentialRepos,
   listRepoCredentials,
   type Provider,
@@ -50,12 +52,14 @@ export function wizardStep(s: {
   provider: Provider | null;
   effectiveMode: AccessMode | null;
   credentialId: string | null;
+  // Azure DevOps only: the project picked under the org-wide credential.
+  adoProject?: boolean;
   selectedRepo: boolean;
   selectedBranch: boolean;
 }): { step: number; total: number } {
   const stages =
     s.provider === "azure_devops"
-      ? ["provider", "credential", "repo", "branch", "label"]
+      ? ["provider", "credential", "project", "repo", "branch", "label"]
       : // Every non-credential mode (public, token) looks a repo up by name instead of browsing.
         s.effectiveMode !== "credential"
         ? ["provider", "mode", "lookup", "branch", "label"]
@@ -66,7 +70,9 @@ export function wizardStep(s: {
       ? "mode"
       : s.effectiveMode === "credential" && !s.credentialId
         ? "credential"
-        : !s.selectedRepo
+        : s.provider === "azure_devops" && !s.adoProject
+          ? "project"
+          : !s.selectedRepo
           ? s.effectiveMode === "credential"
             ? "repo"
             : "lookup"
@@ -109,6 +115,7 @@ export function RepoConnectWizard({
   const effectiveMode: AccessMode | null = provider === "azure_devops" ? "credential" : mode;
   const [addingCredential, setAddingCredential] = useState(false);
   const [credentialId, setCredentialId] = useState<string | null>(null);
+  const [adoProject, setAdoProject] = useState<string | null>(null);
   const [repoQuery, setRepoQuery] = useState("");
   const [repoInput, setRepoInput] = useState("");
   const [tokenPat, setTokenPat] = useState("");
@@ -124,15 +131,36 @@ export function RepoConnectWizard({
     queryFn: listRepoCredentials,
   });
   const providerCredentials = credentials?.filter((c) => c.provider === provider);
+  const isAdo = provider === "azure_devops";
+
+  // A credential saved against one project (before credentials went org-wide) starts on that project.
+  function chooseCredential(id: string | null, savedProject?: string | null) {
+    setCredentialId(id);
+    setAdoProject(savedProject ?? null);
+    setSelectedRepo(null);
+    setSelectedBranch(null);
+  }
+
+  const {
+    data: adoProjects,
+    isLoading: adoProjectsLoading,
+    error: adoProjectsError,
+  } = useQuery({
+    queryKey: queryKeys.repoCredentials.projects(credentialId ?? ""),
+    queryFn: () => listCredentialProjects(credentialId!),
+    enabled: isAdo && !!credentialId,
+  });
 
   const {
     data: credentialRepos,
     isLoading: credentialReposLoading,
     isError: credentialReposError,
+    error: credentialReposErrorDetail,
   } = useQuery({
-    queryKey: queryKeys.repoCredentials.repos(credentialId ?? "", repoQuery),
-    queryFn: () => listCredentialRepos(credentialId!, repoQuery),
-    enabled: effectiveMode === "credential" && !!credentialId,
+    // Azure DevOps lists a whole project at once and filters client-side, so no query in the key.
+    queryKey: queryKeys.repoCredentials.repos(credentialId ?? "", isAdo ? "" : repoQuery, adoProject ?? ""),
+    queryFn: () => listCredentialRepos(credentialId!, isAdo ? "" : repoQuery, 1, adoProject ?? ""),
+    enabled: effectiveMode === "credential" && !!credentialId && (!isAdo || !!adoProject),
   });
 
   const repoIdForBranches = selectedRepo ? (provider === "github" ? selectedRepo.full_name : selectedRepo.id) : null;
@@ -142,8 +170,8 @@ export function RepoConnectWizard({
     isLoading: credentialBranchesLoading,
     error: credentialBranchesError,
   } = useQuery({
-    queryKey: queryKeys.repoCredentials.branches(credentialId ?? "", repoIdForBranches ?? ""),
-    queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!),
+    queryKey: queryKeys.repoCredentials.branches(credentialId ?? "", repoIdForBranches ?? "", adoProject ?? ""),
+    queryFn: () => listCredentialBranches(credentialId!, repoIdForBranches!, adoProject ?? ""),
     enabled: effectiveMode === "credential" && !!credentialId && !!repoIdForBranches,
   });
 
@@ -213,6 +241,7 @@ export function RepoConnectWizard({
             }
           : {
               credential_id: credentialId!,
+              ado_project: isAdo ? adoProject! : undefined,
               repo_full_name: selectedRepo!.full_name,
               clone_url: selectedRepo!.clone_url,
               selected_branch: selectedBranch!,
@@ -231,6 +260,7 @@ export function RepoConnectWizard({
     provider,
     effectiveMode,
     credentialId,
+    adoProject: !!adoProject,
     selectedRepo: !!selectedRepo,
     selectedBranch: !!selectedBranch,
   });
@@ -239,7 +269,10 @@ export function RepoConnectWizard({
     setProvider(null);
     setMode(null);
     setAddingCredential(false);
+    chooseCredential(null);
   }
+
+  const errorText = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback);
 
   function backToMode() {
     setMode(null);
@@ -305,7 +338,7 @@ export function RepoConnectWizard({
               provider={provider}
               onCreated={(created) => {
                 setAddingCredential(false);
-                setCredentialId(created.id);
+                chooseCredential(created.id, created.ado_project);
               }}
             />
           ) : (
@@ -320,14 +353,19 @@ export function RepoConnectWizard({
               </button>
               <Label>{PROVIDER_LABEL[provider]} credential</Label>
               {providerCredentials?.length ? (
-                <Select value={credentialId ?? undefined} onValueChange={(value) => setCredentialId(value ?? null)}>
+                <Select
+                  value={credentialId ?? undefined}
+                  onValueChange={(value) =>
+                    chooseCredential(value ?? null, providerCredentials.find((c) => c.id === value)?.ado_project)
+                  }
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder={`Choose a saved ${PROVIDER_LABEL[provider]} credential…`} />
                   </SelectTrigger>
                   <SelectContent>
                     {providerCredentials.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.label || c.organization}
+                        {c.label ? `${c.label} (${c.organization})` : c.organization}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -340,6 +378,89 @@ export function RepoConnectWizard({
               </Button>
             </div>
           )
+        ) : isAdo ? (
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={() => chooseCredential(null)}
+              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" />
+              Change credential
+            </button>
+            <div className="space-y-2">
+              <Label htmlFor="ado-project">Project</Label>
+              <SearchableSelect
+                id="ado-project"
+                options={adoProjects?.map((p) => ({ value: p.name, label: p.name, hint: p.description }))}
+                value={adoProject}
+                onValueChange={(name) => {
+                  setAdoProject(name);
+                  setSelectedRepo(null);
+                  setSelectedBranch(null);
+                }}
+                placeholder={adoProjects ? `Search ${adoProjects.length} projects…` : "Search projects…"}
+                emptyText="No project matches that search."
+                loading={adoProjectsLoading}
+              />
+              {adoProjectsError ? (
+                <p className="text-sm text-destructive">{errorText(adoProjectsError, "Couldn't load projects.")}</p>
+              ) : adoProjects && !adoProjects.length ? (
+                <p className="text-sm text-muted-foreground">This token can&apos;t see any projects in the organization.</p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ado-repo">Repository</Label>
+              <SearchableSelect
+                id="ado-repo"
+                options={credentialRepos?.map((r) => ({
+                  value: r.id,
+                  label: r.name,
+                  hint: r.default_branch ? `default: ${r.default_branch}` : "empty repository",
+                }))}
+                value={selectedRepo?.id ?? null}
+                onValueChange={(id) => {
+                  const repo = credentialRepos?.find((r) => r.id === id) ?? null;
+                  setSelectedRepo(repo);
+                  // Start on the repo's default branch — the usual pick, still changeable below.
+                  setSelectedBranch(repo?.default_branch ?? null);
+                }}
+                placeholder={adoProject ? "Search repositories…" : "Choose a project first"}
+                emptyText="No repository matches that search."
+                loading={!!adoProject && credentialReposLoading}
+                disabled={!adoProject}
+              />
+              {credentialReposError ? (
+                <p className="text-sm text-destructive">
+                  {errorText(credentialReposErrorDetail, "Couldn't load repositories.")}
+                </p>
+              ) : credentialRepos && !credentialRepos.length ? (
+                <p className="text-sm text-muted-foreground">No Git repositories in this project.</p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ado-branch">Branch</Label>
+              <SearchableSelect
+                id="ado-branch"
+                options={branches?.map((b) => ({ value: b.name, label: b.name }))}
+                value={selectedBranch}
+                onValueChange={setSelectedBranch}
+                placeholder={selectedRepo ? "Search branches…" : "Choose a repository first"}
+                emptyText="No branch matches that search."
+                loading={!!selectedRepo && branchesLoading}
+                disabled={!selectedRepo}
+              />
+              {branchesError ? (
+                <p className="text-sm text-destructive">{errorText(branchesError, "Couldn't load branches.")}</p>
+              ) : selectedRepo && branches && !branches.length ? (
+                <p className="text-sm text-muted-foreground">This repository has no branches yet.</p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="repo-label">Label (optional)</Label>
+              <Input id="repo-label" value={label} onChange={(e) => setLabel(e.target.value)} autoComplete="off" />
+            </div>
+          </div>
         ) : !selectedRepo ? (
           effectiveMode !== "credential" ? (
             <div className="space-y-2">
@@ -371,7 +492,7 @@ export function RepoConnectWizard({
                   <Input
                     id="repo-pat"
                     type="password"
-                    autoComplete="off"
+                    autoComplete="new-password"
                     placeholder="ghp_… or github_pat_…"
                     value={tokenPat}
                     onChange={(e) => setTokenPat(e.target.value)}

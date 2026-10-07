@@ -113,6 +113,8 @@ export function addProjectRepo(
   input:
     | {
         credential_id: string;
+        // The Azure DevOps project picked in the wizard — an org-wide credential has none of its own.
+        ado_project?: string;
         repo_full_name: string;
         clone_url: string;
         selected_branch: string;

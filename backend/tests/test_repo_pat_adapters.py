@@ -95,3 +95,47 @@ def test_github_branch_listing_surfaces_a_failure_on_a_later_page(monkeypatch):
 
     with pytest.raises(RepoPatError):
         asyncio.run(gh.list_branches("pat", "acme", "widgets"))
+
+
+def test_azure_devops_project_listing_follows_continuation_token_and_encodes_names(monkeypatch):
+    """An org can hold more projects than one page; the walk must follow x-ms-continuationtoken
+    to the end, and a project name with a space must reach the URL encoded, not split the path."""
+    from app.services.repo_pat import azure_devops as ado
+
+    pages = {
+        None: ([{"id": "2", "name": "beta"}, {"id": "1", "name": "Alpha"}], "tok-2"),
+        "tok-2": ([{"id": "3", "name": "Gamma Team"}], None),
+    }
+    seen: list = []
+
+    class _Client(_FakeClient):
+        async def get(self, url, **kwargs):
+            token = kwargs["params"].get("continuationToken")
+            seen.append((url, token))
+            value, nxt = pages[token]
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"value": value},
+                headers={"x-ms-continuationtoken": nxt} if nxt else {},
+            )
+
+    monkeypatch.setattr(ado, "httpx", SimpleNamespace(AsyncClient=lambda: _Client(0, [])))
+    projects = asyncio.run(ado.list_projects("pat", "my org"))
+
+    assert [p["name"] for p in projects] == ["Alpha", "beta", "Gamma Team"]  # sorted, case-insensitive
+    assert [t for _, t in seen] == [None, "tok-2"]
+    assert seen[0][0] == "https://dev.azure.com/my%20org/_apis/projects"
+    assert ado._base("org", "Gamma Team") == "https://dev.azure.com/org/Gamma%20Team"
+
+
+def test_azure_devops_bad_pat_sign_in_page_is_a_failure(monkeypatch):
+    """ADO answers an invalid PAT with a 203 HTML sign-in page — it must not parse as zero projects."""
+    from app.services.repo_pat import azure_devops as ado
+
+    class _Client(_FakeClient):
+        async def get(self, url, **kwargs):
+            return SimpleNamespace(status_code=203, json=lambda: {}, headers={})
+
+    monkeypatch.setattr(ado, "httpx", SimpleNamespace(AsyncClient=lambda: _Client(0, [])))
+    with pytest.raises(RepoPatError):
+        asyncio.run(ado.list_projects("bad", "org"))

@@ -33,7 +33,10 @@ async def add_repo(project_id: str, payload: ProjectRepoCreateRequest, user: Use
         credential = await repo_credential_service.get_own_credential_or_404(user, payload.credential_id)
         provider = credential.provider
         organization = credential.organization
-        ado_project = credential.ado_project
+        # An org-wide Azure DevOps credential has no project of its own — the wizard sends the pick.
+        ado_project = (payload.ado_project or credential.ado_project) if provider == "azure_devops" else None
+        if provider == "azure_devops" and not ado_project:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "ado_project is required for Azure DevOps")
         pat_encrypted = credential.pat_encrypted
         source_credential_id = str(credential.id)
     else:

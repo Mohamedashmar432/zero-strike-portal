@@ -84,6 +84,8 @@ def test_clone_repo_env_and_argv_are_hardened(monkeypatch, tmp_path):
     cfg = _pairs(seen["env"])
     assert cfg["http.followRedirects"] == "false"
     assert cfg["protocol.allow"] == "never"
+    # Host credential helpers are cleared: no GUI sign-in prompt, no host credentials for user URLs.
+    assert cfg["credential.helper"] == ""
     assert cfg["http.curloptResolve"] == "example.com:8443:93.184.216.34"
     assert "http.extraHeader" in cfg
     assert seen["cmd"][-3] == "--"
@@ -100,3 +102,12 @@ def test_azure_devops_remote_url_with_bare_username_is_accepted():
 
     parsed = check_repo_url_syntax("https://myorg@dev.azure.com/myorg/proj/_git/repo")
     assert parsed.hostname == "dev.azure.com"
+
+
+def test_clone_failures_get_a_plain_language_cause():
+    no_auth = "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    assert css.clone_failure_hint(no_auth).startswith("Repository not found, or it is private")
+    assert css.clone_failure_hint("warning: Remote branch nope not found in upstream origin").startswith(
+        "That branch does not exist"
+    )
+    assert css.clone_failure_hint("fatal: early EOF") == ""

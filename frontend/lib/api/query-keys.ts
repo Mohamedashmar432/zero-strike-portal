@@ -5,11 +5,14 @@
  * arrays by hand (see docs/ARCHITECTURE_REVIEW_AND_AI_ROADMAP.md, G12).
  */
 export const queryKeys = {
+  // Shared by every queued tag/notice on screen — one poll, however many tags.
+  queue: () => ["queue"] as const,
   admin: {
     auditLogs: (days: number, category?: string) =>
       ["admin", "audit-logs", days, category ?? ""] as const,
     dataStats: (projectId?: string) => ["admin", "data-stats", projectId ?? ""] as const,
     scannerStatus: () => ["admin", "scanner-status"] as const,
+    operations: () => ["admin", "operations"] as const,
     autoFixQuotaRequests: (status?: string) =>
       status === undefined
         ? (["admin", "auto-fix-quota-requests"] as const)
@@ -111,10 +114,11 @@ export const queryKeys = {
   },
   repoCredentials: {
     all: () => ["repo-credentials"] as const,
-    repos: (credentialId: string, query: string) =>
-      ["repo-credentials", credentialId, "repos", query] as const,
-    branches: (credentialId: string, repoId: string) =>
-      ["repo-credentials", credentialId, "branches", repoId] as const,
+    projects: (credentialId: string) => ["repo-credentials", credentialId, "projects"] as const,
+    repos: (credentialId: string, query: string, adoProject = "") =>
+      ["repo-credentials", credentialId, "repos", query, adoProject] as const,
+    branches: (credentialId: string, repoId: string, adoProject = "") =>
+      ["repo-credentials", credentialId, "branches", repoId, adoProject] as const,
   },
   settings: {
     reportTemplate: () => ["settings", "report-template"] as const,

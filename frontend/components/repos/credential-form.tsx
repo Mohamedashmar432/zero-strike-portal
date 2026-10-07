@@ -12,7 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApiError } from "@/lib/api/client";
 import { queryKeys } from "@/lib/api/query-keys";
 import { createRepoCredential, type Provider, type RepoCredential } from "@/lib/api/repo-credentials";
-import { repoCredentialSchema, type RepoCredentialInput } from "@/lib/validation/repo-credential.schema";
+import {
+  normalizeAdoOrganization,
+  repoCredentialSchema,
+  type RepoCredentialInput,
+} from "@/lib/validation/repo-credential.schema";
 
 const PROVIDERS: { value: Provider; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -39,7 +43,12 @@ export function CredentialForm({
   });
 
   const create = useMutation({
-    mutationFn: (values: RepoCredentialInput) => createRepoCredential(values),
+    mutationFn: (values: RepoCredentialInput) =>
+      createRepoCredential(
+        values.provider === "azure_devops"
+          ? { ...values, organization: normalizeAdoOrganization(values.organization) }
+          : values
+      ),
     onSuccess: (credential) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.repoCredentials.all() });
       toast.success("Credential saved");
@@ -77,20 +86,26 @@ export function CredentialForm({
       )}
       <div className="space-y-2">
         <Label htmlFor="cred-org">{provider === "azure_devops" ? "Organization" : "Owner / organization"}</Label>
-        <Input id="cred-org" autoComplete="off" {...register("organization")} />
+        <Input
+          id="cred-org"
+          autoComplete="off"
+          placeholder={provider === "azure_devops" ? "my-org or https://dev.azure.com/my-org" : undefined}
+          {...register("organization")}
+        />
         {errors.organization && <p className="text-sm text-destructive">{errors.organization.message}</p>}
       </div>
-      {provider === "azure_devops" && (
-        <div className="space-y-2">
-          <Label htmlFor="cred-ado-project">Azure DevOps project</Label>
-          <Input id="cred-ado-project" autoComplete="off" {...register("ado_project")} />
-          {errors.ado_project && <p className="text-sm text-destructive">{errors.ado_project.message}</p>}
-        </div>
-      )}
       <div className="space-y-2">
         <Label htmlFor="cred-pat">Personal access token</Label>
-        <Input id="cred-pat" type="password" autoComplete="off" {...register("pat")} />
+        {/* new-password: "off" does not stop Chrome filling a saved site login into a PAT field. */}
+        <Input id="cred-pat" type="password" autoComplete="new-password" {...register("pat")} />
         {errors.pat && <p className="text-sm text-destructive">{errors.pat.message}</p>}
+        {provider === "azure_devops" && (
+          <p className="text-xs text-muted-foreground">
+            Needs <span className="font-mono">Project and Team: Read</span> and{" "}
+            <span className="font-mono">Code: Read</span> (add <span className="font-mono">Code: Read &amp; write</span>{" "}
+            for auto-fix PRs). You&apos;ll pick the project, repo and branch next.
+          </p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="cred-label">Label (optional)</Label>

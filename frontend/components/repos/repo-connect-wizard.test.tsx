@@ -83,6 +83,16 @@ describe("wizardStep", () => {
     expect(at({ effectiveMode: "credential", credentialId: "c" })).toEqual({ step: 4, total: 6 });
   });
 
+  test("azure devops walks credential -> project -> repo -> branch -> label", () => {
+    const ado = (o: Partial<Parameters<typeof wizardStep>[0]>) =>
+      at({ provider: "azure_devops", effectiveMode: "credential", ...o });
+    expect(ado({})).toEqual({ step: 2, total: 6 });
+    expect(ado({ credentialId: "c" }).step).toBe(3);
+    expect(ado({ credentialId: "c", adoProject: true }).step).toBe(4);
+    expect(ado({ credentialId: "c", adoProject: true, selectedRepo: true }).step).toBe(5);
+    expect(ado({ credentialId: "c", adoProject: true, selectedRepo: true, selectedBranch: true }).step).toBe(6);
+  });
+
   test("advances through lookup -> branch -> label", () => {
     expect(at({ effectiveMode: "token" }).step).toBe(3);
     expect(at({ effectiveMode: "token", selectedRepo: true }).step).toBe(4);
