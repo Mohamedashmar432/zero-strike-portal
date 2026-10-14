@@ -8,6 +8,8 @@ for _name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "AZURE_KEY_VAULT_UR
     os.environ[_name] = ""
 # mongomock resolves an mongodb+srv:// URI over real DNS (slow/flaky offline), so give it a plain one.
 os.environ["MONGODB_URI"] = "mongodb://localhost:27017"
+# Fixtures use zerostrike.dev/zs.dev addresses; the domain allowlist has its own tests.
+os.environ["SIGNUP_ALLOWED_EMAIL_DOMAINS"] = "[]"
 # The app's startup sweep and every clone/remediation workdir land here, never in the developer's
 # real %TEMP%/zs-clones (which the sweep would otherwise prune).
 import tempfile  # noqa: E402

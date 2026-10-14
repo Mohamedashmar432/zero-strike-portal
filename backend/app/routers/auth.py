@@ -40,7 +40,11 @@ async def register(payload: RegisterRequest, request: Request, background: Backg
         settings.rate_limit_register_window_seconds,
     )
     user = await auth_service.register(payload.email, payload.password, payload.name)
-    await audit_service.record("register", actor_user_id=str(user.id))
+    await audit_service.record(
+        "register",
+        actor_user_id=str(user.id),
+        metadata={"email": user.email, "approval_status": user.approval_status},
+    )
     if user.approval_status == "pending":
         await auth_service.announce_signup(user)
     if user.approval_status == "approved":
@@ -67,8 +71,9 @@ async def login(payload: LoginRequest, request: Request):
     user.last_login_at = datetime.now(timezone.utc)
     await user.save()
     await audit_service.record(
-        "login", actor_user_id=str(user.id), ip_address=client_ip(request)
+        "login", actor_user_id=str(user.id), ip_address=client_ip(request), metadata={"email": user.email}
     )
+    await auth_service.link_pending_invites(user, via="login")
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
 

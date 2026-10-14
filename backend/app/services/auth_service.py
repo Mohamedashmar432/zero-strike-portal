@@ -19,7 +19,18 @@ class AuthError(HTTPException):
         super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
+def require_allowed_email_domain(email: str) -> None:
+    """422 unless the address is on `signup_allowed_email_domains` (empty list = any domain)."""
+    allowed = [d.lower() for d in settings.signup_allowed_email_domains]
+    if allowed and email.rsplit("@", 1)[-1].lower() not in allowed:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Only " + " or ".join(f"@{d}" for d in allowed) + " email addresses are allowed",
+        )
+
+
 async def register(email: str, password: str, name: str) -> User:
+    require_allowed_email_domain(email)
     if await User.find_one(User.email == email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email already registered")
     now = datetime.now(timezone.utc)
@@ -32,16 +43,32 @@ async def register(email: str, password: str, name: str) -> User:
         updated_at=now,
     )
     await user.insert()
+    await link_pending_invites(user, via="register")
+    return user
 
+
+async def link_pending_invites(user: User, via: str) -> list[str]:
+    """Attach every still-pending invite for this user's email to the account; returns the
+    project ids linked. Runs on register and again on every login, so an invite the register
+    step missed heals on the next sign-in — and the `via="login"` audit row says it was missed."""
     pending = await ProjectMember.find(
-        ProjectMember.invited_email == email, ProjectMember.user_id == None  # noqa: E711
+        ProjectMember.invited_email == user.email, ProjectMember.user_id == None  # noqa: E711
     ).to_list()
+    now = datetime.now(timezone.utc)
     for member in pending:
         member.user_id = str(user.id)
         member.accepted_at = now
         await member.save()
-
-    return user
+        await audit_service.record(
+            "Invite Accepted",
+            actor_user_id=str(user.id),
+            project_id=member.project_id,
+            target_type="user",
+            target_id=str(user.id),
+            metadata={"email": user.email, "via": via, "role": member.role, "member_id": str(member.id)},
+        )
+        logger.info("invite_linked", user_id=str(user.id), project_id=member.project_id, via=via)
+    return [m.project_id for m in pending]
 
 
 async def _approval_required() -> bool:
@@ -79,6 +106,11 @@ def approval_block(user: User) -> HTTPException | None:
 async def authenticate(email: str, password: str) -> User:
     user = await User.find_one(User.email == email)
     if not user or not security.verify_password(password, user.password_hash):
+        await audit_service.record(
+            "Login Failed",
+            actor_user_id=str(user.id) if user else None,
+            metadata={"email": email, "reason": "unknown_email" if not user else "bad_password"},
+        )
         raise AuthError("Invalid email or password")
     if not user.is_active:
         raise AuthError("Account is disabled")

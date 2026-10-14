@@ -241,6 +241,7 @@ async def invite_member(
 ):
     project = await project_service.get_project_or_404(project_id)
     await project_service.require_owner_or_admin(project_id, user)
+    auth_service.require_allowed_email_domain(payload.email)
 
     if await ProjectMember.find_one(
         ProjectMember.project_id == project_id, ProjectMember.invited_email == payload.email
@@ -264,7 +265,8 @@ async def invite_member(
         project_id=project_id,
         target_type="user",
         target_id=str(invitee.id) if invitee else None,
-        metadata={"email": payload.email},
+        metadata={"email": payload.email, "matched_existing_user": invitee is not None,
+                  "status": "accepted" if invitee else "pending", "member_id": str(member.id)},
     )
     background.add_task(
         auth_service.send_project_invite, payload.email, user.name, project, invitee is not None
@@ -305,7 +307,8 @@ async def remove_member(project_id: str, member_id: str, user: User = Depends(ge
         project_id=project_id,
         target_type="user",
         target_id=member.user_id,
-        metadata={"role": member.role},
+        metadata={"role": member.role, "email": member.invited_email,
+                  "status": "accepted" if member.accepted_at else "pending"},
     )
 
 
@@ -345,7 +348,8 @@ async def update_member_role(
         project_id=project_id,
         target_type="user",
         target_id=member.user_id,
-        metadata={"role": member.role},
+        metadata={"role": member.role, "email": member.invited_email,
+                  "status": "accepted" if member.accepted_at else "pending"},
     )
     invitee = await User.get(member.user_id) if member.user_id else None
     return _to_member_response(member, invitee.name if invitee else None)

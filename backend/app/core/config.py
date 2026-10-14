@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     azure_key_vault_url: str = ""  # empty = AI provider keys stay Fernet-encrypted in Mongo
     backend_public_url: str = "http://localhost:8000"  # used to build each provider's redirect_uri
     frontend_origin: str = "http://localhost:3000"  # where /connections/{provider}/callback redirects to
+    # Only these email domains may register, be invited, or be set as a profile email. A
+    # typo'd domain ("thinkbirgde.in") once registered fine and silently missed its project
+    # invite. Env: SIGNUP_ALLOWED_EMAIL_DOMAINS='["a.com","b.com"]'; [] disables the check.
+    signup_allowed_email_domains: list[str] = ["thinkbridge.in", "thinkbridge.com"]
 
     # SMTP (email_service) — used by the forgot-password flow to send reset links. Empty smtp_host
     # (the dev default) means email_service.send_email() logs a warning and no-ops instead of trying

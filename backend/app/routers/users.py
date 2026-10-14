@@ -4,6 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.core.deps import get_current_user, require_admin
+from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.schemas.auth import UserResponse
 from app.schemas.common import Page
@@ -52,6 +53,7 @@ async def update_my_profile(payload: UpdateProfileRequest, user: User = Depends(
         user.name = payload.name
         changed = True
     if payload.email is not None and payload.email != user.email:
+        auth_service.require_allowed_email_domain(payload.email)
         existing = await User.find_one(User.email == payload.email)
         if existing and str(existing.id) != str(user.id):
             raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
@@ -165,11 +167,14 @@ async def delete_user(user_id: str, admin: User = Depends(require_admin)):
     user = await User.get(user_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    # ponytail: memberships are left in place (re-registering does not reclaim them); the count
+    # is recorded so an orphaned membership can be traced back to this deletion.
+    memberships = await ProjectMember.find(ProjectMember.user_id == user_id).count()
     await user.delete()
     await audit_service.record(
         "User Deleted",
         actor_user_id=str(admin.id),
         target_type="user",
         target_id=user_id,
-        metadata={"email": user.email},
+        metadata={"email": user.email, "memberships_left": memberships},
     )

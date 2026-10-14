@@ -267,3 +267,61 @@ def test_invite_emails_point_existing_users_at_the_project_and_new_ones_at_regis
     assert "added you to Mail Demo" in subject and f"/projects/{project['id']}" in text
     subject, text = by_to["no-account@zerostrike.dev"]
     assert "invited you to Mail Demo" in subject and text.rstrip().endswith("/register")
+
+
+def test_login_links_an_invite_that_registration_missed(client):
+    """An account that exists while its invite is still pending (the prod state behind an
+    "invited member sees an empty dashboard" report) is healed on the next sign-in, and the
+    audit trail says so with via=login."""
+    import asyncio
+    from datetime import datetime, timezone
+
+    from app.models.project_member import ProjectMember
+
+    owner = register_and_login(client, email="mowner10@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    register_and_login(client, email="stuck10@zerostrike.dev")
+
+    async def _stuck_invite():
+        await ProjectMember(
+            project_id=project["id"], invited_email="stuck10@zerostrike.dev",
+            invited_by="x", invited_at=datetime.now(timezone.utc),
+        ).insert()
+    asyncio.run(_stuck_invite())
+
+    r = client.post("/api/v1/auth/login", json={"email": "stuck10@zerostrike.dev", "password": "hunter2pass"})
+    me = r.json()
+    assert client.get("/api/v1/projects", headers=_headers(me)).json()["total"] == 1
+    statuses = {m["invited_email"]: m["status"] for m in
+                client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()}
+    assert statuses["stuck10@zerostrike.dev"] == "accepted"
+
+    from tests.test_users import _promote_to_admin
+    _promote_to_admin("mowner10@zerostrike.dev")
+    admin = client.post("/api/v1/auth/login", json={"email": "mowner10@zerostrike.dev", "password": "hunter2pass"}).json()
+    logs = client.get("/api/v1/audit-logs", headers=_headers(admin)).json()["items"]
+    linked = [entry for entry in logs if entry["action"] == "Invite Accepted"]
+    assert linked and linked[0]["metadata"]["via"] == "login"
+
+
+def test_only_allowed_email_domains_can_register_or_be_invited(client, monkeypatch):
+    from app.core.config import settings
+
+    owner = register_and_login(client, email="mowner11@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    monkeypatch.setattr(settings, "signup_allowed_email_domains", ["thinkbridge.in", "thinkbridge.com"])
+
+    def reg(email):
+        return client.post("/api/v1/auth/register", json={"email": email, "password": "hunter2pass", "name": "U"})
+
+    assert reg("someone@thinkbirgde.in").status_code == 422  # the prod typo
+    assert reg("someone@gmail.com").status_code == 422
+    assert reg("someone@thinkbridge.in").status_code == 201
+    assert reg("other@ThinkBridge.com").status_code == 201
+
+    invite = client.post(f"/api/v1/projects/{project['id']}/members",
+                         json={"email": "x@thinkbirgde.in"}, headers=_headers(owner))
+    assert invite.status_code == 422
+    assert "@thinkbridge.in" in invite.json()["detail"]
+    r = client.patch("/api/v1/users/me", json={"email": "mowner11@gmail.com"}, headers=_headers(owner))
+    assert r.status_code == 422
