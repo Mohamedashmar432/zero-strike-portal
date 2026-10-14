@@ -7,6 +7,7 @@ import { ProjectAiProviderCard } from "./project-ai-provider-card";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/api/ai", () => ({
   getAiSettings: vi.fn(() => Promise.resolve({ project_byok_enabled: true })),
+  getAiModelCatalog: vi.fn(() => Promise.resolve({})),
   listProjectAiProviders: vi.fn(),
   createProjectAiProvider: vi.fn(),
   updateProjectAiProvider: vi.fn(),

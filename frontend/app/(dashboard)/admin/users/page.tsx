@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
@@ -121,8 +121,9 @@ export default function AdminUsersPage() {
 function AdminUsers() {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
-  const router = useRouter();
-  // ?status=pending is where the "new signup request" email and notification link to.
+  // ?status=pending is where the "new signup request" email and notification link to. The tabs
+  // flip it with history.pushState, not router.push: a filter needs no server round trip, and on
+  // prod a slow or failed RSC fetch left the tab looking dead.
   const pendingOnly = useSearchParams().get("status") === "pending";
   const [page, setPage] = useState(1);
   const [declineTarget, setDeclineTarget] = useState<User | null>(null);
@@ -212,7 +213,7 @@ function AdminUsers() {
           size="sm"
           onClick={() => {
             setPage(1);
-            router.push("/admin/users");
+            window.history.pushState(null, "", "/admin/users");
           }}
         >
           All users
@@ -222,7 +223,7 @@ function AdminUsers() {
           size="sm"
           onClick={() => {
             setPage(1);
-            router.push("/admin/users?status=pending");
+            window.history.pushState(null, "", "/admin/users?status=pending");
           }}
         >
           Pending approval{pendingCount ? ` (${pendingCount})` : ""}
