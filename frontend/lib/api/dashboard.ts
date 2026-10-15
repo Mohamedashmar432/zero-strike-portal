@@ -14,7 +14,7 @@ export type RecentScanItem = {
   project_id: string;
   project_name: string;
   status: "pending" | "queued" | "running" | "completed" | "failed";
-  scan_type: "local" | "cloud" | "cicd";
+  scan_type: "cloud" | "cicd";
   created_at: string;
   findings_by_severity: SeverityCounts;
   ai_analysis_status: AiAnalysisStatus | null;

@@ -8,7 +8,7 @@ from app.schemas.dashboard import SeverityCounts
 
 
 class ScanCreateRequest(BaseModel):
-    scan_type: Literal["local", "cloud", "cicd"]
+    scan_type: Literal["cloud", "cicd"]
     scan_label: str | None = None
     repo_url: str | None = None
     branch: str | None = None
@@ -40,7 +40,7 @@ class ScanCreateRequest(BaseModel):
 class ScanResponse(BaseModel):
     id: str
     project_id: str
-    scan_type: Literal["local", "cloud", "cicd"]
+    scan_type: Literal["cloud", "cicd"]
     triggered_by: Literal["cli", "ci", "cloud", "manual", "sync"]
     status: ScanStatus
     api_key_id: str | None

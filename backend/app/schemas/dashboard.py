@@ -17,7 +17,7 @@ class RecentScanItem(BaseModel):
     project_id: str
     project_name: str
     status: Literal["pending", "queued", "running", "completed", "failed"]
-    scan_type: Literal["local", "cloud", "cicd"]
+    scan_type: Literal["cloud", "cicd"]
     created_at: datetime
     findings_by_severity: SeverityCounts
     ai_analysis_status: Literal["queued", "in_progress", "completed", "failed"] | None = None

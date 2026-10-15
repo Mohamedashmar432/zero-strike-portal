@@ -105,12 +105,12 @@ async def create_scan(
     response: Response,
     user: User = Depends(get_current_user),
 ):
-    # Local and CI/CD scans are created by the scanner itself via API key (POST /api/v1/scans);
+    # CI/CD scans are created by the scanner itself via API key (POST /api/v1/scans);
     # the UI shows setup instructions for those. Only cloud scans are created + executed here.
     if payload.scan_type != "cloud":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Local and CI/CD scans are created by the scanner via API key; use the setup instructions.",
+            "CI/CD scans are created by the scanner via API key; use the setup instructions.",
         )
     project = await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)

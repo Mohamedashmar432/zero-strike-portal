@@ -2,9 +2,14 @@ import logging
 
 import structlog
 
+from app.core import log_sink
+
 
 def configure_logging() -> None:
     logging.basicConfig(format="%(message)s", level=logging.INFO)
+    # WARNING+ also lands in Mongo (system_logs) for the admin Audit Log page; flushed by
+    # log_sink.flush_loop, which the app lifespan runs.
+    log_sink.install()
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

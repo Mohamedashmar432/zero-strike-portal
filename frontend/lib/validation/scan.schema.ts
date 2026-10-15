@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Only cloud scans are created through a form. Local and CI/CD scans are produced
+// Only cloud scans are created through a form. CI/CD scans are produced
 // by the scanner itself (via API key), so the dialog shows setup instructions for
 // those rather than a create form.
 export const newCloudScanSchema = z

@@ -7,7 +7,7 @@ from pymongo import IndexModel
 # Single source of truth for the status enum — import this everywhere a Scan status
 # is typed (schemas, etc.) instead of repeating the Literal, which used to drift.
 ScanStatus = Literal["pending", "queued", "running", "completed", "failed"]
-ScanType = Literal["local", "cloud", "cicd"]
+ScanType = Literal["cloud", "cicd"]
 
 # Observability-only sub-phase of status="running" for a cloud scan (see Scan.stage), in order:
 #   validating -> cloning -> scanning -> ingesting
