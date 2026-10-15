@@ -247,7 +247,7 @@ def test_capacity_ignores_running_non_cloud_scans(client, monkeypatch):
         now = datetime.now(timezone.utc)
         stale_local = Scan(
             project_id="qproj",
-            scan_type="local",
+            scan_type="cicd",
             triggered_by="cli",
             status="running",
             created_at=now - timedelta(hours=5),

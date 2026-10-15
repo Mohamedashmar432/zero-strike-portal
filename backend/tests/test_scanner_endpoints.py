@@ -49,7 +49,7 @@ def test_create_scan_returns_pending_and_sets_scanner_fields(client):
     assert body["project_name"] == project["name"]
 
     detail = client.get(f"/api/v1/scans/{body['scan_id']}", headers=_headers(owner)).json()
-    assert detail["scan_type"] == "local"
+    assert detail["scan_type"] == "cicd"
     assert detail["triggered_by"] == "cli"
     assert detail["api_key_id"]
     assert detail["scanner_version"] == "v0.22.0"

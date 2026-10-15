@@ -218,7 +218,7 @@ def test_build_report_filename_falls_back_to_root_path_for_local_scans():
     from app.services.pdf_report_service import build_report_filename
 
     now = datetime.now(timezone.utc)
-    scan = Scan(project_id="p1", scan_type="local", started_at=now, created_at=now, updated_at=now)
+    scan = Scan(project_id="p1", scan_type="cicd", started_at=now, created_at=now, updated_at=now)
     report = Report(
         scan_id="s1", project_id="p1", root_path="/home/dev/my_app", stats=ScanStatsEmbedded(), json_uploaded_at=now
     )

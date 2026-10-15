@@ -42,7 +42,7 @@ async def scanner_create_scan(
     scan = Scan(
         project_id=ctx.project_id,
         api_key_id=ctx.key_id,
-        scan_type="local",
+        scan_type="cicd",
         triggered_by="cli",
         status="pending",
         scanner_version=payload.scanner_version,

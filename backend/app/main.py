@@ -11,8 +11,10 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.request_context import bind_request_context
+from app.core import log_sink
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
+from app.models.scan import Scan
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
     admin_ai_analytics,
@@ -63,6 +65,10 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     configure_logging()
     await connect_to_mongo()
+    log_flush_task = asyncio.create_task(log_sink.flush_loop())
+    # Scans the scanner CLI uploads were once typed "local"; they all come from pipelines, so
+    # they are CI/CD now. Idempotent, and a no-op once the old rows are gone.
+    await Scan.get_pymongo_collection().update_many({"scan_type": "local"}, {"$set": {"scan_type": "cicd"}})
     if not cloud_scan_service.scanner_available():
         # Loud and immediate on boot, rather than a surprise buried in the first cloud scan's
         # error_message — every cloud scan will fail until SCANNER_BINARY_PATH is fixed and the
@@ -111,6 +117,9 @@ async def lifespan(app: FastAPI):
         await remediation_poll_task
     with contextlib.suppress(asyncio.CancelledError):
         await compliance_poll_task
+    log_flush_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await log_flush_task
     await close_mongo_connection()
 
 

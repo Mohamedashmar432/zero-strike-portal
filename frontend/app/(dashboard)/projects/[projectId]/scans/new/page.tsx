@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cloud, GitBranch, Terminal } from "lucide-react";
+import { ArrowLeft, Cloud, GitBranch } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,7 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createApiKey } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
@@ -37,8 +36,7 @@ function scannerServerOrigin(): string {
   return "https://your-portal";
 }
 
-const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: typeof Terminal }[] = [
-  { value: "local", label: "Local", description: "Run the thinkShield CLI on your machine and upload results with a project token.", icon: Terminal },
+const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: typeof Cloud }[] = [
   { value: "cloud", label: "Cloud", description: "Give thinkShield a repo URL and it clones + scans it server-side.", icon: Cloud },
   { value: "cicd", label: "CI/CD", description: "Add thinkShield to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
@@ -103,7 +101,7 @@ function BackToTypes({ onBack }: { onBack: () => void }) {
 
 function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2">
       {SCAN_TYPES.map((t) => (
         <Button
           key={t.value}
@@ -121,100 +119,10 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
   );
 }
 
-type LocalOs = "linux" | "macos" | "windows";
-
-const LOCAL_OS: { value: LocalOs; label: string }[] = [
-  { value: "linux", label: "Linux" },
-  { value: "macos", label: "macOS" },
-  { value: "windows", label: "Windows" },
-];
-
-function defaultLocalOs(): LocalOs {
-  if (typeof navigator === "undefined") return "linux";
-  if (/Win/i.test(navigator.userAgent)) return "windows";
-  if (/Mac/i.test(navigator.userAgent)) return "macos";
-  return "linux";
-}
-
-// Hardcoded to "latest" for now (YAGNI) — add a `version` param + version-picker UI if pinning
-// a specific zerostrike release ever becomes necessary.
-function localInstallCmd(os: LocalOs, origin: string): string {
-  if (os === "windows") {
-    return `Invoke-WebRequest ${origin}/api/v1/downloads/zerostrike/latest/windows-amd64 -OutFile zerostrike.exe`;
-  }
-  if (os === "macos") {
-    return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/darwin-arm64 -o zerostrike && chmod +x zerostrike`;
-  }
-  return `curl -fsSL ${origin}/api/v1/downloads/zerostrike/latest/linux-amd64 -o zerostrike && chmod +x zerostrike`;
-}
-
-function localRunCmd(os: LocalOs, token: string): string {
-  const bin = os === "windows" ? ".\\zerostrike.exe" : "./zerostrike";
-  return `${bin} scan . --server ${scannerServerOrigin()} --token ${token}`;
-}
-
-function localFilename(os: LocalOs): string {
-  return os === "windows" ? "zerostrike-scan.ps1" : "zerostrike-scan.sh";
-}
-
-function LocalSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
-  const [rawToken, setRawToken] = useState<string | null>(null);
-  const [os, setOs] = useState<LocalOs>(defaultLocalOs);
-  const generate = useMutation({
-    mutationFn: () => createApiKey(projectId, { label: "local CLI scan", expires_in_days: 90 }),
-    onSuccess: (key) => setRawToken(key.raw_token),
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to create project token"),
-  });
-
-  const token = rawToken ?? "<PROJECT_TOKEN>";
-  const command = `${localInstallCmd(os, scannerServerOrigin())}\n${localRunCmd(os, token)}`;
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Run the thinkShield CLI on your machine — it uploads results here automatically. A scan appears in
-        this list once the CLI runs.
-      </p>
-      <div className="space-y-2">
-        <Label>Operating system</Label>
-        <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
-          {LOCAL_OS.map((o) => (
-            <Button
-              key={o.value}
-              type="button"
-              size="sm"
-              variant={os === o.value ? "secondary" : "ghost"}
-              onClick={() => setOs(o.value)}
-            >
-              {o.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-      {rawToken ? (
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-severity-medium">
-            Copy this project token now — it won&apos;t be shown again.
-          </p>
-          <CopyBlock text={rawToken} />
-        </div>
-      ) : (
-        <Button type="button" onClick={() => generate.mutate()} disabled={generate.isPending}>
-          {generate.isPending ? "Generating…" : "Generate a project token"}
-        </Button>
-      )}
-      <CopyBlock label="Install & run" text={command} filename={localFilename(os)} />
-      <div className="flex justify-end border-t border-border pt-4">
-        <Button onClick={onDone}>Done</Button>
-      </div>
-    </div>
-  );
-}
-
 // Runners for all three providers below default to Linux (ubuntu-latest / default GitLab image /
 // Azure's ubuntu pool), so linux-amd64 is the only download target needed for v1. Windows/macOS
 // CI runner variants are a documented future extension, not built now.
-// Hardcoded to "latest" (YAGNI) — see localInstallCmd for the same call on the local-scan side.
+// Hardcoded to "latest" (YAGNI) — add a version param if pinning a release ever matters.
 function cicdInstallCmd(origin: string): string {
   // Verify against the portal's checksums.txt (lines are "<sha256>  zerostrike_linux_amd64") so
   // a corrupted or tampered download fails the CI step instead of running. Note this checks
@@ -610,9 +518,7 @@ export default function NewScanPage() {
         </CardHeader>
         <CardContent>
           {scanType && <BackToTypes onBack={() => setScanType(null)} />}
-          {scanType === "local" ? (
-            <LocalSetupStep projectId={projectId} onDone={close} />
-          ) : scanType === "cloud" ? (
+          {scanType === "cloud" ? (
             <CloudCreateStep projectId={projectId} onClose={close} />
           ) : scanType === "cicd" ? (
             <CicdSetupStep onDone={close} />

@@ -33,7 +33,7 @@ def _create_project(client, headers, name="Demo"):
 
 
 def _scanner_scan(client, owner_headers, project_id, upload=False):
-    """Create a local scan the real way — via the api-key scanner endpoint."""
+    """Create a CI/CD scan the real way — via the api-key scanner endpoint."""
     raw_token = client.post(
         "/api/v1/apikeys",
         json={"project_id": project_id, "label": "scanner", "expires_in_days": 30},
@@ -77,15 +77,6 @@ def test_create_cloud_scan_schedules_execution(client, monkeypatch):
 
     detail = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(owner)).json()
     assert detail["scan_count"] == 1
-
-
-def test_create_local_via_jwt_is_rejected(client):
-    owner = register_and_login(client, email="sowner2@zerostrike.dev")
-    project = _create_project(client, _headers(owner))
-    r = client.post(
-        f"/api/v1/projects/{project['id']}/scans", json={"scan_type": "local"}, headers=_headers(owner)
-    )
-    assert r.status_code == 400
 
 
 def test_create_cicd_via_jwt_is_rejected(client):

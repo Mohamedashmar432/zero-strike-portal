@@ -37,16 +37,46 @@ export type AuditLogPage = Page<AuditLogEntry> & {
   window_days: number;
 };
 
+/** A [since, until) range in ISO-8601, from the page's date pickers. */
+export type DateRange = { since: string; until: string };
+
 export function listAuditLogs(
-  opts: { days?: number; category?: AuditFilter; page?: number; pageSize?: number } = {}
+  opts: DateRange & { category?: AuditFilter; page?: number; pageSize?: number }
 ) {
   const params = new URLSearchParams({
-    days: String(opts.days ?? 1),
+    since: opts.since,
+    until: opts.until,
     page: String(opts.page ?? 1),
     page_size: String(opts.pageSize ?? 200),
   });
   if (opts.category) params.set("category", opts.category);
   return apiFetch<AuditLogPage>(`/audit-logs?${params}`);
+}
+
+export type SystemLogLevel = "warning" | "error" | "critical";
+
+/** One backend log line at WARNING or above, persisted by the server's log sink. */
+export type SystemLogEntry = {
+  id: string;
+  level: SystemLogLevel;
+  logger: string;
+  message: string;
+  context: Record<string, unknown>;
+  exception: string | null;
+  created_at: string;
+};
+
+export function listSystemLogs(
+  opts: DateRange & { level?: SystemLogLevel; page?: number; pageSize?: number }
+) {
+  const params = new URLSearchParams({
+    since: opts.since,
+    until: opts.until,
+    level: opts.level ?? "warning",
+    page: String(opts.page ?? 1),
+    page_size: String(opts.pageSize ?? 200),
+  });
+  return apiFetch<Page<SystemLogEntry>>(`/audit-logs/system?${params}`);
 }
 
 /**

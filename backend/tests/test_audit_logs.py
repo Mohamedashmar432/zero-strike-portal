@@ -186,3 +186,50 @@ def test_rows_written_from_a_spawned_task_do_not_inherit_the_request_ip(client, 
     ctx, row = asyncio.run(scenario())
     assert ctx == (None, None)
     assert row.ip_address is None
+
+
+def test_explicit_date_range_replaces_the_days_window(client):
+    admin = _admin_headers(client, email="audit-range@zs.dev")
+    asyncio.run(_seed([("Scan Created", "pr", 10), ("Scan Created", "pr", 20), ("Scan Created", "pr", 0)]))
+    now = datetime.now(timezone.utc)
+    params = {"since": (now - timedelta(days=15)).isoformat(), "until": (now - timedelta(days=5)).isoformat()}
+
+    body = client.get(URL, params=params, headers=admin).json()
+    assert [i["project_id"] for i in body["items"]] == ["pr"]  # only the 10-day-old row
+
+    too_wide = {"since": (now - timedelta(days=200)).isoformat(), "until": now.isoformat()}
+    assert client.get(URL, params=too_wide, headers=admin).status_code == 422
+    backwards = {"since": params["until"], "until": params["since"]}
+    assert client.get(URL, params=backwards, headers=admin).status_code == 422
+
+
+def test_warning_logs_are_persisted_and_listed_for_admins(client):
+    import logging
+
+    import structlog
+
+    from app.core import log_sink
+
+    admin = _admin_headers(client, email="syslog@zs.dev")
+    structlog.get_logger("test.sink").warning("disk nearly full", scan_id="s-1")
+    logging.getLogger("test.sink").info("chatter that must not be stored")
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        logging.getLogger("test.sink").error("worker crashed", exc_info=True)
+    asyncio.run(log_sink.flush())
+
+    items = client.get(f"{URL}/system", headers=admin).json()["items"]
+    rows = {r["message"]: r for r in items if r["logger"] == "test.sink"}
+    assert set(rows) == {"worker crashed", "disk nearly full"}  # INFO is not stored
+    assert rows["disk nearly full"]["context"]["scan_id"] == "s-1"  # structlog fields unpacked
+    assert "ValueError: boom" in rows["worker crashed"]["exception"]
+    assert rows["worker crashed"]["created_at"].endswith(("Z", "+00:00"))
+
+    errors = client.get(f"{URL}/system?level=error", headers=admin).json()["items"]
+    assert "disk nearly full" not in [r["message"] for r in errors]
+    from tests.test_auth_flow import register_and_login
+
+    member = register_and_login(client, email="syslog-member@zs.dev")
+    r = client.get(f"{URL}/system", headers={"Authorization": f"Bearer {member['access_token']}"})
+    assert r.status_code == 403

@@ -1,5 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
-import { Cloud, GitBranch, Terminal } from "lucide-react";
+import { Cloud, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const scanTypeBadgeVariants = cva(
@@ -7,24 +7,23 @@ const scanTypeBadgeVariants = cva(
   {
     variants: {
       scanType: {
-        local: "bg-muted-foreground/15 text-muted-foreground",
         cloud: "bg-brand/15 text-brand",
         cicd: "bg-type-cicd/15 text-type-cicd",
       },
     },
-    defaultVariants: { scanType: "local" },
+    defaultVariants: { scanType: "cicd" },
   }
 );
 
-const icons = { local: Terminal, cloud: Cloud, cicd: GitBranch };
-const labels = { local: "Local", cloud: "Cloud", cicd: "CI/CD" };
+const icons = { cloud: Cloud, cicd: GitBranch };
+const labels = { cloud: "Cloud", cicd: "CI/CD" };
 
 type ScanTypeBadgeProps = VariantProps<typeof scanTypeBadgeVariants> & {
   className?: string;
 };
 
 export function ScanTypeBadge({ scanType, className }: ScanTypeBadgeProps) {
-  const type = scanType ?? "local";
+  const type = scanType ?? "cicd";
   const Icon = icons[type];
   return (
     <span className={cn(scanTypeBadgeVariants({ scanType: type }), className)}>

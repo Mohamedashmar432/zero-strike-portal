@@ -465,7 +465,7 @@ function ScansTab({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-muted-foreground">
-          Local and CI/CD scans appear here once the scanner runs and uploads. Cloud scans run on the
+          CI/CD scans appear here once the pipeline runs the scanner and uploads. Cloud scans run on the
           server — open one to watch progress and review findings.
         </p>
         <Button variant="outline" nativeButton={false} render={<Link href={`/projects/${projectId}/scans/new`} />}>
@@ -490,7 +490,7 @@ function ScansTab({ projectId }: { projectId: string }) {
             type: "toggle",
             value: typeFilter,
             onChange: (v) => setTypeFilter(v as ScanType | undefined),
-            options: (["local", "cloud", "cicd"] as ScanType[]).map((t) => ({ value: t, label: t })),
+            options: (["cloud", "cicd"] as ScanType[]).map((t) => ({ value: t, label: t })),
           },
         ]}
       />

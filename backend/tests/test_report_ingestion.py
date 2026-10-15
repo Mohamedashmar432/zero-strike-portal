@@ -173,7 +173,7 @@ def test_zero_scanner_duration_falls_back_to_claim_wall_time(client):
         r = await Report.find_one(Report.scan_id == str(scan.id))
         assert 29_000 <= r.duration_ms <= 40_000
 
-        bare = Scan(project_id="proj-dur", scan_type="local", created_at=now, updated_at=now)
+        bare = Scan(project_id="proj-dur", scan_type="cicd", created_at=now, updated_at=now)
         await bare.insert()
         bare_report = _load()
         bare_report.duration_ns = 0
@@ -189,7 +189,7 @@ def test_zero_scanner_duration_falls_back_to_claim_wall_time(client):
 def test_ingest_writes_findings_report_and_completes_scan(client):
     async def run():
         now = datetime.now(timezone.utc)
-        scan = Scan(project_id="proj-x", scan_type="local", created_at=now, updated_at=now)
+        scan = Scan(project_id="proj-x", scan_type="cicd", created_at=now, updated_at=now)
         await scan.insert()
         raw = _FIXTURE.read_text()
         count = await ingest_svc.ingest(scan, _load(), raw_json=raw)
@@ -225,7 +225,7 @@ def test_ingest_maintains_project_severity_counters(client):
         now = datetime.now(timezone.utc)
         project = Project(name="P", owner_id="o1", created_at=now, updated_at=now)
         await project.insert()
-        scan = Scan(project_id=str(project.id), scan_type="local", created_at=now, updated_at=now)
+        scan = Scan(project_id=str(project.id), scan_type="cicd", created_at=now, updated_at=now)
         await scan.insert()
 
         # fixture: sast=critical, secret=high, sca=medium, config=low -> 1 each, total 4
@@ -255,8 +255,8 @@ def test_project_counters_accumulate_across_scans_and_match_aggregation(client):
         project = Project(name="P2", owner_id="o1", created_at=now, updated_at=now)
         await project.insert()
         pid = str(project.id)
-        scan_a = Scan(project_id=pid, scan_type="local", created_at=now, updated_at=now)
-        scan_b = Scan(project_id=pid, scan_type="local", created_at=now, updated_at=now)
+        scan_a = Scan(project_id=pid, scan_type="cicd", created_at=now, updated_at=now)
+        scan_b = Scan(project_id=pid, scan_type="cicd", created_at=now, updated_at=now)
         await scan_a.insert()
         await scan_b.insert()
 

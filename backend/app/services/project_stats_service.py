@@ -58,13 +58,11 @@ async def _resolve_scanner_names(scans) -> dict[str, str]:
 
 
 def _scanned_by(scan, names: dict[str, str]) -> str:
-    """Who/what started the scan: cloud -> the member's name; CI/CD -> the provider; local -> host."""
+    """Who/what started the scan: cloud -> the member's name; CI/CD -> the provider."""
     if scan.scan_type == "cicd":
         return _CI_LABELS.get(scan.ci_provider or "", "CI/CD")
     if scan.created_by and scan.created_by in names:
         return names[scan.created_by]
-    if scan.scan_type == "local":
-        return scan.hostname or "CLI"
     return "Unknown"
 
 

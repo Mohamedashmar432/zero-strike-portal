@@ -28,6 +28,7 @@ from app.models.report import Report
 from app.models.repo_credential import RepoCredential
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
+from app.models.system_log import SystemLog
 from app.models.user import User
 from app.models.vulnerability import Vulnerability
 from app.models.workspace_settings import WorkspaceSettings
@@ -43,7 +44,10 @@ def get_database():
 
 async def connect_to_mongo() -> None:
     global _client
-    _client = AsyncIOMotorClient(settings.mongodb_uri)
+    # tz_aware: hand back UTC-tagged datetimes. Naive ones serialize without an offset, and
+    # the browser then reads a UTC time as local — every timestamp off by the viewer's offset
+    # (5:30 in IST) on any route that forgot timeutils.as_utc.
+    _client = AsyncIOMotorClient(settings.mongodb_uri, tz_aware=True)
     await init_beanie(
         database=_client[settings.mongodb_db_name],
         document_models=[
@@ -77,6 +81,7 @@ async def connect_to_mongo() -> None:
             ScanAutoFixQuota,
             AutoFixQuotaRequest,
             Vulnerability,
+            SystemLog,
         ],
     )
 

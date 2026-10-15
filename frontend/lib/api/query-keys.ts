@@ -8,8 +8,10 @@ export const queryKeys = {
   // Shared by every queued tag/notice on screen — one poll, however many tags.
   queue: () => ["queue"] as const,
   admin: {
-    auditLogs: (days: number, category?: string) =>
-      ["admin", "audit-logs", days, category ?? ""] as const,
+    auditLogs: (since: string, until: string, category?: string) =>
+      ["admin", "audit-logs", since, until, category ?? ""] as const,
+    systemLogs: (since: string, until: string, level: string) =>
+      ["admin", "system-logs", since, until, level] as const,
     dataStats: (projectId?: string) => ["admin", "data-stats", projectId ?? ""] as const,
     scannerStatus: () => ["admin", "scanner-status"] as const,
     operations: () => ["admin", "operations"] as const,

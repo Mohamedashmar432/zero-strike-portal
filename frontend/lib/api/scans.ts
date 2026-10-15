@@ -3,7 +3,7 @@ import { apiFetch } from "./client";
 import type { SeverityCounts } from "./dashboard";
 import type { Page } from "./users";
 
-export type ScanType = "local" | "cloud" | "cicd";
+export type ScanType = "cloud" | "cicd";
 export type ScanStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type CiProvider = "github_actions" | "gitlab_ci" | "azure_pipelines";
 // Which phase of the cloud-scan pipeline a scan is in (running) or stopped in (failed).

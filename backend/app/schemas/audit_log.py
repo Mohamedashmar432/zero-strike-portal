@@ -38,3 +38,17 @@ class AuditLogCounts(BaseModel):
 class AuditLogPage(Page):
     counts: AuditLogCounts
     window_days: int
+
+
+class SystemLogResponse(BaseModel):
+    id: str
+    level: str
+    logger: str
+    message: str
+    context: dict
+    exception: str | None
+    created_at: datetime
+
+
+class SystemLogPage(Page):
+    items: list[SystemLogResponse]

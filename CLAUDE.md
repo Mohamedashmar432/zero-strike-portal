@@ -65,8 +65,9 @@ background `asyncio.Task`.
   equivalents in `routers/scans.py` — deliberately split so a handler can't accidentally
   accept both.
 
-**Scan lifecycle** (`models/scan.py: ScanStatus`, `scan_type: local|cloud|cicd`):
-- `local`/`cicd` scans are created *by the scanner itself* via API key
+**Scan lifecycle** (`models/scan.py: ScanStatus`, `scan_type: cloud|cicd`):
+- `cicd` scans are created *by the scanner itself* via API key (there is no `local` type any more —
+  every scanner upload came from a pipeline, and a startup migration in `main.py` rewrites old rows)
   (`POST /api/v1/scans` in `scanner_scans.py`, status starts `pending`), which later
   `PUT .../status` and uploads its JSON/HTML report.
 - `cloud` scans are created by the portal (`routers/scans.py: create_scan`, status starts
@@ -178,8 +179,12 @@ other two so an access change inside a project isn't buried in scan traffic. It 
 *name* rather than reading a stored field, deliberately: a stored category would only classify rows
 written after it shipped. `GET /audit-logs` takes `days` (default 1) and `category`, and returns
 per-category counts over the whole window next to the page — counts describe the window, never the
-filtered slice. There is no pager yet; the page states how many events it dropped rather than
-letting a truncated list read as the whole day.
+filtered slice. An explicit `since`/`until` range (the page's date pickers, sent as the admin's local
+midnights) overrides `days` and is capped at 92 days. There is no pager yet; the page states how many
+events it dropped rather than letting a truncated list read as the whole day. Separately,
+`core/log_sink.py` persists every backend log record at WARNING+ to `system_logs` (90-day TTL),
+served by `GET /audit-logs/system` as the page's "System logs" tab; `emit()` only enqueues, and a
+lifespan task batches the inserts, so logging never blocks or fails a request.
 
 **Notifications** (`core/notification_events.py`, `services/notification_service.py`): every
 subscribable event is declared once in `EVENTS`, and `notify()` refuses a key that is not in it, so
