@@ -62,7 +62,7 @@ function CopyBlock({ text, label, filename }: { text: string; label?: string; fi
     <div className="space-y-1">
       {label && <Label>{label}</Label>}
       <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 rounded bg-muted px-2 py-1.5 text-xs break-all whitespace-pre-wrap">
+        <code className="min-w-0 flex-1 overflow-x-auto rounded bg-muted px-2 py-1.5 text-xs whitespace-pre">
           {text}
         </code>
         <Button
@@ -123,13 +123,26 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
 // Azure's ubuntu pool), so linux-amd64 is the only download target needed for v1. Windows/macOS
 // CI runner variants are a documented future extension, not built now.
 // Hardcoded to "latest" (YAGNI) — add a version param if pinning a release ever matters.
-function cicdInstallCmd(origin: string): string {
+function cicdInstallLines(origin: string): string[] {
   // Verify against the portal's checksums.txt (lines are "<sha256>  zerostrike_linux_amd64") so
   // a corrupted or tampered download fails the CI step instead of running. Note this checks
   // integrity against the same server; it is not an independent signature.
   const base = `${origin}/api/v1/downloads/zerostrike/latest`;
-  return `curl -fsSL ${base}/linux-amd64 -o zerostrike_linux_amd64 && curl -fsSL ${base}/checksums.txt -o checksums.txt && grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c - && mv zerostrike_linux_amd64 zerostrike && chmod +x ./zerostrike`;
+  return [
+    `curl -fsSL ${base}/linux-amd64 -o zerostrike_linux_amd64`,
+    `curl -fsSL ${base}/checksums.txt -o checksums.txt`,
+    `grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c -`,
+    "mv zerostrike_linux_amd64 zerostrike",
+    "chmod +x ./zerostrike",
+  ];
 }
+
+// A scan with findings must NOT fail the pipeline: the scanner exits 1 when it finds anything,
+// and 2 when something actually broke (bad token, upload failure, crash). Each snippet treats 0 and
+// 1 as a passing scan and fails only on a real error, then counts critical and high findings in the
+// JSON report and raises the provider's own red warning when there are any. The portal remains the
+// readable report; the JSON file is also kept as a pipeline artifact.
+const REPORT_FILE = "zerostrike-report.json";
 
 function cicdFilename(provider: CiProvider): string {
   if (provider === "github_actions") return "zerostrike.yml";
@@ -137,12 +150,38 @@ function cicdFilename(provider: CiProvider): string {
   return "azure-pipelines.yml";
 }
 
+/** Indents each line of a shell script so it sits under a YAML `|` block scalar. */
+const block = (lines: string[], indent: number) => lines.map((l) => " ".repeat(indent) + l);
+
+/**
+ * The shared shell for the scan step. `warn` is the provider-specific command that surfaces the
+ * red message ($crit / $high are set by then); it runs only when there is something critical/high.
+ */
+function cicdScanLines(origin: string, token: string, warn: string[]): string[] {
+  return [
+    "rc=0",
+    `./zerostrike scan . --server ${origin} --token ${token} --format json --output ${REPORT_FILE} || rc=$?`,
+    // 1 = findings were found (not an error); anything higher is a genuine failure.
+    'if [ "$rc" -gt 1 ]; then echo "thinkShield scan failed (exit code $rc)"; exit "$rc"; fi',
+    // One "Severity" line per finding at this indent, so this does not count nested fields.
+    `crit=$(grep -c '^      "Severity": "critical"' ${REPORT_FILE} || true)`,
+    `high=$(grep -c '^      "Severity": "high"' ${REPORT_FILE} || true)`,
+    'if [ "${crit:-0}" -gt 0 ] || [ "${high:-0}" -gt 0 ]; then',
+    ...block(warn, 2),
+    "fi",
+  ];
+}
+
+const FINDINGS_MSG =
+  "thinkShield found $crit critical and $high high severity findings. Review them in the thinkShield portal.";
+
 function cicdSnippet(provider: CiProvider, origin: string): string {
-  const install = cicdInstallCmd(origin);
-  const cmdGh = `./zerostrike scan . --server ${origin} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`;
-  const cmdSh = `./zerostrike scan . --server ${origin} --token $ZEROSTRIKE_TOKEN`;
-  const cmdAz = `./zerostrike scan . --server ${origin} --token $(ZEROSTRIKE_TOKEN)`;
+  const install = cicdInstallLines(origin);
   if (provider === "github_actions") {
+    // ::error draws a red annotation on the run but does not fail the step.
+    const scan = cicdScanLines(origin, "${{ secrets.ZEROSTRIKE_TOKEN }}", [
+      `echo "::error title=thinkShield::${FINDINGS_MSG}"`,
+    ]);
     return [
       "# .github/workflows/zerostrike.yml",
       "name: thinkShield SAST",
@@ -153,29 +192,66 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
       "    steps:",
       "      - uses: actions/checkout@v4",
       "      - name: Install thinkShield scanner",
-      `        run: ${install}`,
+      "        run: |",
+      ...block(install, 10),
       "      - name: thinkShield scan",
-      `        run: ${cmdGh}`,
+      "        run: |",
+      ...block(scan, 10),
+      "      - name: Upload scan report",
+      "        if: always()",
+      "        uses: actions/upload-artifact@v4",
+      "        with:",
+      "          name: thinkshield-report",
+      `          path: ${REPORT_FILE}`,
+      "          if-no-files-found: ignore",
     ].join("\n");
   }
   if (provider === "gitlab_ci") {
+    // GitLab has no annotations, so: print the message in red and exit 3, which allow_failure
+    // below turns into an orange "passed with warnings" job instead of a failed pipeline.
+    const scan = cicdScanLines(origin, "$ZEROSTRIKE_TOKEN", [
+      `printf '\\033[0;31m%s\\033[0m\\n' "${FINDINGS_MSG}"`,
+      "exit 3",
+    ]);
     return [
       "# .gitlab-ci.yml",
       "zerostrike_scan:",
       "  stage: test",
       "  before_script:",
-      `    - ${install}`,
+      ...install.map((l) => `    - ${l}`),
       "  script:",
-      `    - ${cmdSh}`,
+      "    - |",
+      ...block(scan, 6),
+      "  allow_failure:",
+      "    exit_codes: 3",
+      "  artifacts:",
+      "    when: always",
+      "    paths:",
+      `      - ${REPORT_FILE}`,
     ].join("\n");
   }
+  // logissue type=error puts the message in the run's red error list; SucceededWithIssues keeps
+  // the pipeline from failing (it shows as partially succeeded).
+  const scan = cicdScanLines(origin, "$(ZEROSTRIKE_TOKEN)", [
+    `echo "##vso[task.logissue type=error]${FINDINGS_MSG}"`,
+    'echo "##vso[task.complete result=SucceededWithIssues;]thinkShield findings"',
+  ]);
   return [
     "# azure-pipelines.yml",
     "steps:",
-    `  - script: ${install}`,
+    "  - script: |",
+    ...block(install, 6),
     "    displayName: Install thinkShield scanner",
-    `  - script: ${cmdAz}`,
+    "  - script: |",
+    ...block(scan, 6),
     "    displayName: thinkShield scan",
+    "  - task: PublishBuildArtifacts@1",
+    "    condition: always()",
+    "    continueOnError: true",
+    "    inputs:",
+    `      PathtoPublish: ${REPORT_FILE}`,
+    "      ArtifactName: thinkshield-report",
+    "    displayName: Publish scan report",
   ].join("\n");
 }
 
@@ -211,6 +287,11 @@ function CicdSetupStep({ onDone }: { onDone: () => void }) {
             text={cicdSnippet(provider, scannerServerOrigin())}
             filename={cicdFilename(provider)}
           />
+          <p className="text-xs text-muted-foreground">
+            Findings never fail the pipeline. Critical or high findings raise a red warning on the run;
+            the pipeline fails only if the scan itself errors (for example a bad token). Full results are in
+            the portal, and the JSON report is kept as a pipeline artifact.
+          </p>
           {provider === "github_actions" && (
             <p className="text-xs text-muted-foreground">
               Save the downloaded file as <code>.github/workflows/zerostrike.yml</code>.
