@@ -29,6 +29,7 @@ vi.mock("@/lib/api/ai", () => ({
   activateAiProvider: vi.fn(),
   deactivateAiProvider: vi.fn(),
   testAiProviderConnection: vi.fn(),
+  getAiModelCatalog: vi.fn(() => Promise.resolve({})),
   // The page also renders the Project BYOK panel; default it to off so these tests keep
   // exercising the portal-wide provider table only.
   getAiSettings: vi.fn(() => Promise.resolve({ project_byok_enabled: false })),
