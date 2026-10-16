@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from jose import JWTError, jwt
 
 from app.core.config import settings
@@ -79,14 +79,22 @@ def generate_reset_token() -> tuple[str, str]:
     return raw, hash_token(raw)
 
 
+def _fernets() -> list[Fernet]:
+    if not settings.oauth_encryption_key:
+        raise RuntimeError("OAUTH_ENCRYPTION_KEY is not set; stored secrets cannot be encrypted or decrypted")
+    keys = [settings.oauth_encryption_key, *settings.oauth_encryption_key_previous]
+    return [Fernet(k.encode()) for k in keys]
+
+
 def encrypt_secret(raw: str) -> str:
     """Symmetric encryption for values that must be decrypted for reuse (OAuth access/refresh
     tokens) — unlike API keys/refresh tokens, which only need one-way hash comparison."""
-    return Fernet(settings.oauth_encryption_key.encode()).encrypt(raw.encode()).decode()
+    return _fernets()[0].encrypt(raw.encode()).decode()
 
 
 def decrypt_secret(token: str) -> str:
-    return Fernet(settings.oauth_encryption_key.encode()).decrypt(token.encode()).decode()
+    """Tries the current key, then each previous (rotation) key."""
+    return MultiFernet(_fernets()).decrypt(token.encode()).decode()
 
 
 def create_oauth_state_token(user_id: str, provider: str) -> tuple[str, str]:

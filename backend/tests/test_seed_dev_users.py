@@ -22,3 +22,19 @@ def test_upsert_user_resyncs_password_on_existing_account(client):
 
     user = asyncio.run(_run())
     assert verify_password(spec["password"], user.password_hash)
+
+
+def test_seed_main_refuses_outside_development(monkeypatch):
+    import pytest
+
+    import scripts.seed_dev_users as seed_mod
+
+    def _sentinel(*a, **k):
+        raise AssertionError("must not connect when refusing")
+
+    monkeypatch.setattr(seed_mod.settings, "app_env", "production")
+    monkeypatch.setattr(seed_mod, "connect_to_mongo", _sentinel)
+    monkeypatch.setattr(seed_mod, "_drop_database", _sentinel)
+    with pytest.raises(SystemExit) as exc:
+        seed_mod.main(["--reset", "--yes"])
+    assert exc.value.code == 2

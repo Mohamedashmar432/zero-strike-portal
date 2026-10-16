@@ -81,7 +81,7 @@ GITHUB_CLIENT_ID=<client id from step 2>
 GITHUB_CLIENT_SECRET=<client secret from step 2>
 AZURE_DEVOPS_CLIENT_ID=<app id from step 3>
 AZURE_DEVOPS_CLIENT_SECRET=<client secret from step 3>
-OAUTH_ENCRYPTION_KEY=<key from step 4 — production only>
+OAUTH_ENCRYPTION_KEY=<key from step 4 — required in every environment>
 BACKEND_PUBLIC_URL=http://localhost:8000
 FRONTEND_ORIGIN=http://localhost:3000
 ```

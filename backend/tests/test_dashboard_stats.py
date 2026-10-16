@@ -291,3 +291,21 @@ def test_posture_is_zero_without_completed_scans(client):
 
     body = client.get("/api/v1/dashboard/stats", headers=_headers(owner)).json()
     assert body["findings_by_severity"] == {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+
+
+def test_resolve_scanner_names_ignores_non_objectid_created_by(client):
+    from types import SimpleNamespace
+
+    from app.models.user import User
+    from app.services.project_stats_service import _resolve_scanner_names
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        user = User(email="scanner@zerostrike.dev", password_hash="x", name="Scanner Person",
+                    role="user", created_at=now, updated_at=now)  # fmt: skip
+        await user.insert()
+        scans = [SimpleNamespace(created_by=v) for v in ("not-an-oid", None, str(user.id))]
+        return await _resolve_scanner_names(scans), str(user.id)
+
+    names, uid = asyncio.run(run())
+    assert names == {uid: "Scanner Person"}

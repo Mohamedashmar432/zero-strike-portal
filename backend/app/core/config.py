@@ -1,13 +1,25 @@
+import secrets
+import warnings
+from typing import Literal
+
+from cryptography.fernet import Fernet
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+MIN_JWT_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", secrets_dir="/run/secrets")
 
+    # Fails closed: a deploy that forgets APP_ENV is treated as production and must supply real
+    # secrets. Only a developer's .env (and the test conftest) opts into "development".
+    app_env: Literal["development", "production"] = "production"
+
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "zerostrike"
 
-    jwt_secret: str = "dev-secret-change-me"
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 30
@@ -150,10 +162,12 @@ class Settings(BaseSettings):
     github_client_secret: str = ""
     azure_devops_client_id: str = ""
     azure_devops_client_secret: str = ""
-    # Fernet key for encrypting OAuth tokens at rest. Fixed dev default (not regenerated per-restart,
-    # unlike jwt_secret's throwaway-dev-value pattern) because a rotating key would make previously
-    # encrypted Mongo rows undecryptable. Override in production via env/secrets file.
-    oauth_encryption_key: str = "3RmU3vG6nF1sVw8lXe0aP7wQyKzD2bT9cH4jN6oI5uY="
+    # Fernet key for encrypting OAuth tokens, repo PATs and AI provider keys at rest. Required in
+    # production (see production_secret_problems); there is deliberately no default. Generate with
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    oauth_encryption_key: str = ""
+    # Decrypt-only keys kept during a rotation (scripts/rotate_encryption_key.py), newest first.
+    oauth_encryption_key_previous: list[str] = []
     azure_key_vault_url: str = ""  # empty = AI provider keys stay Fernet-encrypted in Mongo
     backend_public_url: str = "http://localhost:8000"  # used to build each provider's redirect_uri
     frontend_origin: str = "http://localhost:3000"  # where /connections/{provider}/callback redirects to
@@ -196,6 +210,47 @@ class Settings(BaseSettings):
     # Repo Sync does a network round trip (git ls-remote) per request, so it is limited per user.
     rate_limit_repo_sync_max_attempts: int = 10
     rate_limit_repo_sync_window_seconds: int = 60
+
+    @model_validator(mode="after")
+    def _enforce_secrets(self) -> "Settings":
+        if self.app_env == "production":
+            problems = production_secret_problems(self)
+            if problems:
+                raise ValueError("Refusing to start in production: " + "; ".join(problems))
+            return self
+        if not self.jwt_secret:
+            self.jwt_secret = secrets.token_urlsafe(48)
+            warnings.warn(
+                "JWT_SECRET is empty: using a random per-process secret (tokens die on restart).",
+                stacklevel=2,
+            )
+        if not self.oauth_encryption_key:
+            warnings.warn(
+                "OAUTH_ENCRYPTION_KEY is empty: encrypting stored secrets will fail until it is set.",
+                stacklevel=2,
+            )
+        return self
+
+
+def _valid_fernet_key(key: str) -> bool:
+    try:
+        Fernet(key.encode())
+    except Exception:  # noqa: BLE001 - any construction failure means the key is unusable
+        return False
+    return True
+
+
+def production_secret_problems(s: Settings) -> list[str]:
+    """Names (never values) of the required secrets that are missing or malformed."""
+    problems: list[str] = []
+    if len(s.jwt_secret) < MIN_JWT_SECRET_LENGTH:
+        problems.append(f"JWT_SECRET must be set to at least {MIN_JWT_SECRET_LENGTH} characters")
+    if not s.oauth_encryption_key or not _valid_fernet_key(s.oauth_encryption_key):
+        problems.append("OAUTH_ENCRYPTION_KEY must be set to a valid Fernet key")
+    for i, key in enumerate(s.oauth_encryption_key_previous):
+        if not _valid_fernet_key(key):
+            problems.append(f"OAUTH_ENCRYPTION_KEY_PREVIOUS entry {i} is not a valid Fernet key")
+    return problems
 
 
 settings = Settings()

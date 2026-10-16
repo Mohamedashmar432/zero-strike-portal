@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 import structlog
 
 from app.core.config import settings
+from app.core.git_ref import validate_branch_name
 from app.core.repo_url import check_repo_url_syntax
 from app.core.retry import retry_transient
 from app.models.scan import Scan, ScanStage
@@ -265,6 +266,11 @@ async def _clone(
     auth_scheme: str = "bearer",
     pinned_ips: list[str] | None = None,
 ) -> None:
+    if branch:
+        try:
+            validate_branch_name(branch)
+        except ValueError as exc:
+            raise CloudScanError(str(exc))
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     entries: list[tuple[str, str]] = []

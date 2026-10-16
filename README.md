@@ -44,5 +44,6 @@ cd deploy
 cp .env.example .env
 cp secrets/mongodb_uri.txt.example secrets/mongodb_uri.txt   # fill in real Atlas URI
 cp secrets/jwt_secret.txt.example secrets/jwt_secret.txt     # fill in `openssl rand -hex 32`
+cp secrets/oauth_encryption_key.txt.example secrets/oauth_encryption_key.txt  # fill in a Fernet key
 docker compose up -d
 ```

@@ -9,6 +9,7 @@ from datetime import datetime
 
 from beanie import PydanticObjectId
 from beanie.operators import And, Eq, In, Or
+from bson.errors import InvalidId
 
 from app.core.owasp import OWASP_CODES_ORDERED
 from app.models.finding import Finding
@@ -49,8 +50,8 @@ async def _resolve_scanner_names(scans) -> dict[str, str]:
         if s.created_by:
             try:
                 oids.append(PydanticObjectId(s.created_by))
-            except Exception:
-                pass
+            except (InvalidId, TypeError):  # legacy rows may carry a non-ObjectId created_by
+                continue
     if not oids:
         return {}
     users = await User.find(In(User.id, oids)).to_list()
