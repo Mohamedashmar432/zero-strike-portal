@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import structlog
 import yaml
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
 from app.core.config import settings
@@ -303,10 +304,18 @@ async def _run_scanner_on(sample_dir: str, rules_dir: str) -> set[str]:
         rc, out, err = await cloud_scan_service._run(cmd, _VALIDATE_TIMEOUT_S)
     except cloud_scan_service.CloudScanError as exc:
         raise _bad(str(exc), status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+    stderr = err.decode(errors="replace").strip()
+    # The CLI prints its usage text after the error; keep the error itself, without the temp path.
+    if "Error:" in stderr:
+        stderr = stderr.split("Error:", 1)[1].split("Usage:", 1)[0]
+    detail = " ".join(stderr.replace(rules_dir, "<rules>").split())[:600] or f"scanner exited {rc}"
     if rc not in (0, 1):
-        detail = err.decode(errors="replace").strip()[-600:] or f"scanner exited {rc}"
         raise _bad(f"The scanner rejected this rule: {detail}")
-    report = GoReportIn.model_validate_json(out)
+    # A rule the scanner's loader rejects also exits 1 (the "findings" code), with no report.
+    try:
+        report = GoReportIn.model_validate_json(out)
+    except ValidationError as exc:
+        raise _bad(f"The scanner rejected this rule: {detail}") from exc
     return {f.rule_id for f in report.findings if f.rule_id}
 
 

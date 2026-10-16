@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.models.audit_log import AuditLog
 from app.models.notification import Notification
@@ -252,3 +253,14 @@ def test_admin_actions_write_audit_rows(client, admin):
     client.post(f"{BASE}/versions", json={"changelog": "c"}, headers=admin)
     actions = {a.action for a in asyncio.run(AuditLog.find_all().to_list())}
     assert {"Scan Engine Rule Retired", "Scan Engine Rule Pack Published"} <= actions
+
+
+def test_scanner_rejecting_a_rule_is_a_readable_422_not_a_500(monkeypatch):
+    # The scanner's loader exits 1 (its "findings" code) with only stderr when a rule is invalid.
+    async def fake_run(cmd, timeout):
+        return 1, b"", b"loader: ZS-CUSTOM-001.yaml: missing lifecycle"
+
+    monkeypatch.setattr(css, "_run", fake_run)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(engine._run_scanner_on("/tmp/zs/sample", "/tmp/zs/rules"))
+    assert exc.value.status_code == 422 and "missing lifecycle" in exc.value.detail

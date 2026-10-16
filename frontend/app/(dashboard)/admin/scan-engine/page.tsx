@@ -279,7 +279,7 @@ function RulesTab() {
       <ReasonDialog
         open={!!retiring}
         title={`Retire ${retiring?.rule_id ?? "rule"}`}
-        description="Findings from a retired rule are hidden from counts, reports and blocking for every project once a version is published."
+        description="Once a version is published, a retired rule's findings leave every project's vulnerability list right away and are suppressed in all later scans. Scans that already completed keep their results."
         confirmLabel="Retire in draft"
         fieldLabel="Reason (required)"
         required
