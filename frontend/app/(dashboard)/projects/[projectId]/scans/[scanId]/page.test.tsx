@@ -59,6 +59,8 @@ const baseFinding: Finding = {
   rationale: "Untrusted input reaches a SQL query.",
   remediation: null,
   taint_context: null,
+  suppressed: false,
+  suppressed_reason: null,
   created_at: "2026-01-01T00:00:00Z",
 };
 

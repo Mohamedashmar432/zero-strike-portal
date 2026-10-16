@@ -8,6 +8,7 @@ import {
   Gauge,
   Inbox,
   LayoutDashboard,
+  Cog,
   Plug,
   ScrollText,
   Settings,
@@ -28,6 +29,7 @@ export const adminLinks = [
   { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin/operations", label: "Operations", icon: Gauge },
   { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },
+  { href: "/admin/scan-engine", label: "Scan Engine", icon: Cog },
   { href: "/admin/ai-analytics", label: "AI Analytics", icon: ChartColumn },
 ];
 

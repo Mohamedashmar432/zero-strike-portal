@@ -14,6 +14,7 @@ export const queryKeys = {
       ["admin", "system-logs", since, until, level] as const,
     dataStats: (projectId?: string) => ["admin", "data-stats", projectId ?? ""] as const,
     scannerStatus: () => ["admin", "scanner-status"] as const,
+    scanEngine: () => ["admin", "scan-engine"] as const,
     operations: () => ["admin", "operations"] as const,
     autoFixQuotaRequests: (status?: string) =>
       status === undefined
@@ -64,6 +65,7 @@ export const queryKeys = {
         kind?: string;
         owasp?: string;
         priority?: string;
+        suppressed?: boolean;
         page?: number;
         pageSize?: number;
       }
@@ -72,6 +74,7 @@ export const queryKeys = {
         "scans",
         scanId,
         "findings",
+        filters.suppressed ? "suppressed" : "active",
         filters.severity ?? "",
         filters.kind ?? "",
         filters.owasp ?? "",

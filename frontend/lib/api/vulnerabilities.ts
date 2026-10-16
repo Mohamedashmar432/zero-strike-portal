@@ -176,6 +176,11 @@ export function statusChangeBlockReason(
   if (reason === "fixed" && comment.trim() === "") {
     return "A comment is required when marking a vulnerability fixed by hand.";
   }
+  // A false-positive verdict silences the finding on every later scan, and the Scan Engine page
+  // shows the comment as evidence, so it has to say why.
+  if (reason === "false_positive" && comment.trim() === "") {
+    return "A comment is required when marking a vulnerability a false positive.";
+  }
   return null;
 }
 

@@ -57,6 +57,9 @@ export type Finding = {
     sink: string | null;
     path: FindingLocation[];
   } | null;
+  // Stored but not counted: a false-positive verdict or a retired rule (see the Scan Engine).
+  suppressed: boolean;
+  suppressed_reason: "false_positive" | "rule_retired" | null;
   created_at: string;
 };
 
@@ -70,6 +73,7 @@ export function listFindings(
     kind?: FindingKind;
     owasp?: string;
     priority?: PriorityTier;
+    suppressed?: boolean;
     page?: number;
     pageSize?: number;
   } = {}
@@ -79,6 +83,7 @@ export function listFindings(
   if (opts.kind) params.set("kind", opts.kind);
   if (opts.owasp) params.set("owasp", opts.owasp);
   if (opts.priority) params.set("priority", opts.priority);
+  if (opts.suppressed) params.set("suppressed", "true");
   params.set("page", String(opts.page ?? 1));
   params.set("page_size", String(opts.pageSize ?? 50));
   return apiFetch<Page<Finding>>(`/scans/${scanId}/findings?${params.toString()}`);

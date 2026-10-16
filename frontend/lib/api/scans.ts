@@ -49,6 +49,10 @@ export type Scan = {
   // Batched per-scan severity breakdown (see project_stats_service.get_severity_by_scan_ids) --
   // avoids a per-row report fetch for the scans list.
   findings_by_severity: SeverityCounts | null;
+  // Rule pack the scan ran under; findings stored but not counted; whether portal custom rules ran.
+  rule_pack_version: number | null;
+  suppressed_count: number;
+  custom_rules_ran: boolean;
 };
 
 export function listScans(projectId: string, page = 1, pageSize = 20) {

@@ -246,6 +246,11 @@ export function FindingItem({
           className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-150", expanded && "rotate-90 text-primary")}
         />
         {finding.severity && <SeverityBadge severity={finding.severity} />}
+        {finding.suppressed && (
+          <Badge variant="outline" className="text-[10px]">
+            {finding.suppressed_reason === "rule_retired" ? "Suppressed: rule retired" : "Suppressed: false positive"}
+          </Badge>
+        )}
         {adjustedSeverity && (
           <span
             className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono"
@@ -430,6 +435,7 @@ export default function ScanDetailPage() {
   const [kind, setKind] = useState<FindingKind>();
   const [owaspFilter, setOwaspFilter] = useState<string>();
   const [priority, setPriority] = useState<PriorityTier>();
+  const [showSuppressed, setShowSuppressed] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   // Findings per page — user-selectable (default 15, up to 30, see PAGE_SIZE_OPTIONS).
@@ -521,10 +527,12 @@ export default function ScanDetailPage() {
       kind,
       owasp: owaspFilter,
       priority,
+      suppressed: showSuppressed,
       page,
       pageSize,
     }),
-    queryFn: () => listFindings(scanId, { severity, kind, owasp: owaspFilter, priority, page, pageSize }),
+    queryFn: () =>
+      listFindings(scanId, { severity, kind, owasp: owaspFilter, priority, suppressed: showSuppressed, page, pageSize }),
     enabled: completed,
     retry: false,
     // Keep the current page visible while the next page loads. Without this, `findings` goes
@@ -813,6 +821,25 @@ export default function ScanDetailPage() {
             </Card>
           )}
 
+          {scan.suppressed_count > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                {scan.suppressed_count} suppressed as false positive or retired rule. They are kept for the
+                audit trail and are not counted in the totals above.
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowSuppressed((v) => !v);
+                  resetToFirstPage();
+                }}
+              >
+                {showSuppressed ? "Show active findings" : "Show suppressed"}
+              </Button>
+            </div>
+          )}
+
           <FilterBar
             search={search}
             onSearchChange={setSearch}
@@ -945,6 +972,9 @@ export default function ScanDetailPage() {
           <footer className="border-t border-border pt-6 text-center text-xs text-muted-foreground">
             thinkShield Security Platform Scan Engine
             {report?.scanner_version || scan.scanner_version ? ` v${report?.scanner_version ?? scan.scanner_version}` : ""}
+            {scan.rule_pack_version != null
+              ? ` · rule pack v${scan.rule_pack_version}${scan.custom_rules_ran ? " (custom rules ran)" : ""}`
+              : ""}
             {" · "}
             Last scan completed {timeAgo(scan.completed_at ?? scan.created_at)}.
           </footer>

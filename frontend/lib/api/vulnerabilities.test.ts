@@ -38,8 +38,13 @@ describe("statusChangeBlockReason", () => {
     expect(statusChangeBlockReason("resolved", "fixed", "Verified by hand in staging")).toBeNull();
   });
 
+  test("blocks a false positive with no comment", () => {
+    expect(statusChangeBlockReason("resolved", "false_positive", "")).toMatch(/comment/i);
+    expect(statusChangeBlockReason("resolved", "false_positive", "  ")).toMatch(/comment/i);
+    expect(statusChangeBlockReason("resolved", "false_positive", "Test fixture only")).toBeNull();
+  });
+
   test("allows other resolution reasons without a comment", () => {
-    expect(statusChangeBlockReason("resolved", "false_positive", "")).toBeNull();
     expect(statusChangeBlockReason("resolved", "duplicate", "")).toBeNull();
     expect(statusChangeBlockReason("resolved", "wont_fix", "")).toBeNull();
     expect(statusChangeBlockReason("resolved", "not_reproducible", "")).toBeNull();
