@@ -166,6 +166,11 @@ async def list_vulnerabilities(
     await project_service.require_member(project_id, user)
 
     criteria: list = [Vulnerability.project_id == project_id]
+    # A rule retired in the active rule pack is noise by admin decision; its vulnerabilities
+    # reappear on their own if the rule is restored, because nothing about them was changed.
+    retired = await scan_engine_service.retired_rule_ids()
+    if retired:
+        criteria.append({"current_rule_id": {"$nin": sorted(retired)}})
     if status_filter:
         criteria.append(Vulnerability.status == status_filter)
     if fix_status:
@@ -222,7 +227,10 @@ async def get_vulnerability_summary(
     match: dict = {"project_id": project_id}
     if repo:
         match["repo_scope_key"] = repo
-    groups = await Vulnerability.get_pymongo_collection().aggregate(
+    retired = await scan_engine_service.retired_rule_ids()
+    if retired:
+        match["current_rule_id"] = {"$nin": sorted(retired)}
+    groups =await Vulnerability.get_pymongo_collection().aggregate(
         [
             {"$match": match},
             {

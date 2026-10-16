@@ -113,6 +113,32 @@ def test_rule_stats_flag_noisy_rules_and_sort_by_fp_tags(client, admin):
     assert len(hist) == 5 and hist[0]["project_name"] == "Proj A" and hist[0]["comment"] == "not reachable"
 
 
+def test_retired_rule_is_hidden_from_vulnerability_list_and_summary_until_restored(client, admin):
+    pid = client.post("/api/v1/projects", json={"name": "Retire Demo"}, headers=admin).json()["id"]
+
+    async def seed():
+        await _vuln(pid, "ZS-RETIRE-ME", "r1", false_positive=False)
+        await _vuln(pid, "ZS-KEEP", "k1", false_positive=False)
+
+    asyncio.run(seed())
+
+    def visible():
+        items = client.get(f"/api/v1/projects/{pid}/vulnerabilities", headers=admin).json()["items"]
+        return {v["fingerprint"] for v in items}
+
+    def open_count():
+        return client.get(f"/api/v1/projects/{pid}/vulnerabilities/summary", headers=admin).json()["open"]
+
+    assert visible() == {"r1", "k1"} and open_count() == 2
+    assert client.post(f"{BASE}/rules/ZS-RETIRE-ME/retire", json={"reason": "noisy"}, headers=admin).is_success
+    assert visible() == {"r1", "k1"}  # a draft changes nothing until it is published
+    assert client.post(f"{BASE}/versions", json={"changelog": "retire"}, headers=admin).is_success
+    assert visible() == {"k1"} and open_count() == 1
+    assert client.post(f"{BASE}/rules/ZS-RETIRE-ME/restore", headers=admin).is_success
+    assert client.post(f"{BASE}/versions", json={"changelog": "restore"}, headers=admin).is_success
+    assert visible() == {"r1", "k1"} and open_count() == 2
+
+
 def test_crossing_the_noisy_threshold_notifies_admins_once(client, admin):
     async def run():
         from app.services import workspace_settings_service as wss
