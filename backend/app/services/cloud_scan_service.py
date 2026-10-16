@@ -34,7 +34,7 @@ from app.core.repo_url import check_repo_url_syntax
 from app.core.retry import retry_transient
 from app.models.scan import Scan, ScanStage
 from app.schemas.report import GoReportIn
-from app.services import report_ingestion_service, workdir_hygiene, workspace_settings_service
+from app.services import report_ingestion_service, scan_engine_service, workdir_hygiene, workspace_settings_service
 
 logger = structlog.get_logger(__name__)
 
@@ -339,6 +339,7 @@ async def _stamp_head_commit(scan: Scan, workdir: str) -> None:
 # findings (it's third-party or machine-generated, not code the user owns) -- excluded by
 # default on every cloud scan. --exclude-dir matches directory names anywhere in the tree.
 _DEFAULT_EXCLUDE_DIRS = ("node_modules", "vendor", "dist", "build", ".git", "bin", "obj", "target")
+_EXTRA_RULES_DIRNAME = ".zs-extra-rules"
 
 
 async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
@@ -364,6 +365,12 @@ async def _scan_and_ingest(scan: Scan, workdir: str) -> None:
         cmd.append("--enable-framework-checks")
     for d in _DEFAULT_EXCLUDE_DIRS:
         cmd += ["--exclude-dir", d]
+    # Custom rules from the active rule pack. Written inside the workdir (removed with it) and
+    # excluded from the scan itself; the flag is only passed when there is something to load.
+    extra_rules_dir = os.path.join(workdir, _EXTRA_RULES_DIRNAME)
+    if await scan_engine_service.write_pack_custom_rules(extra_rules_dir):
+        cmd += ["--extra-rules", extra_rules_dir, "--exclude-dir", _EXTRA_RULES_DIRNAME]
+        scan.custom_rules_ran = True
     rc, out, err = await _run(cmd, settings.scan_timeout_seconds)
     # Scanner exit codes: 0 clean, 1 findings found — both are successful runs with a report on stdout.
     if rc not in (0, 1):
