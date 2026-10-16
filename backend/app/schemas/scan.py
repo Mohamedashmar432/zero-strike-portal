@@ -1,8 +1,10 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
+from app.core.git_ref import validate_branch_name
+from app.core.repo_url import sanitize_repo_url
 from app.models.scan import ScanStage, ScanStatus
 from app.schemas.dashboard import SeverityCounts
 
@@ -25,6 +27,11 @@ class ScanCreateRequest(BaseModel):
     # With project_repo_id: scan even when the remote head is already covered by a completed scan
     # ("Rescan anyway"). Ignored for ad-hoc repo_url scans, which have no head check.
     force: bool = False
+
+    @field_validator("branch")
+    @classmethod
+    def _validate_branch(cls, v: str | None) -> str | None:
+        return validate_branch_name(v) if v else v
 
     @model_validator(mode="after")
     def _validate_type_config(self):
@@ -97,6 +104,15 @@ class ScannerCreateScanRequest(BaseModel):
     git_commit: str | None = None
     branch: str | None = None
     scan_label: str | None = None
+    # Optional: older scanners omit it. Sanitized, never rejected -- see sanitize_repo_url.
+    repo_url: str | None = None
+
+    @field_validator("repo_url", mode="before")
+    @classmethod
+    def _clean_repo_url(cls, v):
+        """Strip userinfo/query/fragment (a token can ride in any of them) and syntax-check. A bad
+        value becomes None rather than a 422: the scan upload must never fail over display metadata."""
+        return sanitize_repo_url(v)
 
 
 class ScannerCreateScanResponse(BaseModel):

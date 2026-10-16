@@ -614,7 +614,9 @@ export default function ScanDetailPage() {
           <p className="text-sm text-muted-foreground">
             Created {new Date(scan.created_at).toLocaleString()}
             {scan.repo_url ? ` · ${scan.repo_url}` : ""}
-            {scan.branch ? ` (${scan.branch}${scan.git_commit ? `@${scan.git_commit.slice(0, 7)}` : ""})` : ""}
+            {scan.branch || scan.git_commit
+              ? ` (${scan.branch ?? ""}${scan.git_commit ? `@${scan.git_commit.slice(0, 7)}` : ""})`
+              : ""}
             {scan.triggered_by === "sync" ? " · Repo sync" : ""}
           </p>
         </div>

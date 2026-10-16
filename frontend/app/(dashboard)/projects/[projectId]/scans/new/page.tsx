@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cloud, GitBranch } from "lucide-react";
+import { ArrowLeft, Cloud, ExternalLink, GitBranch } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,9 +16,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
+import { queryKeys } from "@/lib/api/query-keys";
 import {
   createCloudScan,
   formatAlreadyScanned,
@@ -26,6 +28,7 @@ import {
   type CreatedScan,
   type ScanType,
 } from "@/lib/api/scans";
+import { cn } from "@/lib/utils";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
@@ -59,29 +62,31 @@ function downloadTextFile(filename: string, text: string) {
 
 function CopyBlock({ text, label, filename }: { text: string; label?: string; filename?: string }) {
   return (
-    <div className="space-y-1">
-      {label && <Label>{label}</Label>}
-      <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto rounded bg-muted px-2 py-1.5 text-xs whitespace-pre">
-          {text}
-        </code>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            navigator.clipboard.writeText(text);
-            toast.success("Copied");
-          }}
-        >
-          Copy
-        </Button>
-        {filename && (
-          <Button type="button" size="sm" variant="outline" onClick={() => downloadTextFile(filename, text)}>
-            Download
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>{label && <Label>{label}</Label>}</div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              navigator.clipboard.writeText(text);
+              toast.success("Copied");
+            }}
+          >
+            Copy
           </Button>
-        )}
+          {filename && (
+            <Button type="button" size="sm" variant="outline" onClick={() => downloadTextFile(filename, text)}>
+              Download
+            </Button>
+          )}
+        </div>
       </div>
+      <code className="block overflow-x-auto rounded bg-muted px-3 py-2.5 text-xs leading-relaxed whitespace-pre">
+        {text}
+      </code>
     </div>
   );
 }
@@ -127,22 +132,36 @@ function cicdInstallLines(origin: string): string[] {
   // Verify against the portal's checksums.txt (lines are "<sha256>  zerostrike_linux_amd64") so
   // a corrupted or tampered download fails the CI step instead of running. Note this checks
   // integrity against the same server; it is not an independent signature.
-  const base = `${origin}/api/v1/downloads/zerostrike/latest`;
   return [
-    `curl -fsSL ${base}/linux-amd64 -o zerostrike_linux_amd64`,
-    `curl -fsSL ${base}/checksums.txt -o checksums.txt`,
-    `grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c -`,
+    `BASE=${origin}/api/v1/downloads/zerostrike/latest`,
+    'curl -fsSL "$BASE/linux-amd64" -o zerostrike_linux_amd64',
+    'curl -fsSL "$BASE/checksums.txt" -o checksums.txt',
+    'grep " zerostrike_linux_amd64$" checksums.txt | sha256sum -c -',
     "mv zerostrike_linux_amd64 zerostrike",
     "chmod +x ./zerostrike",
   ];
 }
 
-// A scan with findings must NOT fail the pipeline: the scanner exits 1 when it finds anything,
-// and 2 when something actually broke (bad token, upload failure, crash). Each snippet treats 0 and
-// 1 as a passing scan and fails only on a real error, then counts critical and high findings in the
-// JSON report and raises the provider's own red warning when there are any. The portal remains the
-// readable report; the JSON file is also kept as a pipeline artifact.
+// What should make the pipeline fail. The scanner exits 1 when it finds anything and 2 when
+// something actually broke (bad token, upload failure, crash). Each snippet treats 0 and 1 as a
+// passing scan and fails only on a real error, then counts critical and high findings in the JSON
+// report. By default findings only raise the provider's own red warning; the engineer opts in to
+// failing the pipeline by setting ZEROSTRIKE_FAIL_ON in the YAML. The portal remains the readable
+// report; the JSON file is also kept as a pipeline artifact.
 const REPORT_FILE = "zerostrike-report.json";
+
+type FailOn = "none" | "critical" | "high";
+
+const FAIL_ON_OPTIONS: { value: FailOn; label: string; description: string }[] = [
+  { value: "none", label: "Warn only", description: "Findings never fail the pipeline; critical or high ones raise a red warning." },
+  { value: "critical", label: "Fail on critical", description: "The pipeline fails if any critical finding is found." },
+  { value: "high", label: "Fail on critical or high", description: "The pipeline fails if any critical or high finding is found." },
+];
+
+const FAIL_ON_COMMENT = [
+  "# What fails the pipeline: none = warn only, critical = fail on critical,",
+  "# high = fail on critical or high.",
+];
 
 function cicdFilename(provider: CiProvider): string {
   if (provider === "github_actions") return "zerostrike.yml";
@@ -154,38 +173,58 @@ function cicdFilename(provider: CiProvider): string {
 const block = (lines: string[], indent: number) => lines.map((l) => " ".repeat(indent) + l);
 
 /**
- * The shared shell for the scan step. `warn` is the provider-specific command that surfaces the
- * red message ($crit / $high are set by then); it runs only when there is something critical/high.
+ * The shared shell for the scan step. `warn` surfaces the red message ($crit / $high are set by
+ * then) and `soft` runs afterwards only when the findings did not trip ZEROSTRIKE_FAIL_ON. Both run
+ * only when there is something critical or high. An unrecognised ZEROSTRIKE_FAIL_ON value is
+ * treated as "none".
  */
-function cicdScanLines(origin: string, token: string, warn: string[]): string[] {
+function cicdScanLines(origin: string, token: string, warn: string[], soft: string[] = []): string[] {
   return [
     "rc=0",
-    `./zerostrike scan . --server ${origin} --token ${token} --format json --output ${REPORT_FILE} || rc=$?`,
+    "./zerostrike scan . \\",
+    `  --server ${origin} \\`,
+    `  --token ${token} \\`,
+    `  --format json --output ${REPORT_FILE} || rc=$?`,
     // 1 = findings were found (not an error); anything higher is a genuine failure.
     'if [ "$rc" -gt 1 ]; then echo "thinkShield scan failed (exit code $rc)"; exit "$rc"; fi',
     // One "Severity" line per finding at this indent, so this does not count nested fields.
     `crit=$(grep -c '^      "Severity": "critical"' ${REPORT_FILE} || true)`,
     `high=$(grep -c '^      "Severity": "high"' ${REPORT_FILE} || true)`,
-    'if [ "${crit:-0}" -gt 0 ] || [ "${high:-0}" -gt 0 ]; then',
+    "crit=${crit:-0}",
+    "high=${high:-0}",
+    'if [ "$crit" -gt 0 ] || [ "$high" -gt 0 ]; then',
+    `  msg="${FINDINGS_MSG}"`,
     ...block(warn, 2),
+    '  case "${ZEROSTRIKE_FAIL_ON:-none}" in',
+    "    critical) blocking=$crit ;;",
+    "    high) blocking=$((crit + high)) ;;",
+    "    *) blocking=0 ;;",
+    "  esac",
+    '  if [ "$blocking" -gt 0 ]; then',
+    '    echo "thinkShield: failing the pipeline (ZEROSTRIKE_FAIL_ON=$ZEROSTRIKE_FAIL_ON, $blocking blocking)"',
+    "    exit 1",
+    "  fi",
+    ...block(soft, 2),
     "fi",
   ];
 }
 
-const FINDINGS_MSG =
-  "thinkShield found $crit critical and $high high severity findings. Review them in the thinkShield portal.";
+const FINDINGS_MSG = "thinkShield: $crit critical and $high high severity findings. See the thinkShield portal.";
 
-function cicdSnippet(provider: CiProvider, origin: string): string {
+function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): string {
   const install = cicdInstallLines(origin);
   if (provider === "github_actions") {
     // ::error draws a red annotation on the run but does not fail the step.
     const scan = cicdScanLines(origin, "${{ secrets.ZEROSTRIKE_TOKEN }}", [
-      `echo "::error title=thinkShield::${FINDINGS_MSG}"`,
+      'echo "::error title=thinkShield::$msg"',
     ]);
     return [
       "# .github/workflows/zerostrike.yml",
       "name: thinkShield SAST",
       "on: [push, pull_request]",
+      "env:",
+      ...FAIL_ON_COMMENT.map((c) => `  ${c}`),
+      `  ZEROSTRIKE_FAIL_ON: ${failOn}`,
       "jobs:",
       "  zerostrike:",
       "    runs-on: ubuntu-latest",
@@ -208,15 +247,21 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
   }
   if (provider === "gitlab_ci") {
     // GitLab has no annotations, so: print the message in red and exit 3, which allow_failure
-    // below turns into an orange "passed with warnings" job instead of a failed pipeline.
-    const scan = cicdScanLines(origin, "$ZEROSTRIKE_TOKEN", [
-      `printf '\\033[0;31m%s\\033[0m\\n' "${FINDINGS_MSG}"`,
-      "exit 3",
-    ]);
+    // below turns into an orange "passed with warnings" job instead of a failed pipeline. A
+    // ZEROSTRIKE_FAIL_ON failure exits 1, which is not allowed to fail, so the job goes red.
+    const scan = cicdScanLines(
+      origin,
+      "$ZEROSTRIKE_TOKEN",
+      ["printf '\\033[0;31m%s\\033[0m\\n' \"$msg\""],
+      ["exit 3"]
+    );
     return [
       "# .gitlab-ci.yml",
       "zerostrike_scan:",
       "  stage: test",
+      "  variables:",
+      ...FAIL_ON_COMMENT.map((c) => `    ${c}`),
+      `    ZEROSTRIKE_FAIL_ON: ${failOn}`,
       "  before_script:",
       ...install.map((l) => `    - ${l}`),
       "  script:",
@@ -231,13 +276,19 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
     ].join("\n");
   }
   // logissue type=error puts the message in the run's red error list; SucceededWithIssues keeps
-  // the pipeline from failing (it shows as partially succeeded).
-  const scan = cicdScanLines(origin, "$(ZEROSTRIKE_TOKEN)", [
-    `echo "##vso[task.logissue type=error]${FINDINGS_MSG}"`,
-    'echo "##vso[task.complete result=SucceededWithIssues;]thinkShield findings"',
-  ]);
+  // the pipeline from failing (it shows as partially succeeded) unless ZEROSTRIKE_FAIL_ON trips
+  // first, in which case the script exits 1 and the step fails.
+  const scan = cicdScanLines(
+    origin,
+    "$(ZEROSTRIKE_TOKEN)",
+    ['echo "##vso[task.logissue type=error]$msg"'],
+    ['echo "##vso[task.complete result=SucceededWithIssues;]thinkShield findings"']
+  );
   return [
     "# azure-pipelines.yml",
+    "variables:",
+    ...FAIL_ON_COMMENT.map((c) => `  ${c}`),
+    `  ZEROSTRIKE_FAIL_ON: ${failOn}`,
     "steps:",
     "  - script: |",
     ...block(install, 6),
@@ -255,15 +306,45 @@ function cicdSnippet(provider: CiProvider, origin: string): string {
   ].join("\n");
 }
 
-function CicdSetupStep({ onDone }: { onDone: () => void }) {
+function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
   const [provider, setProvider] = useState<CiProvider>();
+  const [failOn, setFailOn] = useState<FailOn>("none");
+  const { data: keys, isLoading: keysLoading } = useQuery({
+    queryKey: queryKeys.projects.apiKeys(projectId),
+    queryFn: () => listApiKeys(projectId),
+  });
+  const hasToken = (keys?.items ?? []).some((k) => k.is_active);
+  const noToken = !keysLoading && !hasToken;
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Add thinkShield to your pipeline. Store a project token as a secret named{" "}
-        <code>ZEROSTRIKE_TOKEN</code> (generate one on the Project Tokens tab), then drop in the snippet.
-      </p>
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
+          noToken ? "border-severity-medium bg-severity-medium-tint" : "border-border"
+        )}
+      >
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="text-sm font-medium text-foreground">Project token</p>
+          <p className="text-xs text-muted-foreground">
+            {keysLoading
+              ? "Checking this project for a token…"
+              : hasToken
+                ? "This project has an active token. Store it in your CI as a secret named ZEROSTRIKE_TOKEN. The raw value is only shown once, when it is created."
+                : "This project has no active token yet. Generate one, then store it in your CI as a secret named ZEROSTRIKE_TOKEN."}
+          </p>
+        </div>
+        {/* New tab: the wizard keeps its place while the token is created. */}
+        <Button
+          size="sm"
+          variant={noToken ? "default" : "outline"}
+          nativeButton={false}
+          render={<Link href={`/projects/${projectId}?tab=keys`} target="_blank" rel="noopener" />}
+        >
+          {noToken ? "Generate a project token" : "Manage project tokens"}
+          <ExternalLink />
+        </Button>
+      </div>
       <div className="space-y-2">
         <Label>CI provider</Label>
         <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
@@ -280,16 +361,35 @@ function CicdSetupStep({ onDone }: { onDone: () => void }) {
           ))}
         </div>
       </div>
+      <div className="space-y-2">
+        <Label>When findings are found</Label>
+        <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
+          {FAIL_ON_OPTIONS.map((o) => (
+            <Button
+              key={o.value}
+              type="button"
+              size="sm"
+              variant={failOn === o.value ? "secondary" : "ghost"}
+              onClick={() => setFailOn(o.value)}
+            >
+              {o.label}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {FAIL_ON_OPTIONS.find((o) => o.value === failOn)?.description} You can change this any time by
+          editing <code>ZEROSTRIKE_FAIL_ON</code> at the top of the pipeline file.
+        </p>
+      </div>
       {provider && (
         <div className="space-y-1">
           <CopyBlock
             label="Pipeline snippet"
-            text={cicdSnippet(provider, scannerServerOrigin())}
+            text={cicdSnippet(provider, scannerServerOrigin(), failOn)}
             filename={cicdFilename(provider)}
           />
           <p className="text-xs text-muted-foreground">
-            Findings never fail the pipeline. Critical or high findings raise a red warning on the run;
-            the pipeline fails only if the scan itself errors (for example a bad token). Full results are in
+            The pipeline also fails if the scan itself errors (for example a bad token). Full results are in
             the portal, and the JSON report is kept as a pipeline artifact.
           </p>
           {provider === "github_actions" && (
@@ -591,7 +691,7 @@ export default function NewScanPage() {
           />
         }
       />
-      <Card className="mx-auto max-w-2xl">
+      <Card className={cn("mx-auto", scanType === "cicd" ? "max-w-5xl" : "max-w-2xl")}>
         <CardHeader>
           <CardTitle className="text-sm font-medium text-muted-foreground">
             {scanType ? `Step 2 of 2 — ${scanTypeLabel} scan` : "Step 1 of 2 — Choose scan type"}
@@ -602,7 +702,7 @@ export default function NewScanPage() {
           {scanType === "cloud" ? (
             <CloudCreateStep projectId={projectId} onClose={close} />
           ) : scanType === "cicd" ? (
-            <CicdSetupStep onDone={close} />
+            <CicdSetupStep projectId={projectId} onDone={close} />
           ) : (
             <TypeSelectStep onSelect={setScanType} />
           )}

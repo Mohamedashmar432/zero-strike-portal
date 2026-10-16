@@ -475,15 +475,24 @@ async def _try_clone(scan: Scan | None, repo: ProjectRepo | None, branch: str, j
     proposes from the stored finding excerpt exactly as before."""
     if scan is None or not scan.repo_url:
         return None
+    clone_url = scan.repo_url
+    if repo is None and scan.scan_type == "cicd":
+        # A pipeline's self-reported repo_url is untrusted display metadata: never clone it. Clone
+        # only when it names a repo already connected to this project, and then use *that* repo's
+        # own clone_url and credential.
+        repo = await project_repo_service.find_repo_by_url(scan.project_id, scan.repo_url)
+        if repo is None:
+            return None
+        clone_url = repo.clone_url
     try:
-        git_workspace.validate_repo_url(scan.repo_url)
+        git_workspace.validate_repo_url(clone_url)
     except Exception as exc:  # noqa: BLE001
         logger.warning("propose clone skipped: repo url rejected", error=str(exc))
         return None
     token, scheme = await _resolve_read_credential(repo, job.created_by)
     workdir = tempfile.mkdtemp(prefix="zs-remediate-propose-", dir=git_workspace.workdir_root())
     try:
-        await git_workspace.clone_repo(scan.repo_url, branch, workdir, token, scheme)
+        await git_workspace.clone_repo(clone_url, branch, workdir, token, scheme)
         return workdir
     except Exception as exc:  # noqa: BLE001 — degrade to no-clone rather than fail the job
         logger.warning("propose clone failed; proposing without a worktree", error=git_workspace.sanitize(str(exc), token))
