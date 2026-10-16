@@ -36,6 +36,7 @@ from app.services import (
     project_repo_service,
     remediation_brief_service,
     remediation_settings_service,
+    scan_engine_service,
 )
 from app.services import workdir_hygiene
 from app.services.repo_write import RepoWriteError
@@ -249,6 +250,9 @@ async def _rescan_and_judge(
     post_report, _ = await git_workspace.run_scanner(workdir)
     post_fps = _fingerprints(post_report)
     new_fps = post_fps - baseline_fps
+    # A rule retired in the active rule pack no longer counts, so a patch is not blamed for it.
+    retired = await scan_engine_service.retired_rule_ids()
+    new_fps -= {f.fingerprint for f in post_report.findings if getattr(f, "rule_id", None) in retired}
     blamed, unattributed = _blame(post_report, new_fps, blocking, expected)
     ran_at = datetime.now(timezone.utc).isoformat()
     sev_label = "/".join(sorted(blocking))

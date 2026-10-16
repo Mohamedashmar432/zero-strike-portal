@@ -62,6 +62,13 @@ class Scan(Document):
     # first claim (see scan_queue_service._claim_next) and never restored, so raising
     # max_attempts above 1 for a token-authenticated repo would make a retried attempt
     # clone without auth — fine for public repos, not yet solved for private ones.
+    # Rule pack (see models/scan_engine.py) the scan ran under, stamped at ingest; None = no pack
+    # published yet / scan predates the engine room. suppressed_count is the findings stored but not
+    # counted (false-positive verdict or retired rule); custom_rules_ran says whether portal custom
+    # rules were passed to the scanner (cloud scans only - CI binaries do not see them in v1).
+    rule_pack_version: int | None = None
+    suppressed_count: int = 0
+    custom_rules_ran: bool = False
     retry_count: int = 0
     max_attempts: int = 1
     created_at: datetime

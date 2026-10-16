@@ -107,6 +107,12 @@ EVENTS: tuple[NotificationEvent, ...] = (
         default_email=True,
     ),
     NotificationEvent(
+        key="scan_engine.rule_noisy",
+        label="Scanner rule is noisy",
+        description="A scanner rule crossed the false-positive threshold. Review it in the Scan Engine.",
+        audience="admin",
+    ),
+    NotificationEvent(
         key="email.delivery_failed",
         label="Email delivery failing",
         description="The portal could not send an email. Check SMTP settings and the server log.",

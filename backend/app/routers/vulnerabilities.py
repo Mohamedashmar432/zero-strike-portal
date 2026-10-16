@@ -39,6 +39,7 @@ from app.services import (
     pr_status_service,
     project_repo_service,
     project_service,
+    scan_engine_service,
     vulnerability_service,
 )
 from app.services import project_stats_service as stats_svc
@@ -397,6 +398,13 @@ async def update_vulnerability_status(
                 status.HTTP_400_BAD_REQUEST,
                 "resolution_comment is required when manually marking a vulnerability fixed",
             )
+        # A false-positive verdict silences this fingerprint on every later scan of the repo, and
+        # the Scan Engine page shows the comment as evidence -- so it has to say why.
+        if payload.resolution_reason == "false_positive" and not (payload.resolution_comment or "").strip():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "resolution_comment is required when marking a vulnerability a false positive",
+            )
         vuln.status = "resolved"
         vuln.resolution_reason = payload.resolution_reason
         vuln.resolution_comment = payload.resolution_comment
@@ -432,6 +440,8 @@ async def update_vulnerability_status(
         target_id=str(vuln.id),
         metadata=changed,
     )
+    if vuln.resolution_reason == "false_positive" and "resolution_reason" in changed:
+        await scan_engine_service.check_rule_noisy(vuln.current_rule_id)
 
     emails = await _email_map(_emails_for([vuln]))
     return _to_out(vuln, emails)

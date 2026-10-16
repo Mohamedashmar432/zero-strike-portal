@@ -23,7 +23,7 @@ from app.core.timeutils import as_utc
 from app.models.ai_analysis_job import AIAnalysisJob, AIJobStage
 from app.models.ai_finding_insight import AIFindingInsight
 from app.models.ai_scan_insight import AIScanInsight
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.models.scan import Scan
 from app.services import ai_provider_config_service, audit_service, llm_client
 
@@ -565,7 +565,7 @@ async def run_job(job: AIAnalysisJob) -> None:
             if scan is None:
                 raise ValueError(f"Scan not found: {job.scan_id!r}")
             findings = (
-                await Finding.find(Finding.scan_id == job.scan_id)
+                await Finding.find(Finding.scan_id == job.scan_id, NOT_SUPPRESSED)
                 .sort("-priority_score")
                 .limit(settings.ai_analysis_max_findings_per_scan)
                 .to_list()

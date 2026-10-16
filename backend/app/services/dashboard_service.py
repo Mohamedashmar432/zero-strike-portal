@@ -1,7 +1,7 @@
 from beanie import PydanticObjectId
 from beanie.operators import In
 
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.scan import Scan
@@ -27,7 +27,7 @@ async def _recent_scans(project_ids: list[str] | None) -> list[RecentScanItem]:
     scan_ids = [str(s.id) for s in scans]
     per_scan_groups = await _severity_groups(
         [
-            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$match": {"scan_id": {"$in": scan_ids}, **NOT_SUPPRESSED}},
             {"$group": {"_id": {"scan_id": "$scan_id", "severity": "$severity"}, "count": {"$sum": 1}}},
         ]
     )
@@ -112,7 +112,7 @@ async def _current_posture(project_ids: list[str] | None) -> tuple[SeverityCount
 
     groups = await _severity_groups(
         [
-            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$match": {"scan_id": {"$in": scan_ids}, **NOT_SUPPRESSED}},
             {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
         ]
     )

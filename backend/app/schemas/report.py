@@ -196,6 +196,8 @@ class FindingResponse(BaseModel):
     rationale: str | None
     remediation: str | None
     taint_context: TaintContextEmbedded | None
+    suppressed: bool = False
+    suppressed_reason: str | None = None
     created_at: datetime
 
 

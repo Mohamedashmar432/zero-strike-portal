@@ -38,7 +38,7 @@ from app.models.compliance_audit import (
     ControlStatus,
     FrameworkSummary,
 )
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.services import audit_service, llm_client, project_stats_service
 
 logger = structlog.get_logger(__name__)
@@ -238,7 +238,7 @@ async def gather_evidence(
 
     cap = settings.compliance_max_findings
     findings = (
-        await Finding.find(In(Finding.scan_id, scan_ids))
+        await Finding.find(In(Finding.scan_id, scan_ids), NOT_SUPPRESSED)
         .sort("-priority_score")
         .limit(cap + 1)  # +1 so we can tell "exactly at the cap" from "over it"
         .to_list()

@@ -68,6 +68,12 @@ class WorkspaceSettings(Document):
     # A missing key means the built-in default (core.email_templates).
     email_templates: dict[str, dict[str, str]] = Field(default_factory=dict)
 
+    # --- scan engine ---------------------------------------------------------
+    # A rule is flagged Noisy when it has at least this many false-positive tags AND at least this
+    # share of its findings tagged. Both must hold; crossing them notifies admins once per rule.
+    noisy_rule_min_fp_tags: int = 5
+    noisy_rule_min_fp_percent: int = 40
+
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by: str | None = None
 

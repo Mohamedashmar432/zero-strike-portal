@@ -79,6 +79,9 @@ class ScanResponse(BaseModel):
     # Denormalized (read-side join) per-scan severity breakdown, batched for the whole list page
     # (see project_stats_service.get_severity_by_scan_ids) -- avoids a per-row report fetch.
     findings_by_severity: SeverityCounts | None = None
+    rule_pack_version: int | None = None
+    suppressed_count: int = 0
+    custom_rules_ran: bool = False
 
 
 class ScanCreateResponse(ScanResponse):

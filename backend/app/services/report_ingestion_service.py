@@ -14,6 +14,7 @@ from app.core.timeutils import as_utc
 from app.core.owasp import OWASP_CODES_ORDERED
 from app.core.priority import compute_priority
 from app.models.finding import (
+    NOT_SUPPRESSED,
     ConfigEmbedded,
     DependencyEmbedded,
     EvidenceEmbedded,
@@ -193,22 +194,33 @@ def _map_finding(
     )
 
 
-def _stats(s: GoStatsIn, findings: list[Finding] | None = None) -> ScanStatsEmbedded:
+def _stats(s: GoStatsIn, findings: list[Finding] | None = None, n_suppressed: int = 0) -> ScanStatsEmbedded:
+    """`findings` are the ones that count (suppressed ones already removed). When the portal suppressed
+    some, the scanner's own totals still include them, so every breakdown is recomputed from `findings`."""
     by_owasp = dict.fromkeys(OWASP_CODES_ORDERED, 0)
     for finding in findings or []:
         for code in finding.owasp:
             if code in by_owasp:
                 by_owasp[code] += 1
+    total, by_severity = s.total_findings, s.by_severity
+    by_language, by_category, by_kind = s.by_language, s.by_category, s.by_kind
+    if n_suppressed:
+        counted = findings or []
+        total = len(counted)
+        by_severity = dict(Counter(f.severity for f in counted if f.severity in _SEVERITIES))
+        by_language = dict(Counter(f.language for f in counted if f.language))
+        by_category = dict(Counter(f.category for f in counted if f.category))
+        by_kind = dict(Counter(f.kind for f in counted if f.kind))
     return ScanStatsEmbedded(
         files_scanned=s.files_scanned,
         files_skipped=s.files_skipped,
         files_cached=s.files_cached,
-        total_findings=s.total_findings,
-        suppressed=s.suppressed,
-        by_severity=s.by_severity,
-        by_language=s.by_language,
-        by_category=s.by_category,
-        by_kind=s.by_kind,
+        total_findings=total,
+        suppressed=(s.suppressed or 0) + n_suppressed,
+        by_severity=by_severity,
+        by_language=by_language,
+        by_category=by_category,
+        by_kind=by_kind,
         by_owasp=by_owasp,
     )
 
@@ -227,7 +239,7 @@ async def _scan_finding_counts(scan_id: str) -> tuple[int, dict[str, int]]:
     matching how project_stats_service reports findings_by_severity."""
     cursor = Finding.get_pymongo_collection().aggregate(
         [
-            {"$match": {"scan_id": scan_id}},
+            {"$match": {"scan_id": scan_id, **NOT_SUPPRESSED}},
             {"$group": {"_id": "$severity", "count": {"$sum": 1}}},
         ]
     )
@@ -285,6 +297,48 @@ def _completion_summary(findings: list[Finding]) -> str:
     return ", ".join(parts) if parts else "No findings."
 
 
+async def _apply_suppression(scan: Scan, findings: list[Finding]) -> int:
+    """Mark findings that must not count, in place; returns how many were marked.
+
+    Two sources, checked in this order: a project member's `false_positive` verdict on the same
+    fingerprint *in this project and repo scope* (never another project's), then a rule retired in the
+    active rule pack. Suppressed findings are still stored - a silently missing finding would be an
+    audit hole. Also stamps the scan with the pack version it ran under."""
+    from app.services import project_repo_service, scan_engine_service
+    from app.services import project_stats_service as stats_svc
+    from app.models.vulnerability import Vulnerability
+
+    pack = await scan_engine_service.active_pack()
+    scan.rule_pack_version = pack.version if pack else None
+    retired = set(pack.retired_rule_ids) if pack else set()
+
+    fp_fingerprints: set[str] = set()
+    if any(f.fingerprint for f in findings):
+        resolve = stats_svc.repo_key_resolver(await project_repo_service.list_repos(scan.project_id))
+        rows = await Vulnerability.get_pymongo_collection().find(
+            {
+                "project_id": scan.project_id,
+                "repo_scope_key": resolve(scan),
+                "status": "resolved",
+                "resolution_reason": "false_positive",
+            },
+            {"fingerprint": 1},
+        ).to_list(length=None)
+        fp_fingerprints = {r["fingerprint"] for r in rows}
+
+    n = 0
+    for f in findings:
+        if f.fingerprint and f.fingerprint in fp_fingerprints:
+            f.suppressed, f.suppressed_reason = True, "false_positive"
+        elif f.rule_id and f.rule_id in retired:
+            f.suppressed, f.suppressed_reason = True, "rule_retired"
+        else:
+            continue
+        n += 1
+    scan.suppressed_count = n
+    return n
+
+
 async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     """Write findings + report for `scan` from a parsed Go report, mark the scan completed.
 
@@ -306,10 +360,12 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         _map_finding(scan_id, project_id, f, scan.project_repo_id, report.root_path)
         for f in report.findings
     ]
+    n_suppressed = await _apply_suppression(scan, findings)
+    counted = [f for f in findings if not f.suppressed]
     if findings:
         await Finding.insert_many(findings)
 
-    await _apply_finding_delta(project_id, old_total, old_by_sev, findings)
+    await _apply_finding_delta(project_id, old_total, old_by_sev, counted)
 
     now = datetime.now(timezone.utc)
     if report.duration_ns:  # None or 0 = the scanner did not time itself; 0 must not read as "0.0s"
@@ -345,7 +401,7 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         git_commit=report.git_commit,
         branch=report.branch,
         hostname=report.hostname,
-        stats=_stats(report.stats, findings),
+        stats=_stats(report.stats, counted, n_suppressed),
         diagnostics=diagnostics,
         raw_json=stored_raw_json,
         json_uploaded_at=now,
@@ -400,11 +456,11 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     await notification_service.notify(
         "scan.completed",
         project_id=project_id,
-        title=f"Scan completed — {len(findings)} finding(s)",
+        title=f"Scan completed — {len(counted)} finding(s)",
         body=(
             _sync_summary(reconciled, scan.git_commit)
             if reconciled is not None and scan.triggered_by == "sync"
-            else _completion_summary(findings)
+            else _completion_summary(counted)
         ),
         link=f"/projects/{project_id}/scans/{scan_id}",
     )

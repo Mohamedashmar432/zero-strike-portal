@@ -12,7 +12,7 @@ from beanie.operators import And, Eq, In, Or
 from bson.errors import InvalidId
 
 from app.core.owasp import OWASP_CODES_ORDERED
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_repo import ProjectRepo
@@ -250,7 +250,7 @@ async def get_severity_by_scan_ids(scan_ids: list[str]) -> dict[str, SeverityCou
     groups = await _aggregate(
         Finding,
         [
-            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$match": {"scan_id": {"$in": scan_ids}, **NOT_SUPPRESSED}},
             {"$group": {"_id": {"scan_id": "$scan_id", "severity": "$severity"}, "count": {"$sum": 1}}},
         ],
     )
@@ -264,7 +264,7 @@ async def reconcile_project_finding_counts() -> int:
     the first boot it writes nothing (no changes to make). Returns the number of projects updated."""
     groups = await _aggregate(
         Finding,
-        [{"$group": {"_id": {"project_id": "$project_id", "severity": "$severity"}, "count": {"$sum": 1}}}],
+        [{"$match": NOT_SUPPRESSED}, {"$group": {"_id": {"project_id": "$project_id", "severity": "$severity"}, "count": {"$sum": 1}}}],
     )
     totals: dict[str, int] = {}
     by_sev: dict[str, dict[str, int]] = {}
@@ -335,6 +335,7 @@ async def get_projects_stats(user: User, project_ids: list[str] | None = None) -
                     "project_id": {"$in": ids},
                     "severity": {"$in": _RISK_SEVERITIES},
                     "project_repo_id": {"$ne": None},
+                    **NOT_SUPPRESSED,
                 }
             },
             {"$group": {"_id": "$project_id", "repos": {"$addToSet": "$project_repo_id"}}},
@@ -377,7 +378,7 @@ async def get_projects_stats(user: User, project_ids: list[str] | None = None) -
         current_groups = await _aggregate(
             Finding,
             [
-                {"$match": {"scan_id": {"$in": posture_scan_ids}}},
+                {"$match": {"scan_id": {"$in": posture_scan_ids}, **NOT_SUPPRESSED}},
                 {
                     "$group": {
                         "_id": {"project_id": "$project_id", "severity": "$severity"},
@@ -435,7 +436,7 @@ async def get_repo_scan_history(project_id: str, repo_id: str, limit: int = 30) 
     groups = await _aggregate(
         Finding,
         [
-            {"$match": {"scan_id": {"$in": scan_ids}}},
+            {"$match": {"scan_id": {"$in": scan_ids}, **NOT_SUPPRESSED}},
             {"$group": {"_id": {"scan_id": "$scan_id", "severity": "$severity"}, "count": {"$sum": 1}}},
         ],
     )
@@ -483,7 +484,7 @@ async def get_project_scan_activity(project_id: str, limit_per_repo: int = 50) -
         groups = await _aggregate(
             Finding,
             [
-                {"$match": {"scan_id": {"$in": [str(s.id) for s in scans]}}},
+                {"$match": {"scan_id": {"$in": [str(s.id) for s in scans]}, **NOT_SUPPRESSED}},
                 {"$group": {"_id": {"scan_id": "$scan_id", "severity": "$severity"}, "count": {"$sum": 1}}},
             ],
         )
@@ -547,7 +548,7 @@ async def get_project_scan_activity(project_id: str, limit_per_repo: int = 50) -
 
 
 async def get_owasp_summary(project_id: str, project_repo_id: str | None = None) -> dict[str, int]:
-    match: dict = {"project_id": project_id}
+    match: dict = {"project_id": project_id, **NOT_SUPPRESSED}
     if project_repo_id:
         match["project_repo_id"] = project_repo_id
     groups = await _aggregate(

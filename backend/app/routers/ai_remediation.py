@@ -15,7 +15,7 @@ from app.core.timeutils import as_utc
 from app.models.ai_fix_proposal import AIFixProposal
 from app.models.ai_remediation_job import RemediationJob
 from app.models.audit_log import AuditLog
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.models.finding_comment import FindingComment
 from app.models.fix_conversation import ConversationMessage, FixConversation
 from app.models.scan import Scan
@@ -276,7 +276,7 @@ def _resolve_status(job: RemediationJob | None, has_data: bool):
 
 
 async def _scan_response(scan_id: str, job: RemediationJob | None) -> ScanAutoFixResponse:
-    findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+    findings = await Finding.find(Finding.scan_id == scan_id, NOT_SUPPRESSED).to_list()
     fmap = {str(f.id): f for f in findings}
     proposals = await AIFixProposal.find(AIFixProposal.scan_id == scan_id).sort("-created_at").to_list()
     # One proposal per finding (the service replaces priors, but keep newest defensively).
@@ -388,7 +388,7 @@ async def trigger_scan_auto_fix(
         # guaranteed to contain a full batch of selectable findings if that many exist,
         # so this stays bounded on a scan with thousands of findings.
         findings = (
-            await Finding.find(Finding.scan_id == scan_id)
+            await Finding.find(Finding.scan_id == scan_id, NOT_SUPPRESSED)
             .sort("-priority_score")
             .limit(cfg.max_findings_per_job + len(excluded))
             .to_list()

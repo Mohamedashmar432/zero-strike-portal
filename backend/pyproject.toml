@@ -26,6 +26,8 @@ dependencies = [
     "azure-keyvault-secrets>=4.8",
     # Container CPU/memory for the admin Operations page (services/system_metrics.py).
     "psutil>=5.9",
+    # Custom scanner rules are parsed (id, language) before they are validated by the scanner.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

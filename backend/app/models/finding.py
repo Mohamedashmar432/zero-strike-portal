@@ -50,6 +50,12 @@ class TaintContextEmbedded(BaseModel):
     path: list[LocationEmbedded] = []
 
 
+# Mongo filter fragment: findings that count toward severity totals, reports, compliance evidence and
+# blocking. Suppressed findings are stored (an audit trail) but never counted. `$ne: True` also matches
+# documents written before the field existed.
+NOT_SUPPRESSED = {"suppressed": {"$ne": True}}
+
+
 class Finding(Document):
     scan_id: str
     project_id: str
@@ -89,6 +95,10 @@ class Finding(Document):
     # unfingerprinted findings (nothing to reconcile against) and for findings ingested
     # before this field existed.
     vulnerability_id: str | None = None
+    # Stored but not counted: a project member's false-positive verdict, or a retired rule. See
+    # NOT_SUPPRESSED and report_ingestion_service._apply_suppression.
+    suppressed: bool = False
+    suppressed_reason: Literal["false_positive", "rule_retired"] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:

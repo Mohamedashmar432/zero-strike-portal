@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import get_current_user
-from app.models.finding import Finding
+from app.models.finding import NOT_SUPPRESSED, Finding
 from app.models.report import Report
 from app.models.scan import Scan
 from app.models.user import User
@@ -55,6 +55,8 @@ def _to_finding_response(f: Finding) -> FindingResponse:
         rationale=f.rationale,
         remediation=f.remediation,
         taint_context=f.taint_context,
+        suppressed=f.suppressed,
+        suppressed_reason=f.suppressed_reason,
         created_at=f.created_at,
     )
 
@@ -92,6 +94,9 @@ def _to_response(
         ai_analysis_progress_completed=ai.progress_completed if ai else 0,
         ai_analysis_progress_total=ai.progress_total if ai else 0,
         findings_by_severity=severity,
+        rule_pack_version=scan.rule_pack_version,
+        suppressed_count=scan.suppressed_count,
+        custom_rules_ran=scan.custom_rules_ran,
     )
 
 
@@ -262,7 +267,7 @@ async def get_scan_report_pdf(scan_id: str, user: User = Depends(get_current_use
 
     project = await project_service.get_project_or_404(scan.project_id)
     template = await report_template_service.get_effective_template(project)
-    findings = await Finding.find(Finding.scan_id == scan_id).to_list()
+    findings = await Finding.find(Finding.scan_id == scan_id, NOT_SUPPRESSED).to_list()
     pdf_bytes = await pdf_report_service.render_scan_report_pdf(scan, report, findings, template, project.name)
     filename = pdf_report_service.build_report_filename(scan, report, project.name)
     return Response(
@@ -279,6 +284,7 @@ async def list_scan_findings(
     kind: str | None = Query(None),
     owasp: str | None = Query(None),
     priority: str | None = Query(None),
+    suppressed: bool = Query(False, description="true lists only the suppressed findings"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     user: User = Depends(get_current_user),
@@ -286,7 +292,7 @@ async def list_scan_findings(
     scan = await scan_service.get_scan_or_404(scan_id)
     await project_service.require_member(scan.project_id, user)
 
-    criteria = [Finding.scan_id == scan_id]
+    criteria: list = [Finding.scan_id == scan_id, {"suppressed": True} if suppressed else NOT_SUPPRESSED]
     if severity:
         criteria.append(Finding.severity == severity)
     if kind:

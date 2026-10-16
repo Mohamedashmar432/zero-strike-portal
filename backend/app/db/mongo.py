@@ -30,6 +30,7 @@ from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
 from app.models.system_log import SystemLog
 from app.models.user import User
+from app.models.scan_engine import CustomRule, NoisyRuleAlert, RuleOverride, RulePackVersion
 from app.models.vulnerability import Vulnerability
 from app.models.workspace_settings import WorkspaceSettings
 
@@ -82,6 +83,10 @@ async def connect_to_mongo() -> None:
             AutoFixQuotaRequest,
             Vulnerability,
             SystemLog,
+            RuleOverride,
+            CustomRule,
+            RulePackVersion,
+            NoisyRuleAlert,
         ],
     )
 
