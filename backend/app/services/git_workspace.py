@@ -22,6 +22,7 @@ from pathlib import Path
 import structlog
 
 from app.core.config import settings
+from app.core.git_ref import validate_branch_name
 from app.schemas.report import GoReportIn
 from app.services import workdir_hygiene
 from app.services.cloud_scan_service import (  # single SSRF source of truth
@@ -114,6 +115,11 @@ async def clone_repo(
     parent is the fetched tip); if a push is later rejected as shallow, call `git(..., ["fetch",
     "--unshallow", "origin"])` and retry once (see ai_remediation_apply_service)."""
     # Validated here, not left to callers: an unvalidated `--upload-pack=<cmd>` clone_url is RCE.
+    if branch:
+        try:
+            validate_branch_name(branch)
+        except ValueError as exc:
+            raise GitWorkspaceError(str(exc))
     try:
         pinned_ips = validate_repo_url(repo_url)
     except CloudScanError as exc:
@@ -142,17 +148,16 @@ async def clone_repo(
         raise GitWorkspaceError(str(exc))
 
 
-_BRANCH_RE = re.compile(r"[A-Za-z0-9._/-]+")
-
-
 async def remote_head(
     repo_url: str, branch: str, token: str | None = None, auth_scheme: str = "bearer", timeout: int = 30
 ) -> str:
     """Head commit sha of `branch` on the remote, via `git ls-remote` (no clone). SSRF-validated and
     pinned like a clone; the token travels in GIT_CONFIG_* env, never argv. Raises GitWorkspaceError
     with a sanitized message on any failure, including a branch that does not exist remotely."""
-    if not _BRANCH_RE.fullmatch(branch) or branch.startswith("-") or ".." in branch:
-        raise GitWorkspaceError("invalid branch name")
+    try:
+        validate_branch_name(branch)
+    except ValueError as exc:
+        raise GitWorkspaceError(str(exc))
     try:
         pinned_ips = validate_repo_url(repo_url)
     except CloudScanError as exc:

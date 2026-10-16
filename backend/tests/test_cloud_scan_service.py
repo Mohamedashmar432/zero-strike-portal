@@ -559,3 +559,29 @@ def test_cloud_scan_ignores_unusable_rev_parse_output(client, monkeypatch, tmp_p
         assert reloaded.git_commit is None
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("bad_branch", ["-x", "--upload-pack=y", "a..b", "x" * 256, "a b"])
+def test_scan_request_rejects_unsafe_branch(bad_branch):
+    from pydantic import ValidationError
+
+    from app.schemas.scan import ScanCreateRequest
+
+    with pytest.raises(ValidationError):
+        ScanCreateRequest(scan_type="cloud", repo_url="https://github.com/example/repo", branch=bad_branch)
+
+
+def test_scan_request_accepts_normal_branch():
+    from app.schemas.scan import ScanCreateRequest
+
+    req = ScanCreateRequest(scan_type="cloud", repo_url="https://github.com/example/repo", branch="feature/x-1.2")
+    assert req.branch == "feature/x-1.2"
+
+
+def test_clone_refuses_bad_branch_before_spawning_git(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise AssertionError("git must not be spawned for an invalid branch")
+
+    monkeypatch.setattr(css, "_run", boom)
+    with pytest.raises(css.CloudScanError):
+        asyncio.run(css._clone("https://github.com/example/repo", "--upload-pack=y", str(tmp_path), None))

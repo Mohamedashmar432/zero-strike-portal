@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.git_ref import validate_branch_name
 from app.core.repo_url import check_repo_url_syntax
 
 
@@ -23,6 +24,11 @@ class ProjectRepoCreateRequest(BaseModel):
     clone_url: str
     selected_branch: str
     label: str | None = None
+
+    @field_validator("selected_branch")
+    @classmethod
+    def _validate_selected_branch(cls, v: str) -> str:
+        return validate_branch_name(v)
 
     @field_validator("clone_url")
     @classmethod
@@ -50,6 +56,11 @@ class ProjectRepoCreateRequest(BaseModel):
 
 class ProjectRepoUpdateRequest(BaseModel):
     selected_branch: str
+
+    @field_validator("selected_branch")
+    @classmethod
+    def _validate_selected_branch(cls, v: str) -> str:
+        return validate_branch_name(v)
 
 
 class ProjectRepoReauthRequest(BaseModel):

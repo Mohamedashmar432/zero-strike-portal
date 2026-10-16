@@ -75,6 +75,54 @@ def test_create_scan_without_project_id_in_body_succeeds(client):
     assert body["project_name"] == project["name"]
 
 
+def _stored_repo_url(client, owner, token, **fields):
+    r = client.post("/api/v1/scans", json={"scanner_version": "v0.24.0", **fields}, headers=_scanner(token))
+    assert r.status_code == 201
+    detail = client.get(f"/api/v1/scans/{r.json()['scan_id']}", headers=_headers(owner)).json()
+    return detail
+
+
+def test_create_scan_stores_sanitized_repo_url(client):
+    owner = register_and_login(client, email="scn1c@zerostrike.dev")
+    project = _project(client, _headers(owner))
+    token = _raw_key(client, _headers(owner), project["id"])
+
+    detail = _stored_repo_url(client, owner, token, repo_url="https://github.com/org/repo", branch="main")
+    assert detail["repo_url"] == "https://github.com/org/repo"
+    assert detail["branch"] == "main"
+
+    # Credentials, query and fragment never reach the database.
+    detail = _stored_repo_url(
+        client, owner, token, repo_url="https://user:secret@github.com/org/repo.git?token=abc#frag"
+    )
+    assert detail["repo_url"] == "https://github.com/org/repo.git"
+    detail = _stored_repo_url(client, owner, token, repo_url="https://ghp_tok@dev.azure.com/o/p/_git/r")
+    assert detail["repo_url"] == "https://dev.azure.com/o/p/_git/r"
+
+
+def test_create_scan_invalid_repo_url_is_stored_as_none(client):
+    owner = register_and_login(client, email="scn1d@zerostrike.dev")
+    project = _project(client, _headers(owner))
+    token = _raw_key(client, _headers(owner), project["id"])
+
+    for bad in (
+        "ssh://git@github.com/org/repo", "-oProxyCommand=x", "not a url", "", 42,
+        "https://github.com/ghp_abcdefghijklmnopqrstuvwxyz0123456789/r", "https://github.com/o/r/extra",
+    ):
+        assert _stored_repo_url(client, owner, token, repo_url=bad)["repo_url"] is None
+
+
+def test_create_scan_without_repo_url_or_branch_succeeds(client):
+    """Older scanners send neither field."""
+    owner = register_and_login(client, email="scn1e@zerostrike.dev")
+    project = _project(client, _headers(owner))
+    token = _raw_key(client, _headers(owner), project["id"])
+
+    detail = _stored_repo_url(client, owner, token)
+    assert detail["repo_url"] is None
+    assert detail["branch"] is None
+
+
 def test_create_scan_project_mismatch_forbidden(client):
     owner = register_and_login(client, email="scn2@zerostrike.dev")
     project_a = _project(client, _headers(owner), name="A")

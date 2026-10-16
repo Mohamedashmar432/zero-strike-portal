@@ -6,6 +6,14 @@ import os
 # Tests that exercise email set `settings.smtp_host` themselves via monkeypatch.
 for _name in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "AZURE_KEY_VAULT_URL"):
     os.environ[_name] = ""
+# The settings guard fails closed (production) unless told otherwise; keys are generated per run.
+import secrets as _secrets  # noqa: E402
+
+from cryptography.fernet import Fernet  # noqa: E402
+
+os.environ["APP_ENV"] = "development"
+os.environ["OAUTH_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+os.environ["JWT_SECRET"] = _secrets.token_urlsafe(48)
 # mongomock resolves an mongodb+srv:// URI over real DNS (slow/flaky offline), so give it a plain one.
 os.environ["MONGODB_URI"] = "mongodb://localhost:27017"
 # Fixtures use zerostrike.dev/zs.dev addresses; the domain allowlist has its own tests.

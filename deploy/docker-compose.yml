@@ -12,6 +12,7 @@ services:
     secrets:
       - mongodb_uri
       - jwt_secret
+      - oauth_encryption_key
     tmpfs:
       # Ephemeral, size-capped clone workspace.
       - /tmp/zs-clones:size=2147483648
@@ -56,6 +57,8 @@ secrets:
     file: ./secrets/mongodb_uri.txt
   jwt_secret:
     file: ./secrets/jwt_secret.txt
+  oauth_encryption_key:
+    file: ./secrets/oauth_encryption_key.txt
 
 volumes:
   caddy_data:

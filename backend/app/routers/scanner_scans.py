@@ -49,6 +49,7 @@ async def scanner_create_scan(
         hostname=payload.hostname,
         git_commit=payload.git_commit,
         branch=payload.branch,
+        repo_url=payload.repo_url,
         scan_label=payload.scan_label,
         created_at=now,
         updated_at=now,

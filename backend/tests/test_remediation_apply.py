@@ -13,6 +13,7 @@ from app.models.finding import Finding, LocationEmbedded
 from app.models.project_repo import ProjectRepo
 from app.models.scan import Scan
 from app.services import ai_remediation_apply_service as apply_svc
+from app.services import ai_remediation_service, workdir_hygiene
 from app.services import git_workspace
 from app.services.repo_write import github as gh_write
 
@@ -465,3 +466,52 @@ def test_apply_azure_devops_opens_pr_with_description_within_ado_limit(client, m
         assert "truncated" in body["description"]
 
     asyncio.run(run())
+
+
+def _cicd_scan(repo_url):
+    now = datetime.now(timezone.utc)
+    return Scan(
+        project_id="p", scan_type="cicd", status="completed", repo_url=repo_url,
+        created_at=now, updated_at=now,
+    )
+
+
+def _spy_clone(monkeypatch):
+    calls = []
+
+    async def fake_clone(clone_url, branch, workdir, token=None, auth_scheme="bearer"):
+        calls.append((clone_url, token, auth_scheme))
+
+    monkeypatch.setattr(git_workspace, "validate_repo_url", lambda u: None)
+    monkeypatch.setattr(git_workspace, "clone_repo", fake_clone)
+    return calls
+
+
+def test_cicd_scan_with_unmatched_repo_url_is_never_cloned(client, monkeypatch):
+    calls = _spy_clone(monkeypatch)
+
+    async def run():
+        await _seed()  # connects https://github.com/o/r.git to project "p"
+        scan = _cicd_scan("https://github.com/attacker/other")
+        await scan.insert()
+        job = SimpleNamespace(created_by=None)
+        assert await ai_remediation_service._try_clone(scan, None, "main", job) is None
+
+    asyncio.run(run())
+    assert calls == []
+
+
+def test_cicd_scan_matching_connected_repo_clones_its_clone_url_and_credential(client, monkeypatch):
+    calls = _spy_clone(monkeypatch)
+
+    async def run():
+        await _seed(pat="ghp_repo_pat")
+        scan = _cicd_scan("https://GitHub.com/o/r")  # different spelling, same repo
+        await scan.insert()
+        job = SimpleNamespace(created_by=None)
+        workdir = await ai_remediation_service._try_clone(scan, None, "main", job)
+        assert workdir is not None
+        workdir_hygiene.rmtree_logged(workdir)
+
+    asyncio.run(run())
+    assert calls == [("https://github.com/o/r.git", "ghp_repo_pat", "basic")]

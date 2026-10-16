@@ -265,3 +265,14 @@ def test_legacy_apply_job_without_proposal_ids_still_runs(client, monkeypatch):
         assert p.review_state == "pr_open"
 
     asyncio.run(run())
+
+
+def test_apply_scope_key_digest_unchanged_by_usedforsecurity_flag():
+    import hashlib
+
+    from app.routers.ai_remediation import _apply_scope_key
+
+    ids = ["b", "a", "c"]
+    legacy = "apply:batch:" + hashlib.sha1(",".join(sorted(ids)).encode()).hexdigest()[:16]
+    assert _apply_scope_key(ids) == legacy
+    assert _apply_scope_key(["only"]) == "apply:only"

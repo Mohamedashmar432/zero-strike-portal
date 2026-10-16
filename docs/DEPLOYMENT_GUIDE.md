@@ -68,10 +68,13 @@ Let's Encrypt, so no separate cert step.
    ```
    cp secrets/mongodb_uri.txt.example secrets/mongodb_uri.txt
    cp secrets/jwt_secret.txt.example secrets/jwt_secret.txt
+   cp secrets/oauth_encryption_key.txt.example secrets/oauth_encryption_key.txt
    ```
    Put your Atlas connection string in `secrets/mongodb_uri.txt` and the
    `openssl rand -hex 32` value in `secrets/jwt_secret.txt` (no quotes, no trailing
-   newline needed either way).
+   newline needed either way). Put a Fernet key (`python -c "from cryptography.fernet import Fernet;
+   print(Fernet.generate_key().decode())"`) in `secrets/oauth_encryption_key.txt`. `APP_ENV` defaults to
+   `production`, so the backend refuses to boot if either secret is missing or malformed.
 
 5. **Build and start**:
    ```
@@ -109,6 +112,7 @@ Let's Encrypt, so no separate cert step.
    | `MONGODB_URI` | your Atlas connection string |
    | `MONGODB_DB_NAME` | `zerostrike` |
    | `JWT_SECRET` | the `openssl rand -hex 32` value |
+| `OAUTH_ENCRYPTION_KEY` | a Fernet key (required; `APP_ENV` defaults to `production`) |
    | `CORS_ORIGINS` | `["https://<your-vercel-domain>"]` — fill in after B2, once you know it |
    | `BACKEND_PUBLIC_URL` | `https://<your-railway-domain>` (this service's own URL, from step 3 above) |
    | `FRONTEND_ORIGIN` | `https://<your-vercel-domain>` — fill in after B2, same as `CORS_ORIGINS` |

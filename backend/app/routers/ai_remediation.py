@@ -670,7 +670,7 @@ def _apply_scope_key(proposal_ids: list[str]) -> str:
     existing single-proposal dedup (and any job queued before batching) still matches."""
     if len(proposal_ids) == 1:
         return f"apply:{proposal_ids[0]}"
-    return "apply:batch:" + hashlib.sha1(",".join(sorted(proposal_ids)).encode()).hexdigest()[:16]
+    return "apply:batch:" + hashlib.sha1(",".join(sorted(proposal_ids)).encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 async def _apply_in_flight(proposal_id: str) -> bool:

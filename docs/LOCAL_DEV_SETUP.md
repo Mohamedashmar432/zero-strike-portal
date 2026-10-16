@@ -41,13 +41,15 @@ Fill in (only these 5 are active by default in `.env.example`):
 |---|---|
 | `MONGODB_URI` | Your Atlas connection string from step 2 |
 | `MONGODB_DB_NAME` | Leave as `zerostrike` unless you want a different DB name |
-| `JWT_SECRET` | Any random string, e.g. `openssl rand -hex 32` |
+| `APP_ENV` | `development` (the default is `production`, which refuses to boot without real secrets) |
+| `JWT_SECRET` | Any random string, e.g. `openssl rand -hex 32` (blank = random per run) |
+| `OAUTH_ENCRYPTION_KEY` | A Fernet key (see `.env.example`); encrypts AI provider keys and PATs |
 | `CORS_ORIGINS` | Leave as `["http://localhost:3000"]` |
 | `SCANNER_BINARY_PATH` | Absolute path to the binary built in step 1 |
 
 Everything else in `.env.example` is commented out and **optional**:
 `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, `AZURE_DEVOPS_CLIENT_ID`/
-`AZURE_DEVOPS_CLIENT_SECRET`, `OAUTH_ENCRYPTION_KEY` — only needed if you're testing
+`AZURE_DEVOPS_CLIENT_SECRET` — only needed if you're testing
 GitHub/Azure DevOps repo-import OAuth. `CLONE_WORKDIR_PATH`, `SCAN_TIMEOUT_SECONDS`,
 `MAX_CONCURRENT_CLOUD_SCANS` — cloud-scan tuning, defaults are fine for local dev.
 Every field in `backend/app/core/config.py` has a default, so the app boots even if

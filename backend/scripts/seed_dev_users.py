@@ -15,6 +15,7 @@ Usage (from backend/):
 
 import argparse
 import asyncio
+import sys
 from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -27,11 +28,14 @@ from app.models.project_member import ProjectMember
 from app.models.user import User
 
 USERS = [
+    # zerostrike-ignore: ZS-PY-141 -- dev-only accounts documented in docs/TEST_USERS.md; script refuses outside APP_ENV=development
     {"email": "admin@zerostrike.dev", "name": "Admin", "password": "AdminDev!2026", "role": "admin"},
+    # zerostrike-ignore: ZS-PY-141 -- dev-only accounts documented in docs/TEST_USERS.md; script refuses outside APP_ENV=development
     {"email": "owner@zerostrike.dev", "name": "Owner", "password": "OwnerDev!2026", "role": "user"},
     {
         "email": "collaborator@zerostrike.dev",
         "name": "Collaborator",
+        # zerostrike-ignore: ZS-PY-141 -- dev-only accounts documented in docs/TEST_USERS.md; script refuses outside APP_ENV=development
         "password": "CollabDev!2026",
         "role": "user",
     },
@@ -131,19 +135,29 @@ async def seed(reset: bool = False) -> None:
     print(f"Seeded demo project: {project.name!r} ({project.id}), owner={owner.email}")
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    # This script resets admin passwords against whatever MONGODB_URI points at, so it only runs
+    # when the environment explicitly says it is a development one. Checked before any connection.
+    if settings.app_env != "development":
+        print("Refusing to seed: set APP_ENV=development (this script resets admin passwords).")
+        sys.exit(2)
     parser = argparse.ArgumentParser(description="Seed local-dev users; optionally wipe first.")
     parser.add_argument(
         "--reset", action="store_true", help="Drop the entire target database before seeding."
     )
     parser.add_argument("--yes", action="store_true", help="Skip the --reset confirmation prompt.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Irreversible and the db name is identical in every environment (`zerostrike`), so the
     # only thing separating dev from prod here is which URI is in .env. Make the operator read it.
     if args.reset and not args.yes:
         print(f"About to DROP EVERYTHING in {_target()} (users, scans, findings, binaries).")
+        print(f"Target database: {settings.mongodb_db_name}")
         if input("Type the database name to confirm: ").strip() != settings.mongodb_db_name:
             raise SystemExit("Aborted.")
 
     asyncio.run(seed(reset=args.reset))
+
+
+if __name__ == "__main__":
+    main()

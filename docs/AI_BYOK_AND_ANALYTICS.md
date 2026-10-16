@@ -128,4 +128,4 @@ Relevant suites: `test_project_byok.py` (switch, CRUD, cross-project isolation),
 | A project reads or edits another's credential | Every scoped lookup asserts `config.project_id`; four verbs covered by tests. |
 | Usage-event volume on a 512MB Atlas M0 | 180-day TTL index; lifetime totals live on `AIProviderConfig`. |
 | Cost figures are estimates | They come from litellm's price table and fall back to `0.0` when it can't price a model. Labelled "Estimated from provider pricing" in the UI — not billing-grade. |
-| One shared Fernet key for all secret types | Pre-existing (`oauth_encryption_key`, committed dev default, no rotation path). BYOK widens the blast radius; key rotation is still unaddressed. |
+| One shared Fernet key for all secret types | `oauth_encryption_key` has no default and is required; rotate with `backend/scripts/rotate_encryption_key.py` (`OAUTH_ENCRYPTION_KEY_PREVIOUS` holds the old key). BYOK widens the blast radius. |
