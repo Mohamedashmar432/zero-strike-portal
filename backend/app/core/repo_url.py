@@ -1,7 +1,9 @@
 """Syntax-only repo URL check, shared by request schemas (write time, no DNS) and
 cloud_scan_service.validate_repo_url (clone time, adds DNS/IP vetting)."""
 
+import ipaddress
 import re
+import socket
 from urllib.parse import ParseResult, urlparse, urlsplit, urlunsplit
 
 
@@ -25,6 +27,29 @@ def check_repo_url_syntax(repo_url: str) -> ParseResult:
     except ValueError:
         raise ValueError("repo_url has an invalid port")
     return parsed
+
+
+def resolve_vetted_ips(hostname: str) -> list[str]:
+    """DNS-resolve `hostname` and reject any result that isn't globally routable (SSRF +
+    cloud-metadata 169.254.169.254 + CGNAT 100.64/10 defense). Returns the vetted IP strings
+    so a caller can pin a later connection to them against DNS-rebinding. Raises ValueError."""
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise ValueError("host does not resolve")
+    vetted: list[str] = []
+    for info in infos:
+        raw = info[4][0].split("%")[0]
+        ip = ipaddress.ip_address(raw)
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            raise ValueError("host resolves to a disallowed address")
+        if raw not in vetted:
+            vetted.append(raw)
+    if not vetted:
+        raise ValueError("host does not resolve")
+    return vetted
 
 
 _TOKEN_PREFIXES = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "gldt-", "xox")

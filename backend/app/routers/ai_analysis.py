@@ -122,17 +122,22 @@ async def _get_scan_or_404_and_authorize(scan_id: str, user: User) -> Scan:
     return scan
 
 
-async def _latest_job(kind: str, scope_key: str) -> AIAnalysisJob | None:
+async def _latest_job(kind: str, project_id: str, scope_key: str) -> AIAnalysisJob | None:
     return (
-        await AIAnalysisJob.find(AIAnalysisJob.kind == kind, AIAnalysisJob.scope_key == scope_key)
+        await AIAnalysisJob.find(
+            AIAnalysisJob.kind == kind,
+            AIAnalysisJob.project_id == project_id,
+            AIAnalysisJob.scope_key == scope_key,
+        )
         .sort("-created_at")
         .first_or_none()
     )
 
 
-async def _active_job(kind: str, scope_key: str) -> AIAnalysisJob | None:
+async def _active_job(kind: str, project_id: str, scope_key: str) -> AIAnalysisJob | None:
     return await AIAnalysisJob.find(
         AIAnalysisJob.kind == kind,
+        AIAnalysisJob.project_id == project_id,
         AIAnalysisJob.scope_key == scope_key,
         In(AIAnalysisJob.status, ["queued", "running"]),
     ).first_or_none()
@@ -180,7 +185,7 @@ async def trigger_finding_analysis(
     if insight is not None and not payload.force:
         return FindingAnalysisResponse(status="completed", error_message=None, insight=_to_finding_insight(insight))
 
-    active_job = await _active_job("finding", finding.fingerprint)
+    active_job = await _active_job("finding", finding.project_id, finding.fingerprint)
     if active_job is not None:
         return FindingAnalysisResponse(
             status=_JOB_STATUS_TO_API[active_job.status],
@@ -222,7 +227,7 @@ async def get_finding_analysis(finding_id: str, user: User = Depends(get_current
         insight = await AIFindingInsight.find_one(
             AIFindingInsight.fingerprint == finding.fingerprint, AIFindingInsight.project_id == finding.project_id
         )
-    job = await _latest_job("finding", finding.fingerprint) if finding.fingerprint else None
+    job = await _latest_job("finding", finding.project_id, finding.fingerprint) if finding.fingerprint else None
     status_value, error_message, started_at, done, total = _resolve_status(job, insight is not None)
     return FindingAnalysisResponse(
         status=status_value,
@@ -248,7 +253,7 @@ async def trigger_scan_analysis(
     if insight is not None and not payload.force:
         return ScanAnalysisResponse(status="completed", error_message=None, insight=_to_scan_insight(insight))
 
-    active_job = await _active_job("scan", scan_id)
+    active_job = await _active_job("scan", scan.project_id, scan_id)
     if active_job is not None:
         return ScanAnalysisResponse(
             status=_JOB_STATUS_TO_API[active_job.status],
@@ -284,9 +289,9 @@ async def trigger_scan_analysis(
 
 @finding_scan_router.get("/scans/{scan_id}/ai-analysis", response_model=ScanAnalysisResponse)
 async def get_scan_analysis(scan_id: str, user: User = Depends(get_current_user)):
-    await _get_scan_or_404_and_authorize(scan_id, user)
+    scan = await _get_scan_or_404_and_authorize(scan_id, user)
     insight = await AIScanInsight.find_one(AIScanInsight.scan_id == scan_id)
-    job = await _latest_job("scan", scan_id)
+    job = await _latest_job("scan", scan.project_id, scan_id)
     status_value, error_message, started_at, done, total = _resolve_status(job, insight is not None)
     return ScanAnalysisResponse(
         status=status_value,

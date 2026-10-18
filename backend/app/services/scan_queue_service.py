@@ -14,6 +14,7 @@ from datetime import timedelta
 
 import structlog
 
+from app.core import security
 from app.core.config import settings
 from app.core.job_queue import claim_next, drain_lock, reap_stuck
 from app.models.scan import Scan
@@ -68,8 +69,9 @@ async def drain_queue() -> None:
             scan = await _claim_next()
             if scan is None:
                 break
+            plaintext_token = security.decrypt_secret(scan.repo_token) if scan.repo_token else None
             task = asyncio.create_task(
-                cloud_scan_service.run_cloud_scan(str(scan.id), scan.repo_token, scan.repo_token_auth_scheme)
+                cloud_scan_service.run_cloud_scan(str(scan.id), plaintext_token, scan.repo_token_auth_scheme)
             )
             _track(task)
 

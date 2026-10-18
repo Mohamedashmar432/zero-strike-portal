@@ -65,6 +65,16 @@ background `asyncio.Task`.
   equivalents in `routers/scans.py` — deliberately split so a handler can't accidentally
   accept both.
 
+**Project invites require a claim token, not just a matching email**
+(`services/auth_service.py: link_pending_invites`, `models/project_member.py`): registering with
+an allowed-domain address is not proof of mailbox ownership, so a pending `ProjectMember` (no
+`user_id` yet) is only linked to a new account when the registrant presents the one-time token
+from the invite email (`invite_token_hash`, sha256 via `security.generate_reset_token`/
+`hash_token`, same pattern as password reset) — matching on `invited_email` alone would let
+anyone register first with a victim's address and steal their pending invites. An invite that
+resolved to an *existing* user at invite time carries no token and needs no claim; login no
+longer auto-links pending invites by email either, for the same reason.
+
 **Scan lifecycle** (`models/scan.py: ScanStatus`, `scan_type: cloud|cicd`):
 - `cicd` scans are created *by the scanner itself* via API key (there is no `local` type any more —
   every scanner upload came from a pipeline, and a startup migration in `main.py` rewrites old rows)

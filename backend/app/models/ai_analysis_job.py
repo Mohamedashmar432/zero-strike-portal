@@ -74,5 +74,7 @@ class AIAnalysisJob(Document):
         # job before inserting) plus a plain non-unique compound index for that query's shape.
         indexes = [
             IndexModel([("status", 1), ("created_at", 1)]),  # oldest-queued claim query (job_queue.claim_next)
-            IndexModel([("kind", 1), ("scope_key", 1), ("status", 1)]),
+            # project_id included: scope_key (a finding's fingerprint) is not unique across
+            # projects, so the dedup lookup in routers/ai_analysis.py must also scope by project.
+            IndexModel([("kind", 1), ("project_id", 1), ("scope_key", 1), ("status", 1)]),
         ]

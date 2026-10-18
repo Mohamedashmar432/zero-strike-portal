@@ -132,10 +132,11 @@ def test_create_cloud_scan_via_project_repo_id_resolves_url_branch_and_token(cli
     assert body["branch"] == "release"
 
     async def _check():
+        from app.core import security
         from app.models.scan import Scan
 
         scan = await Scan.get(body["id"])
-        assert scan.repo_token == "pat-value"
+        assert security.decrypt_secret(scan.repo_token) == "pat-value"
         assert scan.repo_token_auth_scheme == "basic"
 
     asyncio.run(_check())

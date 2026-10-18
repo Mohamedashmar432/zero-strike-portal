@@ -47,7 +47,13 @@ def test_invite_unregistered_email_is_pending(client):
     assert body["user_id"] is None
 
 
-def test_pending_invite_links_on_registration(client):
+def test_pending_invite_links_on_registration_with_token(client):
+    """Registering with the invite's token (as the emailed link carries) claims the invite --
+    this is the proof-of-mailbox-ownership step; see test_registration_without_token_does_not_claim_invite."""
+    import asyncio
+
+    from app.models.project_member import ProjectMember
+
     owner = register_and_login(client, email="mowner3@zerostrike.dev")
     project = _create_project(client, _headers(owner))
     client.post(
@@ -56,7 +62,27 @@ def test_pending_invite_links_on_registration(client):
         headers=_headers(owner),
     )
 
-    new_user = register_and_login(client, email="future3@zerostrike.dev")
+    async def _raw_token():
+        from app.core import security
+
+        member = await ProjectMember.find_one(ProjectMember.invited_email == "future3@zerostrike.dev")
+        # Re-derive: the test has no access to the raw token the email carried, so mint a fresh
+        # one through the same hash path to simulate "the registrant has the emailed token".
+        raw = "test-raw-token"
+        member.invite_token_hash = security.hash_token(raw)
+        await member.save()
+        return raw
+
+    raw_token = asyncio.run(_raw_token())
+
+    r = client.post(
+        "/api/v1/auth/register",
+        json={"email": "future3@zerostrike.dev", "password": "hunter2pass", "name": "User", "invite_token": raw_token},
+    )
+    assert r.status_code == 201
+    new_user = client.post(
+        "/api/v1/auth/login", json={"email": "future3@zerostrike.dev", "password": "hunter2pass"}
+    ).json()
 
     r = client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner))
     members = r.json()
@@ -65,6 +91,28 @@ def test_pending_invite_links_on_registration(client):
 
     r = client.get("/api/v1/projects", headers=_headers(new_user))
     assert r.json()["total"] == 1
+
+
+def test_registration_without_token_does_not_claim_invite(client):
+    """The core fix: registering with a matching email but no (or wrong) invite token must NOT
+    claim someone else's pending invite -- otherwise anyone on an allowed domain could steal it
+    by registering first."""
+    owner = register_and_login(client, email="mowner3b@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    client.post(
+        f"/api/v1/projects/{project['id']}/members",
+        json={"email": "future3b@zerostrike.dev"},
+        headers=_headers(owner),
+    )
+
+    attacker = register_and_login(client, email="future3b@zerostrike.dev")
+
+    r = client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner))
+    target = next(m for m in r.json() if m["invited_email"] == "future3b@zerostrike.dev")
+    assert target["status"] == "pending"
+    assert target["user_id"] is None
+
+    assert client.get("/api/v1/projects", headers=_headers(attacker)).json()["total"] == 0
 
 
 def test_duplicate_invite_is_conflict(client):
@@ -266,13 +314,15 @@ def test_invite_emails_point_existing_users_at_the_project_and_new_ones_at_regis
     subject, text = by_to["has-account@zerostrike.dev"]
     assert "added you to Mail Demo" in subject and f"/projects/{project['id']}" in text
     subject, text = by_to["no-account@zerostrike.dev"]
-    assert "invited you to Mail Demo" in subject and text.rstrip().endswith("/register")
+    assert "invited you to Mail Demo" in subject and "/register?invite_token=" in text
 
 
-def test_login_links_an_invite_that_registration_missed(client):
-    """An account that exists while its invite is still pending (the prod state behind an
-    "invited member sees an empty dashboard" report) is healed on the next sign-in, and the
-    audit trail says so with via=login."""
+def test_login_no_longer_silently_links_a_stuck_invite(client):
+    """Login used to auto-link any pending invite matching the account's email by email alone --
+    that's the same unverified-ownership gap as registration (see
+    test_registration_without_token_does_not_claim_invite), just reachable one step later via an
+    account that already existed when the invite was created without a token. It must stay
+    pending until it is actually claimed with its token."""
     import asyncio
     from datetime import datetime, timezone
 
@@ -291,17 +341,10 @@ def test_login_links_an_invite_that_registration_missed(client):
 
     r = client.post("/api/v1/auth/login", json={"email": "stuck10@zerostrike.dev", "password": "hunter2pass"})
     me = r.json()
-    assert client.get("/api/v1/projects", headers=_headers(me)).json()["total"] == 1
+    assert client.get("/api/v1/projects", headers=_headers(me)).json()["total"] == 0
     statuses = {m["invited_email"]: m["status"] for m in
                 client.get(f"/api/v1/projects/{project['id']}/members", headers=_headers(owner)).json()}
-    assert statuses["stuck10@zerostrike.dev"] == "accepted"
-
-    from tests.test_users import _promote_to_admin
-    _promote_to_admin("mowner10@zerostrike.dev")
-    admin = client.post("/api/v1/auth/login", json={"email": "mowner10@zerostrike.dev", "password": "hunter2pass"}).json()
-    logs = client.get("/api/v1/audit-logs", headers=_headers(admin)).json()["items"]
-    linked = [entry for entry in logs if entry["action"] == "Invite Accepted"]
-    assert linked and linked[0]["metadata"]["via"] == "login"
+    assert statuses["stuck10@zerostrike.dev"] == "pending"
 
 
 def test_only_allowed_email_domains_can_register_or_be_invited(client, monkeypatch):

@@ -45,7 +45,7 @@ async def validate_key(payload: ApiKeyValidateRequest, request: Request):
 @router.post("", response_model=ApiKeyCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(payload: ApiKeyCreateRequest, user: User = Depends(get_current_user)):
     project = await project_service.get_project_or_404(payload.project_id)
-    await project_service.require_member(payload.project_id, user)
+    await project_service.require_owner_or_admin(payload.project_id, user)
     if project.is_archived:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is archived")
 
@@ -114,7 +114,7 @@ async def revoke_api_key(key_id: str, user: User = Depends(get_current_user)):
     key = await ApiKey.get(key_id)
     if not key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "API key not found")
-    await project_service.require_member(key.project_id, user)
+    await project_service.require_owner_or_admin(key.project_id, user)
 
     if key.revoked_at is None:
         key.revoked_at = datetime.now(timezone.utc)

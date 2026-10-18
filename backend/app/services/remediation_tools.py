@@ -222,7 +222,10 @@ def _resolve_in_workdir(workdir: str, path: str) -> Path | None:
     if not path or path.startswith("/") or path.startswith("\\"):
         return None
     root = Path(workdir).resolve()
-    target = (root / path).resolve()
+    unresolved = root / path
+    if unresolved.is_symlink():
+        return None
+    target = unresolved.resolve()
     if target != root and root not in target.parents:
         return None
     return target
@@ -232,8 +235,10 @@ def _list_repo_files(workdir: str, limit: int = 2000) -> tuple[list[str], bool]:
     root = Path(workdir).resolve()
     out: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not (Path(dirpath) / d).is_symlink()]
         for fn in sorted(filenames):
+            if (Path(dirpath) / fn).is_symlink():
+                continue
             rel = os.path.relpath(os.path.join(dirpath, fn), root).replace("\\", "/")
             out.append(rel)
             if len(out) >= limit:

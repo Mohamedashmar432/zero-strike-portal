@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from structlog import get_logger
 
 from app.core import security
+from app.core.repo_url import check_repo_url_syntax, resolve_vetted_ips
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider, AIProviderConfig
 from app.models.ai_usage_event import AIUsageEvent
 from app.services import ai_budget_service, report_template_service, secret_store
@@ -23,6 +24,20 @@ logger = get_logger(__name__)
 
 # Everything below is scoped: project_id=None is the portal-wide, admin-managed scope, and any
 # other value is one project's own. The two never mix -- see resolve_failover_configs.
+
+
+def _validate_base_url(base_url: str | None, provider: AIProvider) -> None:
+    """A custom base_url is a server-side outbound HTTP target (see llm_client) -- vet it the
+    same way cloud_scan_service vets repo_url, or a project owner could point a cloud provider's
+    backend at internal services / cloud metadata (SSRF). Exempts lmstudio/custom: those providers
+    ARE meant to point at a local/self-hosted runtime (localhost, LAN), at any scope."""
+    if not base_url or provider in NO_KEY_REQUIRED_PROVIDERS:
+        return
+    try:
+        parsed = check_repo_url_syntax(base_url)
+        resolve_vetted_ips(parsed.hostname)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"base_url is invalid: {exc}")
 
 
 async def byok_enabled() -> bool:
@@ -204,6 +219,7 @@ async def create_config(
 ) -> AIProviderConfig:
     """Auto-activates iff this scope was empty before the insert -- the first provider a project
     (or the portal) ever adds becomes active automatically; every subsequent one starts inactive."""
+    _validate_base_url(base_url, provider)
     was_empty = await AIProviderConfig.find(AIProviderConfig.project_id == project_id).count() == 0
     now = datetime.now(timezone.utc)
     config = AIProviderConfig(
@@ -252,6 +268,7 @@ async def update_config(
     prospective (post-update) state would leave it not ready -- an admin editing the live
     active provider must not be able to silently break it.
     """
+    _validate_base_url(base_url, provider)
     config = await get_config_or_404(config_id, project_id)
     config.name = name
     config.provider = provider

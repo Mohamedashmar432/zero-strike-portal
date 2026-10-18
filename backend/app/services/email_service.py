@@ -7,6 +7,7 @@ wrap these in `asyncio.to_thread` rather than this module growing an async API.
 """
 
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -73,7 +74,7 @@ def send_email(to_address: str, subject: str, text_body: str, html_body: str | N
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
         if settings.smtp_use_tls:
-            server.starttls()
+            server.starttls(context=ssl.create_default_context())
         if settings.smtp_username and settings.smtp_password:
             server.login(settings.smtp_username, settings.smtp_password)
         server.sendmail(settings.smtp_from_address, [to_address], message.as_string())

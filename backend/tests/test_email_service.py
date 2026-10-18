@@ -10,6 +10,7 @@ class _FakeSMTP:
         self.host = host
         self.port = port
         self.starttls_called = False
+        self.starttls_context = None
         self.login_args = None
         self.sendmail_args = None
         _FakeSMTP.instances.append(self)
@@ -20,8 +21,9 @@ class _FakeSMTP:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def starttls(self):
+    def starttls(self, context=None):
         self.starttls_called = True
+        self.starttls_context = context
 
     def login(self, username, password):
         self.login_args = (username, password)
@@ -62,6 +64,11 @@ def test_send_email_connects_and_sends_with_tls_and_login(monkeypatch):
     assert smtp.host == "smtp.example.com"
     assert smtp.port == 2525
     assert smtp.starttls_called is True
+    # Explicit default context: certificate/hostname verification must not be left implicit.
+    import ssl
+
+    assert isinstance(smtp.starttls_context, ssl.SSLContext)
+    assert smtp.starttls_context.verify_mode == ssl.CERT_REQUIRED
     assert smtp.login_args == ("svc-user", "svc-pass")
     from_addr, to_addrs, message = smtp.sendmail_args
     assert from_addr == "noreply@example.com"

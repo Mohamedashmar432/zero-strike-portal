@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import app.services.cloud_scan_service as cloud_scan_service
 import app.services.scan_queue_service as scan_queue_service
+from app.core import security
 from app.models.scan import Scan
 
 
@@ -14,7 +15,7 @@ def _make_queued_scan(created_at, repo_token=None):
         triggered_by="cloud",
         status="queued",
         repo_url="https://github.com/example/repo",
-        repo_token=repo_token,
+        repo_token=security.encrypt_secret(repo_token) if repo_token else None,
         created_at=created_at,
         updated_at=now,
     )
@@ -97,7 +98,7 @@ def test_drain_threads_basic_auth_scheme_for_azure_devops(client, monkeypatch):
             triggered_by="cloud",
             status="queued",
             repo_url="https://dev.azure.com/example/project/_git/repo",
-            repo_token="ado-pat",
+            repo_token=security.encrypt_secret("ado-pat"),
             repo_token_auth_scheme="basic",
             created_at=now,
             updated_at=now,

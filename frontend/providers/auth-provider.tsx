@@ -12,7 +12,7 @@ type AuthContextValue = {
   isRestoringSession: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Resolves to the new account; a `pending` one is NOT signed in. */
-  register: (email: string, password: string, name: string) => Promise<authApi.User>;
+  register: (email: string, password: string, name: string, inviteToken?: string | null) => Promise<authApi.User>;
   logout: () => Promise<void>;
   updateProfile: (payload: { name?: string; email?: string }) => Promise<void>;
 };
@@ -54,10 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function register(email: string, password: string, name: string) {
+  async function register(email: string, password: string, name: string, inviteToken?: string | null) {
     setIsAuthenticating(true);
     try {
-      const created = await authApi.register(email, password, name);
+      const created = await authApi.register(email, password, name, inviteToken);
       if (created.approval_status === "pending") return created;
       await login(email, password);
       return created;

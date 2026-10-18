@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import structlog
 from fastapi import BackgroundTasks, HTTPException, status
@@ -29,7 +30,7 @@ def require_allowed_email_domain(email: str) -> None:
         )
 
 
-async def register(email: str, password: str, name: str) -> User:
+async def register(email: str, password: str, name: str, invite_token: str | None = None) -> User:
     require_allowed_email_domain(email)
     if await User.find_one(User.email == email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email already registered")
@@ -43,32 +44,47 @@ async def register(email: str, password: str, name: str) -> User:
         updated_at=now,
     )
     await user.insert()
-    await link_pending_invites(user, via="register")
+    await link_pending_invites(user, via="register", invite_token=invite_token)
     return user
 
 
-async def link_pending_invites(user: User, via: str) -> list[str]:
-    """Attach every still-pending invite for this user's email to the account; returns the
-    project ids linked. Runs on register and again on every login, so an invite the register
-    step missed heals on the next sign-in — and the `via="login"` audit row says it was missed."""
-    pending = await ProjectMember.find(
-        ProjectMember.invited_email == user.email, ProjectMember.user_id == None  # noqa: E711
-    ).to_list()
+async def link_pending_invites(user: User, via: str, invite_token: str | None = None) -> list[str]:
+    """Attach a still-pending invite for this user's email to the account; returns the project
+    ids linked.
+
+    Registration is never proof of mailbox ownership on its own (an allowed-domain address is
+    enough to register, not to receive mail there), so a pending invite (no `user_id` set yet)
+    can only be claimed by presenting the one-time token from its invite email — matching on
+    `invited_email` alone would let anyone who registers first with a victim's address steal
+    their pending invites. An invite that already resolved to an existing user at invite time
+    (`invite_token_hash` is None) carries no such risk and was already linked then; there is
+    nothing left to claim on login.
+    """
+    if not invite_token:
+        return []
+    token_hash = security.hash_token(invite_token)
+    member = await ProjectMember.find_one(
+        ProjectMember.invited_email == user.email,
+        ProjectMember.user_id == None,  # noqa: E711
+        ProjectMember.invite_token_hash == token_hash,
+    )
+    if member is None:
+        return []
     now = datetime.now(timezone.utc)
-    for member in pending:
-        member.user_id = str(user.id)
-        member.accepted_at = now
-        await member.save()
-        await audit_service.record(
-            "Invite Accepted",
-            actor_user_id=str(user.id),
-            project_id=member.project_id,
-            target_type="user",
-            target_id=str(user.id),
-            metadata={"email": user.email, "via": via, "role": member.role, "member_id": str(member.id)},
-        )
-        logger.info("invite_linked", user_id=str(user.id), project_id=member.project_id, via=via)
-    return [m.project_id for m in pending]
+    member.user_id = str(user.id)
+    member.accepted_at = now
+    member.invite_token_hash = None
+    await member.save()
+    await audit_service.record(
+        "Invite Accepted",
+        actor_user_id=str(user.id),
+        project_id=member.project_id,
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"email": user.email, "via": via, "role": member.role, "member_id": str(member.id)},
+    )
+    logger.info("invite_linked", user_id=str(user.id), project_id=member.project_id, via=via)
+    return [member.project_id]
 
 
 async def _approval_required() -> bool:
@@ -147,18 +163,26 @@ async def send_welcome_email(user: User) -> None:
     )
 
 
-async def send_project_invite(email: str, inviter: str, project: Project, existing: bool) -> None:
+async def send_project_invite(
+    email: str, inviter: str, project: Project, existing: bool, invite_token: str | None = None
+) -> None:
     """Tell the invitee about a project invite. An existing account already has access, so the
-    link opens the project; otherwise it goes to registration, which picks up the pending
-    membership (see `register`). Run as a background task; never raises."""
+    link opens the project; otherwise it goes to registration carrying `invite_token` (see
+    `register`/`link_pending_invites`), which is what proves the registrant actually received
+    this email rather than merely typing a matching address. Run as a background task; never
+    raises."""
     origin = settings.frontend_origin
+    if existing:
+        action_url = f"{origin}/projects/{project.id}"
+    else:
+        action_url = f"{origin}/register?invite_token={invite_token}&email={quote(email)}"
     await _send_template(
         email,
         "project_invite_existing" if existing else "project_invite_new",
         {
             "inviter": inviter,
             "project": project.name,
-            "action_url": f"{origin}/projects/{project.id}" if existing else f"{origin}/register",
+            "action_url": action_url,
         },
         context="project invite",
     )

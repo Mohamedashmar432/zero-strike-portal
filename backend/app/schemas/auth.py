@@ -11,6 +11,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: BcryptSafePassword
     name: str
+    invite_token: str | None = None
 
 
 class LoginRequest(BaseModel):

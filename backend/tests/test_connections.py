@@ -226,10 +226,11 @@ def test_create_cloud_scan_via_connection_id(client, monkeypatch):
     assert r.status_code == 201
 
     async def _check_token():
+        from app.core import security
         from app.models.scan import Scan
 
         scan = await Scan.get(r.json()["id"])
-        assert scan.repo_token == "gho_abc123"
+        assert security.decrypt_secret(scan.repo_token) == "gho_abc123"
         # GitHub's git-over-HTTPS backend rejects Bearer even for OAuth tokens.
         assert scan.repo_token_auth_scheme == "basic"
 

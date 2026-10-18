@@ -2,8 +2,8 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,19 +14,25 @@ import { ApiError } from "@/lib/api/client";
 import { registerSchema, type RegisterInput } from "@/lib/validation/auth.schema";
 import { useAuth } from "@/providers/auth-provider";
 
-export default function RegisterPage() {
+function RegisterForm() {
   const { register: registerUser, isAuthenticating } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite_token");
+  const invitedEmail = searchParams.get("email");
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<RegisterInput>({ resolver: zodResolver(registerSchema) });
+  } = useForm<RegisterInput>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: invitedEmail ? { email: invitedEmail } : undefined,
+  });
 
   async function onSubmit(values: RegisterInput) {
     try {
-      const created = await registerUser(values.email, values.password, values.name);
+      const created = await registerUser(values.email, values.password, values.name, inviteToken);
       if (created.approval_status === "pending") {
         setSubmittedEmail(created.email);
         return;
@@ -92,5 +98,13 @@ export default function RegisterPage() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }

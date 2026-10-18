@@ -35,6 +35,21 @@ class RateLimiter:
         self._hits[key] = bucket
         return allowed
 
+    def peek(self, key: str, max_attempts: int, window_seconds: int) -> bool:
+        """Like `check`, but never records a hit -- for a caller that only wants to know
+        whether the bucket is currently full (e.g. decide whether a failed attempt gets to
+        raise 429) without counting the lookup itself as an attempt."""
+        now = self._clock()
+        bucket = [t for t in self._hits.get(key, []) if now - t < window_seconds]
+        return len(bucket) < max_attempts
+
+    def record(self, key: str, window_seconds: int) -> None:
+        """Records a hit for `key` without checking the limit."""
+        now = self._clock()
+        bucket = [t for t in self._hits.get(key, []) if now - t < window_seconds]
+        bucket.append(now)
+        self._hits[key] = bucket
+
 
 limiter = RateLimiter()
 
@@ -61,3 +76,13 @@ def enforce(key: str, max_attempts: int, window_seconds: int) -> None:
     """Raises HTTP 429 if `key` has exceeded `max_attempts` within `window_seconds`."""
     if not limiter.check(key, max_attempts, window_seconds):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many attempts, try again later")
+
+
+def peek_ok(key: str, max_attempts: int, window_seconds: int) -> bool:
+    """Whether `key` is currently under its limit, without recording a hit."""
+    return limiter.peek(key, max_attempts, window_seconds)
+
+
+def record_failure(key: str, window_seconds: int) -> None:
+    """Records a hit for `key` without checking the limit."""
+    limiter.record(key, window_seconds)

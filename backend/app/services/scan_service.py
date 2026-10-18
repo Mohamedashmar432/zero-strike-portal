@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 
+from app.core import security
 from app.models.project import Project
 from app.models.scan import Scan
 from app.models.user import User
@@ -36,7 +37,10 @@ async def enqueue_repo_scan(
         scan_type="cloud",
         triggered_by=triggered_by,
         status="queued",
-        repo_token=repo_token,
+        # Encrypted at rest: this sits on the Scan doc until the queue claims it (see
+        # scan_queue_service), which can be a while under load -- a plaintext clone credential
+        # (GitHub/Azure DevOps PAT) shouldn't be readable from the raw document in the meantime.
+        repo_token=security.encrypt_secret(repo_token) if repo_token else None,
         repo_token_auth_scheme=repo_token_auth_scheme,
         scan_label=scan_label,
         repo_url=repo_url,

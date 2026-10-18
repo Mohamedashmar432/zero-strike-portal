@@ -30,13 +30,18 @@ _PATTERNS: list[re.Pattern] = [
 ]
 
 # Assignment of a secret-looking key to a long, high-entropy literal:  API_KEY = "…"
+# No leading `\w*` before the alternation: that construction let the backtracker try every way
+# of splitting a long run of word characters across the `\w*`/alternation boundary when the line
+# never actually contained one of the keywords (catastrophic backtracking / ReDoS on long lines).
+_KEYWORD = re.compile(r"(?i)secret|token|passwd|password|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret")
 _ASSIGN = re.compile(
     r"""(?ix)
-    \b(\w*(?:secret|token|passwd|password|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\w*)
+    ([A-Za-z0-9_-]*(?:secret|token|passwd|password|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)[A-Za-z0-9_-]*)
     \s*[:=]\s*
     (['"]?)([A-Za-z0-9+/_\-=.]{16,})(['"]?)
     """
 )
+_MAX_LINE_LEN = 4000
 
 
 def _shannon_entropy(s: str) -> float:
@@ -48,8 +53,18 @@ def _shannon_entropy(s: str) -> float:
 
 
 def _redact_line(line: str) -> str:
+    # A pathologically long line (minified JS, a base64 blob) is where _ASSIGN's backtracking
+    # could get expensive; it's also never a plausible single source line, so just cap it.
+    if len(line) > _MAX_LINE_LEN:
+        line = line[:_MAX_LINE_LEN]
+
     for pat in _PATTERNS:
         line = pat.sub(PLACEHOLDER, line)
+
+    # Cheap literal/keyword pre-check: skip the heavier _ASSIGN regex entirely unless one of its
+    # keywords is even present, so a long line with no secret-shaped substring never reaches it.
+    if not _KEYWORD.search(line):
+        return line
 
     def _assign_sub(m: re.Match) -> str:
         value = m.group(3)

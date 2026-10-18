@@ -86,8 +86,11 @@ async def _resolve_credential(repo: ProjectRepo, approver_user_id: str | None):
 
 
 def _apply_patch(workdir: str, file_path: str, original_code: str, patched_code: str) -> None:
-    target = (Path(workdir) / file_path).resolve()
     root = Path(workdir).resolve()
+    unresolved = root / file_path
+    if unresolved.is_symlink():
+        raise _ManualReview("Patch target is a symlink; refusing to apply.")
+    target = unresolved.resolve()
     if root not in target.parents and target != root:
         raise _ManualReview("Patch target path escapes the repository.")
     if not target.is_file():

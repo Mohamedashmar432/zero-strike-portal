@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 
 from app.core import rate_limit
 from app.core.config import settings
@@ -39,7 +39,7 @@ async def register(payload: RegisterRequest, request: Request, background: Backg
         settings.rate_limit_register_max_attempts,
         settings.rate_limit_register_window_seconds,
     )
-    user = await auth_service.register(payload.email, payload.password, payload.name)
+    user = await auth_service.register(payload.email, payload.password, payload.name, payload.invite_token)
     await audit_service.record(
         "register",
         actor_user_id=str(user.id),
@@ -59,12 +59,23 @@ async def login(payload: LoginRequest, request: Request):
         settings.rate_limit_login_max_attempts,
         settings.rate_limit_login_window_seconds,
     )
-    rate_limit.enforce(
-        f"login-account:{payload.email.strip().lower()}",
-        settings.rate_limit_login_account_max_attempts,
-        settings.rate_limit_login_account_window_seconds,
+    # Account-wide bucket is keyed on email alone (no auth required to hit it), so an anonymous
+    # attacker spraying wrong passwords from many IPs could otherwise lock the real user out of
+    # their own account for the whole window. Only a FAILED attempt counts against it, and it's
+    # checked (not just incremented) before the failure is recorded, so a request with the
+    # correct password still succeeds even once the bucket is full.
+    account_key = f"login-account:{payload.email.strip().lower()}"
+    account_window = settings.rate_limit_login_account_window_seconds
+    account_ok = rate_limit.peek_ok(
+        account_key, settings.rate_limit_login_account_max_attempts, account_window
     )
-    user = await auth_service.authenticate(payload.email, payload.password)
+    try:
+        user = await auth_service.authenticate(payload.email, payload.password)
+    except auth_service.AuthError:
+        rate_limit.record_failure(account_key, account_window)
+        if not account_ok:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many attempts, try again later")
+        raise
     access_token, refresh_token, expires_in = await auth_service.issue_token_pair(
         user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
     )
@@ -73,7 +84,6 @@ async def login(payload: LoginRequest, request: Request):
     await audit_service.record(
         "login", actor_user_id=str(user.id), ip_address=client_ip(request), metadata={"email": user.email}
     )
-    await auth_service.link_pending_invites(user, via="login")
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
 

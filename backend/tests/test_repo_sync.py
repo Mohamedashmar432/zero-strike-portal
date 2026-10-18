@@ -169,7 +169,9 @@ def test_sync_enqueues_a_sync_scan_when_there_is_no_prior_scan(client, monkeypat
     assert str(scan.id) == body["scan_id"]
     assert (scan.triggered_by, scan.scan_type, scan.status) == ("sync", "cloud", "queued")
     assert scan.project_repo_id == rid and scan.branch == "main" and scan.repo_url == URL
-    assert scan.repo_token == "ghp_sync_token" and scan.repo_token_auth_scheme == "basic"
+    from app.core import security
+
+    assert security.decrypt_secret(scan.repo_token) == "ghp_sync_token" and scan.repo_token_auth_scheme == "basic"
     assert calls == [(URL, "main", "ghp_sync_token")]
     repo = _repo(rid)
     assert repo.remote_head_sha == SHA_A and repo.last_sync_error is None

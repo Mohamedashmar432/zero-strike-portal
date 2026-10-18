@@ -5,7 +5,9 @@ from beanie import PydanticObjectId
 from beanie.operators import In
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
+from app.core import security
 from app.core.deps import get_current_user
+from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -253,6 +255,9 @@ async def invite_member(
 
     invitee = await User.find_one(User.email == payload.email)
     now = datetime.now(timezone.utc)
+    # Only a pending invite (no account yet) needs a claim token: an invite that already matched
+    # an existing user is accepted immediately against that user's id, no registration involved.
+    raw_token = security.generate_reset_token()[0] if invitee is None else None
     member = ProjectMember(
         project_id=project_id,
         user_id=str(invitee.id) if invitee else None,
@@ -260,6 +265,7 @@ async def invite_member(
         invited_by=str(user.id),
         invited_at=now,
         accepted_at=now if invitee else None,
+        invite_token_hash=security.hash_token(raw_token) if raw_token else None,
     )
     await member.insert()
     await audit_service.record(
@@ -272,7 +278,7 @@ async def invite_member(
                   "status": "accepted" if invitee else "pending", "member_id": str(member.id)},
     )
     background.add_task(
-        auth_service.send_project_invite, payload.email, user.name, project, invitee is not None
+        auth_service.send_project_invite, payload.email, user.name, project, invitee is not None, raw_token
     )
     return _to_member_response(member, invitee.name if invitee else None)
 
@@ -304,6 +310,13 @@ async def remove_member(project_id: str, member_id: str, user: User = Depends(ge
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Owner or admin privileges required")
 
     await member.delete()
+    if member.user_id:
+        now = datetime.now(timezone.utc)
+        await ApiKey.find(
+            ApiKey.project_id == project_id,
+            ApiKey.created_by == member.user_id,
+            ApiKey.revoked_at == None,  # noqa: E711
+        ).update({"$set": {"revoked_at": now}})
     await audit_service.record(
         "Member Removed",
         actor_user_id=str(user.id),

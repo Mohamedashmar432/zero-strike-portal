@@ -41,8 +41,11 @@ async def _generate(workdir: str, scan_id: str | None, project_id: str) -> str |
     manifests: dict[str, str] = {}
     for rel in files:
         if rel.split("/")[-1] in _MANIFEST_NAMES and len(manifests) < 12:
+            path = root / rel
+            if path.is_symlink():
+                continue
             try:
-                raw = (root / rel).read_text(encoding="utf-8", errors="replace")[:8000]
+                raw = path.read_text(encoding="utf-8", errors="replace")[:8000]
                 manifests[rel] = redact(raw)
             except Exception:  # noqa: BLE001 — a single unreadable manifest must not abort the overview
                 pass

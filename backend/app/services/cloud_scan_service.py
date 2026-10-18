@@ -15,11 +15,9 @@ so the same code path works on Windows (local dev) and Linux (container).
 import asyncio
 import base64
 import contextlib
-import ipaddress
 import os
 import re
 import shutil
-import socket
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -30,7 +28,7 @@ import structlog
 
 from app.core.config import settings
 from app.core.git_ref import validate_branch_name
-from app.core.repo_url import check_repo_url_syntax
+from app.core.repo_url import check_repo_url_syntax, resolve_vetted_ips
 from app.core.retry import retry_transient
 from app.models.scan import Scan, ScanStage
 from app.schemas.report import GoReportIn
@@ -89,25 +87,9 @@ def validate_repo_url(repo_url: str) -> list[str]:
     git would otherwise re-resolve the host and a rebinding DNS server could answer differently."""
     try:
         parsed = check_repo_url_syntax(repo_url)
+        return resolve_vetted_ips(parsed.hostname)
     except ValueError as exc:
         raise CloudScanError(str(exc))
-    try:
-        infos = socket.getaddrinfo(parsed.hostname, None)
-    except socket.gaierror:
-        raise CloudScanError("repo_url host does not resolve")
-    vetted: list[str] = []
-    for info in infos:
-        raw = info[4][0].split("%")[0]
-        ip = ipaddress.ip_address(raw)
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-            ip = ip.ipv4_mapped
-        if not ip.is_global:
-            raise CloudScanError("repo_url resolves to a disallowed address")
-        if raw not in vetted:
-            vetted.append(raw)
-    if not vetted:
-        raise CloudScanError("repo_url host does not resolve")
-    return vetted
 
 
 def git_hardening_entries(repo_url: str, ips: list[str] | None) -> list[tuple[str, str]]:

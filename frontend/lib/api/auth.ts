@@ -24,10 +24,10 @@ export function login(email: string, password: string) {
   });
 }
 
-export function register(email: string, password: string, name: string) {
+export function register(email: string, password: string, name: string, inviteToken?: string | null) {
   return apiFetch<User>("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ email, password, name }),
+    body: JSON.stringify({ email, password, name, invite_token: inviteToken || undefined }),
   });
 }
 
