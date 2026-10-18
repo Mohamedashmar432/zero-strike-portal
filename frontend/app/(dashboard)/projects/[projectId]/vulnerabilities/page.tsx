@@ -23,8 +23,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
 import { FilterBar } from "@/components/common/filter-bar";
 import { RelativeTime } from "@/components/common/relative-time";
-import { CommitRef, FIX_STATUS_LABELS, FIXED_TOOLTIP } from "@/components/vulnerabilities/commit-ref";
-import { RegressionBadge } from "@/components/vulnerabilities/regression-badge";
+import { FIX_STATUS_LABELS } from "@/components/vulnerabilities/commit-ref";
 import { VulnerabilityStatusBadge } from "@/components/vulnerabilities/vulnerability-status-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
 import { Button } from "@/components/ui/button";
@@ -49,10 +48,6 @@ const REGRESSION_LABELS: Record<RegressionState, string> = {
   fixed: "Fixed",
   unchanged: "Unchanged",
 };
-
-function fileLine(file: string, line: number | null) {
-  return line ? `${file}:${line}` : file;
-}
 
 export default function VulnerabilitiesPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -258,14 +253,9 @@ export default function VulnerabilitiesPage() {
               <TableHead>Severity</TableHead>
               <TableHead>Vulnerability</TableHead>
               <TableHead>Repository</TableHead>
-              <TableHead>Location</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Regression</TableHead>
               <TableHead>Owner</TableHead>
-              <TableHead>Introduced</TableHead>
-              <TableHead>Fixed in</TableHead>
               <TableHead>First seen</TableHead>
-              <TableHead>Last seen</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -294,33 +284,12 @@ export default function VulnerabilitiesPage() {
                 <TableCell className="max-w-40 truncate font-mono text-xs" title={repoLabel(v)}>
                   {repoLabel(v)}
                 </TableCell>
-                <TableCell className="max-w-48 truncate font-mono text-xs">
-                  {v.current_location ? fileLine(v.current_location.file, v.current_location.start_line) : "—"}
-                </TableCell>
                 <TableCell>
                   <VulnerabilityStatusBadge status={v.status} />
                 </TableCell>
-                <TableCell>
-                  <RegressionBadge state={v.last_regression_state} />
-                </TableCell>
                 <TableCell className="text-xs">{v.assignee_email ?? "Unassigned"}</TableCell>
-                <TableCell>
-                  <CommitRef commit={v.first_seen_commit} branch={v.first_seen_branch} />
-                </TableCell>
-                <TableCell>
-                  {v.fix_status === "fixed" ? (
-                    <span title={FIXED_TOOLTIP}>
-                      <CommitRef commit={v.fixed_commit} branch={v.fixed_branch} />
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
-                </TableCell>
                 <TableCell className="text-xs">
                   <RelativeTime iso={v.first_seen_at} />
-                </TableCell>
-                <TableCell className="text-xs">
-                  <RelativeTime iso={v.last_seen_at} />
                 </TableCell>
                 <TableCell>
                   <Button
