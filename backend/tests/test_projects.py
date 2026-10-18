@@ -199,3 +199,13 @@ def test_project_stats_reflect_ingested_findings_and_risk_repo_count(client):
     assert body["total_findings"] == 4
     assert body["risk_repo_count"] == 1  # the fixture has a "critical" finding
     assert body["total_repo_count"] == 1
+
+
+def test_cicd_fail_on_defaults_to_high_and_can_be_changed(client):
+    h = _headers(register_and_login(client, email="gate@zerostrike.dev"))
+    project = _create_project(client, h)
+    assert project["cicd_fail_on"] == "high"
+    r = client.patch(f"/api/v1/projects/{project['id']}", json={"cicd_fail_on": "none"}, headers=h)
+    assert r.status_code == 200 and r.json()["cicd_fail_on"] == "none"
+    assert client.get(f"/api/v1/projects/{project['id']}", headers=h).json()["cicd_fail_on"] == "none"
+    assert client.patch(f"/api/v1/projects/{project['id']}", json={"cicd_fail_on": "bogus"}, headers=h).status_code == 422

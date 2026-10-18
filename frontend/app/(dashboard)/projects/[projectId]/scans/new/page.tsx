@@ -21,6 +21,7 @@ import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
+import { FAIL_ON_OPTIONS, type FailOn } from "@/lib/cicd-fail-on";
 import {
   createCloudScan,
   formatAlreadyScanned,
@@ -145,18 +146,10 @@ function cicdInstallLines(origin: string): string[] {
 // What should make the pipeline fail. The scanner exits 1 when it finds anything and 2 when
 // something actually broke (bad token, upload failure, crash). Each snippet treats 0 and 1 as a
 // passing scan and fails only on a real error, then counts critical and high findings in the JSON
-// report. By default findings only raise the provider's own red warning; the engineer opts in to
-// failing the pipeline by setting ZEROSTRIKE_FAIL_ON in the YAML. The portal remains the readable
+// report. The project's cicd_fail_on setting (default: high) seeds ZEROSTRIKE_FAIL_ON in the YAML;
+// the engineer can still edit it there. The portal remains the readable
 // report; the JSON file is also kept as a pipeline artifact.
 const REPORT_FILE = "zerostrike-report.json";
-
-type FailOn = "none" | "critical" | "high";
-
-const FAIL_ON_OPTIONS: { value: FailOn; label: string; description: string }[] = [
-  { value: "none", label: "Warn only", description: "Findings never fail the pipeline; critical or high ones raise a red warning." },
-  { value: "critical", label: "Fail on critical", description: "The pipeline fails if any critical finding is found." },
-  { value: "high", label: "Fail on critical or high", description: "The pipeline fails if any critical or high finding is found." },
-];
 
 const FAIL_ON_COMMENT = [
   "# What fails the pipeline: none = warn only, critical = fail on critical,",
@@ -308,7 +301,12 @@ function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): stri
 
 function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
   const [provider, setProvider] = useState<CiProvider>();
-  const [failOn, setFailOn] = useState<FailOn>("none");
+  const { data: project } = useQuery({
+    queryKey: queryKeys.projects.detail(projectId),
+    queryFn: () => getProject(projectId),
+  });
+  // The gate is a project setting (default: critical or high), not chosen per snippet.
+  const failOn: FailOn = project?.cicd_fail_on ?? "high";
   const { data: keys, isLoading: keysLoading } = useQuery({
     queryKey: queryKeys.projects.apiKeys(projectId),
     queryFn: () => listApiKeys(projectId),
@@ -361,26 +359,6 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
           ))}
         </div>
       </div>
-      <div className="space-y-2">
-        <Label>When findings are found</Label>
-        <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
-          {FAIL_ON_OPTIONS.map((o) => (
-            <Button
-              key={o.value}
-              type="button"
-              size="sm"
-              variant={failOn === o.value ? "secondary" : "ghost"}
-              onClick={() => setFailOn(o.value)}
-            >
-              {o.label}
-            </Button>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {FAIL_ON_OPTIONS.find((o) => o.value === failOn)?.description} You can change this any time by
-          editing <code>ZEROSTRIKE_FAIL_ON</code> at the top of the pipeline file.
-        </p>
-      </div>
       {provider && (
         <div className="space-y-1">
           <CopyBlock
@@ -389,7 +367,11 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
             filename={cicdFilename(provider)}
           />
           <p className="text-xs text-muted-foreground">
-            The pipeline also fails if the scan itself errors (for example a bad token). Full results are in
+            {FAIL_ON_OPTIONS.find((o) => o.value === failOn)?.description} Change this in{" "}
+            <Link href={`/projects/${projectId}?tab=settings`} className="underline underline-offset-2">
+              Project Settings
+            </Link>
+            . The pipeline also fails if the scan itself errors (for example a bad token). Full results are in
             the portal, and the JSON report is kept as a pipeline artifact.
           </p>
           {provider === "github_actions" && (

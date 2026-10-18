@@ -21,6 +21,9 @@ class Project(Document):
     # None = inherit the workspace-wide default (see report_template_service, added in a
     # later task).
     report_template: Literal["standard", "executive"] | None = None
+    # What the CI/CD pipeline snippet fails on. Seeds the ZEROSTRIKE_FAIL_ON line the portal
+    # generates; the pipeline file itself stays the source of truth once copied.
+    cicd_fail_on: Literal["none", "critical", "high"] = "high"
 
     # --- policy overrides ----------------------------------------------------
     # Every field below is None-means-inherit, twinned with a WorkspaceSettings field and

@@ -2,11 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
+import { FAIL_ON_OPTIONS, type FailOn } from "@/lib/cicd-fail-on";
 import { ProjectAiProviderCard } from "@/components/projects/project-ai-provider-card";
 import { ProjectAiBudgetCard } from "@/components/projects/project-ai-budget-card";
 import { ProjectPolicyCard } from "@/components/projects/project-policy-card";
@@ -28,6 +30,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 function canManage(role: string | undefined) {
   return role === "owner" || role === "admin";
 }
+
+// Search keywords per section, in render order.
+const SECTIONS = [
+  "general name description project settings rename",
+  "ai provider model api key byok llm",
+  "ai budget spend tokens cost limit usd hard stop alert",
+  "policy scan secrets sca framework checks compliance auto-fix confidence",
+  "ci/cd pipeline gate fail findings critical high warn github gitlab azure build",
+  "report template pdf executive standard",
+  "archive restore sync",
+  "danger zone delete project remove",
+];
 
 export function ProjectSettingsTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
@@ -65,6 +79,21 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update report template"),
   });
 
+  const updateGate = useMutation({
+    mutationFn: (v: FailOn) => updateProject(projectId, { cicd_fail_on: v }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) });
+      toast.success("CI/CD gate updated");
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to update CI/CD gate"),
+  });
+
+  // Settings search: each section declares the words it answers to; a section is shown when the
+  // query appears in them. Empty query shows everything.
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const show = (keywords: string) => !q || keywords.toLowerCase().includes(q);
+
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const setArchived = useMutation({
     mutationFn: (isArchived: boolean) => updateProject(projectId, { is_archived: isArchived }),
@@ -97,6 +126,21 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-6">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search settings (e.g. token, budget, pipeline, archive)…"
+          aria-label="Search settings"
+          className="pl-9"
+        />
+      </div>
+      {q && !SECTIONS.some(show) && (
+        <p className="text-sm text-muted-foreground">No settings match “{query}”.</p>
+      )}
+
+      {show(SECTIONS[0]) && (
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-normal text-muted-foreground">Project settings</CardTitle>
@@ -115,13 +159,43 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           </Button>
         </CardContent>
       </Card>
+      )}
 
-      <ProjectAiProviderCard projectId={projectId} canManage={canManage(project.my_role)} />
+      {show(SECTIONS[1]) && <ProjectAiProviderCard projectId={projectId} canManage={canManage(project.my_role)} />}
 
-      <ProjectAiBudgetCard projectId={projectId} canManage={canManage(project.my_role)} />
+      {show(SECTIONS[2]) && <ProjectAiBudgetCard projectId={projectId} canManage={canManage(project.my_role)} />}
 
-      <ProjectPolicyCard projectId={projectId} />
+      {show(SECTIONS[3]) && <ProjectPolicyCard projectId={projectId} />}
 
+      {show(SECTIONS[4]) && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-normal text-muted-foreground">CI/CD pipeline gate</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5 w-fit">
+            {FAIL_ON_OPTIONS.map((o) => (
+              <Button
+                key={o.value}
+                type="button"
+                size="sm"
+                variant={project.cicd_fail_on === o.value ? "secondary" : "ghost"}
+                disabled={updateGate.isPending}
+                onClick={() => updateGate.mutate(o.value)}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {FAIL_ON_OPTIONS.find((o) => o.value === project.cicd_fail_on)?.description} This seeds the
+            pipeline snippet in a new CI/CD scan; pipelines you have already copied keep their own value.
+          </p>
+        </CardContent>
+      </Card>
+      )}
+
+      {show(SECTIONS[5]) && (
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-normal text-muted-foreground">Report Template</CardTitle>
@@ -134,7 +208,9 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           />
         </CardContent>
       </Card>
+      )}
 
+      {show(SECTIONS[6]) && (
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-normal text-muted-foreground">Archive</CardTitle>
@@ -156,7 +232,9 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {show(SECTIONS[7]) && (
       <Card className="border-destructive/30">
         <CardHeader>
           <CardTitle className="text-sm font-medium text-destructive">Danger Zone</CardTitle>
@@ -170,6 +248,7 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
           </Button>
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
         <DialogContent>

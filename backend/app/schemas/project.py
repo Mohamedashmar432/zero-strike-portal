@@ -19,6 +19,7 @@ class ProjectUpdateRequest(BaseModel):
     # "inherit" clears the override (stored as None); None here means "not provided in
     # this patch", distinguishing "don't touch" from "explicitly clear."
     report_template: Literal["inherit", "standard", "executive"] | None = None
+    cicd_fail_on: Literal["none", "critical", "high"] | None = None
 
 
 class ScanStatusCounts(BaseModel):
@@ -103,6 +104,7 @@ class ProjectResponse(BaseModel):
     scan_count: int
     last_scan_at: datetime | None
     report_template: Literal["standard", "executive"] | None
+    cicd_fail_on: Literal["none", "critical", "high"] = "high"
     created_at: datetime
     updated_at: datetime
     my_role: Literal["owner", "collaborator", "admin"]

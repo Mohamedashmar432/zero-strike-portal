@@ -73,6 +73,7 @@ def _to_project_response(
         scan_count=project.scan_count,
         last_scan_at=project.last_scan_at,
         report_template=project.report_template,
+        cicd_fail_on=project.cicd_fail_on,
         created_at=project.created_at,
         updated_at=project.updated_at,
         my_role=my_role,
@@ -214,6 +215,8 @@ async def update_project(
         project.is_archived = payload.is_archived
     if payload.report_template is not None:
         project.report_template = None if payload.report_template == "inherit" else payload.report_template
+    if payload.cicd_fail_on is not None:
+        project.cicd_fail_on = payload.cicd_fail_on
     project.updated_at = datetime.now(timezone.utc)
     await project.save()
     await audit_service.record(

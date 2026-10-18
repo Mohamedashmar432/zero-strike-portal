@@ -103,13 +103,12 @@ describe("New scan: CI/CD setup", () => {
     expect(screen.queryByText(/Generate a project token/)).toBeNull();
   });
 
-  test("the snippet carries the fail-on setting the engineer picked, and keeps every line short", async () => {
+  test("the snippet carries the project's fail-on setting (default high), and keeps every line short", async () => {
     await openCicdStep(true);
     fireEvent.click(screen.getByRole("button", { name: "Azure Pipelines" }));
     const code = () => screen.getByText(/# azure-pipelines\.yml/).textContent ?? "";
-    expect(code()).toContain("ZEROSTRIKE_FAIL_ON: none"); // default: findings only warn
-    fireEvent.click(screen.getByRole("button", { name: "Fail on critical or high" }));
-    expect(code()).toContain("ZEROSTRIKE_FAIL_ON: high");
+    expect(code()).toContain("ZEROSTRIKE_FAIL_ON: high"); // default: critical or high fails the pipeline
+    expect(screen.queryByText("When findings are found")).toBeNull(); // now a project setting
     // The scan command is split with line continuations, so nothing needs a horizontal scrollbar.
     expect(code()).toContain("./zerostrike scan . \\\n");
     expect(Math.max(...code().split("\n").map((l) => l.length))).toBeLessThan(120);

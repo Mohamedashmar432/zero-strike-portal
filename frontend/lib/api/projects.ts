@@ -27,6 +27,7 @@ export type Project = {
   scan_count: number;
   last_scan_at: string | null;
   report_template: "standard" | "executive" | null;
+  cicd_fail_on: "none" | "critical" | "high";
   created_at: string;
   updated_at: string;
   my_role: "owner" | "collaborator" | "admin";
@@ -116,6 +117,7 @@ export function updateProject(
     description?: string;
     is_archived?: boolean;
     report_template?: "inherit" | "standard" | "executive";
+    cicd_fail_on?: "none" | "critical" | "high";
   }
 ) {
   return apiFetch<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
