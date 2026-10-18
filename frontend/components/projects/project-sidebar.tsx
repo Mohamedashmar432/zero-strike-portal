@@ -2,7 +2,8 @@
 
 import {
   Activity,
-  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Code2,
   FolderGit2,
   History,
@@ -18,8 +19,10 @@ import {
   Wand2,
 } from "lucide-react";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { Project, ProjectScanActivity } from "@/lib/api/projects";
+import type { Project } from "@/lib/api/projects";
 
 /**
  * A group is now purely a visual cluster — a hairline and some space between related items,
@@ -47,9 +50,6 @@ export interface ProjectSidebarCategory {
 
 interface ProjectSidebarProps {
   project: Project;
-  activity?: ProjectScanActivity;
-  activeTab: string;
-  onTabChange: (tabId: string) => void;
   counts?: {
     scans?: number;
     repos?: number;
@@ -58,13 +58,40 @@ interface ProjectSidebarProps {
   };
 }
 
-export function ProjectSidebar({
-  project,
-  activeTab,
-  onTabChange,
-  counts,
-}: ProjectSidebarProps) {
+const COLLAPSE_KEY = "project-sidebar-collapsed";
+
+/** Which rail item a URL belongs to: the project page itself is driven by `?tab=`, while the
+ *  nested routes (a scan, an audit, the vulnerability queue…) light up their parent section. */
+function activeItemId(pathname: string, projectId: string, tab: string | null): string {
+  const rest = pathname.slice(`/projects/${projectId}`.length).split("/")[1] ?? "";
+  if (rest === "") return tab || "overview";
+  return rest; // scans | vulnerabilities | compliance | auto-fix | repos — ids match the segment
+}
+
+export function ProjectSidebar({ project, counts }: ProjectSidebarProps) {
+  const pathname = usePathname();
+  const tab = useSearchParams().get("tab");
+  const activeTab = activeItemId(pathname, project.id, tab);
   const isOverview = activeTab === "overview";
+  const base = `/projects/${project.id}`;
+
+  // Collapse is a per-browser preference. The layout mounts this only after the client-side
+  // project query resolves, so reading storage in the initializer can't mismatch SSR.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggle() {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
+      } catch {}
+      return !c;
+    });
+  }
 
   const categories: ProjectSidebarCategory[] = [
     {
@@ -81,7 +108,7 @@ export function ProjectSidebar({
           id: "vulnerabilities",
           label: "Vulnerabilities",
           icon: ShieldAlert,
-          href: `/projects/${project.id}/vulnerabilities`,
+          href: `${base}/vulnerabilities`,
         },
         { id: "history", label: "Scan History", icon: History },
       ],
@@ -112,109 +139,99 @@ export function ProjectSidebar({
     },
   ];
 
+  const itemClass = (active: boolean) =>
+    cn(
+      "group relative flex w-full items-center py-1.5 font-mono tracking-[-0.01em] transition-colors duration-150",
+      collapsed ? "justify-center px-0" : "justify-between pl-3.5 pr-2.5 text-[12px]",
+      active
+        ? "bg-accent font-semibold text-foreground"
+        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+    );
+
   return (
-    <aside className="flex w-56 shrink-0 flex-col rounded-lg border border-border bg-card py-2.5">
-      {/* Overview Primary Button */}
-      <button
-        type="button"
-        onClick={() => onTabChange("overview")}
-        className={cn(
-          "relative mb-3 flex w-full cursor-pointer items-center justify-between px-3.5 py-2 text-left font-mono text-[13px] tracking-[-0.01em] transition-colors duration-150",
-          isOverview
-            ? "bg-accent font-semibold text-foreground"
-            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-        )}
+    <aside
+      className={cn(
+        "relative flex shrink-0 flex-col rounded-lg border border-border bg-card py-2.5 transition-[width] duration-200",
+        collapsed ? "w-full lg:w-12" : "w-full lg:w-56"
+      )}
+    >
+      <Link
+        href={base}
+        title="Project Overview"
+        className={cn(itemClass(isOverview), "mb-3 py-2", !collapsed && "text-[13px]")}
       >
         {isOverview && <span className="absolute inset-y-0 left-0 w-[3px] bg-signal" />}
         <div className="flex items-center gap-2.5">
-          <LayoutDashboard
-            className={cn("size-4", isOverview ? "text-signal" : "text-muted-foreground")}
-          />
-          <span>Project Overview</span>
+          <LayoutDashboard className={cn("size-4", isOverview ? "text-signal" : "text-muted-foreground")} />
+          {!collapsed && <span>Project Overview</span>}
         </div>
-        {isOverview && <ChevronRight className="size-3.5 text-muted-foreground" />}
-      </button>
+      </Link>
 
       {/* Navigation. Clusters separated by a hairline, not by a heading. */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden">
         {categories.map((cat, i) => (
-          <div
-            key={cat.title}
-            className={cn(
-              "py-1.5",
-              i > 0 && "mt-1.5 border-t border-border/60"
-            )}
-          >
+          <div key={cat.title} className={cn("py-1.5", i > 0 && "mt-1.5 border-t border-border/60")}>
             <div className="space-y-0.5">
               {cat.items.filter((item) => !item.hidden).map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
-                const className = cn(
-                  "group relative flex w-full cursor-pointer items-center justify-between py-1.5 pl-3.5 pr-2.5 text-left font-mono text-[12px] tracking-[-0.01em] transition-colors duration-150",
-                  isActive
-                    ? "bg-accent font-semibold text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                );
-                const inner = (
-                  <>
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href ?? `${base}?tab=${item.id}`}
+                    title={collapsed ? item.label : undefined}
+                    className={itemClass(isActive)}
+                  >
                     {isActive && <span className="absolute inset-y-0 left-0 w-[3px] bg-signal" />}
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex min-w-0 items-center gap-2.5">
                       <Icon
                         className={cn(
                           "size-3.5 shrink-0 transition-colors",
                           isActive ? "text-signal" : "text-muted-foreground group-hover:text-foreground"
                         )}
                       />
-                      <span className="truncate">{item.label}</span>
+                      {!collapsed && <span className="truncate">{item.label}</span>}
                     </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* "NEW" reads as shipped; these tabs have no engine behind
-                          them, so they are labelled as previews instead. */}
-                      {item.isPreview && (
-                        <span
-                          title="Design preview — no scan engine connected"
-                          className="rounded-sm border-l-2 border-severity-medium bg-severity-medium-tint px-1 font-mono text-[9px] font-bold text-severity-medium"
-                        >
-                          PREVIEW
-                        </span>
-                      )}
-                      {item.badge !== undefined && item.badge !== 0 && (
-                        <span
-                          className={cn(
-                            "rounded-sm px-1.5 font-mono text-[10px] font-semibold tabular-nums",
-                            isActive
-                              ? "bg-signal/20 text-signal"
-                              : "bg-muted-foreground/15 text-muted-foreground"
-                          )}
-                        >
-                          {item.badge}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                );
-                // A routed item renders as a link so middle-click and open-in-new-tab still
-                // work; a tab item stays a button because it changes no URL segment.
-                return item.href ? (
-                  <Link key={item.id} href={item.href} className={className}>
-                    {inner}
+                    {!collapsed && (
+                      <div className="flex shrink-0 items-center gap-1">
+                        {item.isPreview && (
+                          <span
+                            title="Design preview — no scan engine connected"
+                            className="rounded-sm border-l-2 border-severity-medium bg-severity-medium-tint px-1 font-mono text-[9px] font-bold text-severity-medium"
+                          >
+                            PREVIEW
+                          </span>
+                        )}
+                        {item.badge !== undefined && item.badge !== 0 && (
+                          <span
+                            className={cn(
+                              "rounded-sm px-1.5 font-mono text-[10px] font-semibold tabular-nums",
+                              isActive ? "bg-signal/20 text-signal" : "bg-muted-foreground/15 text-muted-foreground"
+                            )}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </Link>
-                ) : (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onTabChange(item.id)}
-                    className={className}
-                  >
-                    {inner}
-                  </button>
                 );
               })}
             </div>
           </div>
         ))}
       </nav>
+
+      {/* Handle straddling the rail's top-right edge; hidden on stacked (narrow) layouts. */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={collapsed ? "Expand project navigation" : "Collapse project navigation"}
+        title={collapsed ? "Expand" : "Collapse"}
+        className="absolute -right-3 top-3 z-10 hidden size-6 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground lg:flex"
+      >
+        {collapsed ? <ChevronsRight className="size-3.5" /> : <ChevronsLeft className="size-3.5" />}
+      </button>
     </aside>
   );
 }

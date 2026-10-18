@@ -74,7 +74,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/providers/auth-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/common/stat-card";
-import { ProjectSidebar } from "@/components/projects/project-sidebar";
 import { ProjectOverviewHub } from "@/components/projects/project-overview-hub";
 import { ProjectDastTab } from "@/components/projects/project-dast-tab";
 import { ProjectAttackSimTab } from "@/components/projects/project-attack-sim-tab";
@@ -1157,12 +1156,6 @@ export default function ProjectDetailPage() {
     enabled: !!project,
   });
 
-  const { data: members } = useQuery({
-    queryKey: queryKeys.projects.members(projectId),
-    queryFn: () => listMembers(projectId),
-    enabled: !!project,
-  });
-
   const { data: activity } = useQuery({
     queryKey: queryKeys.projects.scanActivity(projectId),
     queryFn: () => getProjectScanActivity(projectId),
@@ -1242,25 +1235,9 @@ export default function ProjectDetailPage() {
         items={[{ label: "Projects", href: "/projects" }, { label: project.name }]}
       />
 
-      {/* Azure-Style Two-Tier Workspace: Secondary Project Sidebar Blade (Left) + Content (Right) */}
-      <div className="flex flex-col gap-5 lg:flex-row items-start">
-        {/* Left Column: Project Sidebar Blade */}
-        <div className="w-full lg:w-56 lg:sticky lg:top-4 shrink-0">
-          <ProjectSidebar
-            project={project}
-            activity={activity}
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            counts={{
-              scans: project.scan_count,
-              repos: repos?.length,
-              members: members?.length,
-            }}
-          />
-        </div>
-
+      <div>
         {/* Right Column: Main Module Work Area */}
-        <div className="min-w-0 flex-1 space-y-5 w-full">
+        <div className="min-w-0 w-full space-y-5">
           {/* Slim Contextual Header */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-3">
             <div className="space-y-1 min-w-0">
