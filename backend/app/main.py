@@ -8,12 +8,15 @@ import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.routing import Route
 
 from app.core.config import settings
 from app.core.request_context import bind_request_context
 from app.core import log_sink
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
+from app.mcp import server as mcp_server
+from app.mcp import user_server as mcp_user_server
 from app.models.scan import Scan
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
@@ -21,6 +24,8 @@ from app.routers import (
     admin_data,
     auto_fix_quota,
     admin_downloads,
+    admin_mcp_tokens,
+    oauth_consent,
     admin_scan_engine,
     admin_scanner_status,
     ai_analysis,
@@ -104,7 +109,12 @@ async def lifespan(app: FastAPI):
     remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())
     compliance_poll_task = asyncio.create_task(compliance_queue_service.poll_loop())
     pricing_task = asyncio.create_task(pricing_service.refresh_loop())
-    yield
+    async with contextlib.AsyncExitStack() as stack:
+        for name in ("mcp_server", "mcp_user_server"):
+            mcp = getattr(app.state, name, None)
+            if mcp is not None:
+                await stack.enter_async_context(mcp.session_manager.run())
+        yield
     pricing_task.cancel()
     poll_task.cancel()
     ai_poll_task.cancel()
@@ -161,6 +171,8 @@ def create_app() -> FastAPI:
     app.include_router(repo_lookup.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
+    app.include_router(admin_mcp_tokens.router, prefix="/api/v1")
+    app.include_router(oauth_consent.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(admin_scan_engine.router, prefix="/api/v1")
     app.include_router(admin_data.router, prefix="/api/v1")
@@ -182,6 +194,18 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
     app.include_router(operations.queue_router, prefix="/api/v1")
+
+    if settings.mcp_enabled:
+        # Admin MCP server (docs/ADMIN_MCP.md). A plain Route, not a Mount: a Mount at /mcp answers
+        # POST /mcp with a 307 to /mcp/, which MCP clients do not follow. Its session manager is
+        # run by the lifespan above.
+        mcp_app, app.state.mcp_server = mcp_server.build()
+        app.router.routes.append(Route("/mcp", endpoint=mcp_app))
+        # User MCP over OAuth (docs/USER_MCP_OAUTH.md): same plain-Route rule. The discovery
+        # documents and /register /authorize /token /revoke must sit at the backend root.
+        user_app, app.state.mcp_user_server = mcp_user_server.build()
+        app.router.routes.append(Route("/mcp/user", endpoint=user_app))
+        app.router.routes.extend(mcp_user_server.oauth_routes())
 
     @app.exception_handler(OAuthProviderError)
     async def oauth_provider_error_handler(request: Request, exc: OAuthProviderError):

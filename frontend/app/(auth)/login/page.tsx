@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, NetworkError } from "@/lib/api/client";
+import { safeNextPath } from "@/lib/safe-redirect";
 import { loginSchema, type LoginInput } from "@/lib/validation/auth.schema";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -33,7 +34,9 @@ export default function LoginPage() {
     setAwaitingApproval(false);
     try {
       await login(values.email, values.password);
-      router.push("/dashboard");
+      // `next` brings a user back to what sent them here (the OAuth consent page); only a plain
+      // same-origin path is honoured, anything else falls back to the dashboard.
+      router.push(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/dashboard");
     } catch (err) {
       // Three genuinely different failures. Collapsing them into "Login failed"
       // sends people hunting for a password problem when the backend is simply

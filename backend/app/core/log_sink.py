@@ -53,6 +53,10 @@ def _to_row(record: logging.LogRecord) -> dict:
 
 class MongoLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
+        # A client hanging up mid-request (e.g. an MCP agent killed mid-call) is not a server
+        # fault; persisting it would only bury real errors in System Logs and summarize_errors.
+        if record.exc_info and record.exc_info[0] is not None and record.exc_info[0].__name__ == "ClientDisconnect":
+            return
         try:
             _queue.put_nowait(_to_row(record))
         except queue.Full:

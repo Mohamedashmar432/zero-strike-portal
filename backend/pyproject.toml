@@ -28,6 +28,8 @@ dependencies = [
     "psutil>=5.9",
     # Custom scanner rules are parsed (id, language) before they are validated by the scanner.
     "pyyaml>=6.0",
+    # Admin MCP server (app/mcp, docs/ADMIN_MCP.md).
+    "mcp>=1.9",
 ]
 
 [project.optional-dependencies]

@@ -7,6 +7,10 @@
 export const queryKeys = {
   // Shared by every queued tag/notice on screen — one poll, however many tags.
   queue: () => ["queue"] as const,
+  oauth: {
+    consentRequest: (id: string) => ["oauth", "request", id] as const,
+    connectedApps: () => ["oauth", "connected-apps"] as const,
+  },
   admin: {
     auditLogs: (since: string, until: string, category?: string) =>
       ["admin", "audit-logs", since, until, category ?? ""] as const,
@@ -16,6 +20,7 @@ export const queryKeys = {
     scannerStatus: () => ["admin", "scanner-status"] as const,
     scanEngine: () => ["admin", "scan-engine"] as const,
     operations: () => ["admin", "operations"] as const,
+    mcpTokens: () => ["admin", "mcp-tokens"] as const,
     autoFixQuotaRequests: (status?: string) =>
       status === undefined
         ? (["admin", "auto-fix-quota-requests"] as const)

@@ -157,6 +157,9 @@ class Settings(BaseSettings):
     # keep their deterministic rationale with no AI prose (never a job failure).
     compliance_ai_max_controls_per_call: int = 25
 
+    # Admin MCP server mounted at /mcp (docs/ADMIN_MCP.md). Kill switch: False leaves /mcp unmounted.
+    mcp_enabled: bool = True
+
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""
     github_client_secret: str = ""

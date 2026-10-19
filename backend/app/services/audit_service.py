@@ -15,6 +15,7 @@ _PRIVILEGE_MARKERS = (
     "member",
     "role",
     "api key",
+    "mcp app",
     "credential",
     "invited",
 )

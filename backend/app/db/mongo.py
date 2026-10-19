@@ -15,6 +15,8 @@ from app.models.auto_fix_quota import AutoFixQuotaRequest, ScanAutoFixQuota
 from app.models.compliance_audit import ComplianceAudit
 from app.models.finding import Finding
 from app.models.finding_comment import FindingComment
+from app.models.mcp_oauth import OAuthAuthorizationRequest, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
+from app.models.mcp_token import McpToken
 from app.models.notification import Notification
 from app.models.fix_conversation import FixConversation
 from app.models.fix_pattern import FixPattern
@@ -56,6 +58,12 @@ async def connect_to_mongo() -> None:
             Project,
             ProjectMember,
             ApiKey,
+            McpToken,
+            OAuthClient,
+            OAuthAuthorizationRequest,
+            OAuthCode,
+            OAuthGrant,
+            OAuthToken,
             Scan,
             Finding,
             Report,

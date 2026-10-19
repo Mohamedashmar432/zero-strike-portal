@@ -1,12 +1,14 @@
 import {
   Activity,
   Bell,
+  Bot,
   ChartColumn,
   Database,
   FileText,
   FolderKanban,
   Gauge,
   Inbox,
+  KeyRound,
   LayoutDashboard,
   Cog,
   Plug,
@@ -31,6 +33,7 @@ export const adminLinks = [
   { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },
   { href: "/admin/scan-engine", label: "Scan Engine", icon: Cog },
   { href: "/admin/ai-analytics", label: "AI Analytics", icon: ChartColumn },
+  { href: "/admin/mcp", label: "MCP Access", icon: KeyRound },
 ];
 
 export const settingsLinks = [
@@ -40,6 +43,7 @@ export const settingsLinks = [
   { href: "/settings/ai-provider", label: "AI Provider", icon: Sparkles },
   { href: "/settings/auto-fix", label: "Auto-fix", icon: Wand2 },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
+  { href: "/settings/connected-apps", label: "Connected Apps", icon: Bot },
   { href: "/settings/report-templates", label: "Report Templates", icon: FileText },
   { href: "/settings/data", label: "Data Management", icon: Database },
 ];
