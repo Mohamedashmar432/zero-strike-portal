@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
 import { QueueNotice } from "@/components/queue/queue-notice";
+import { ScanProgress } from "@/components/scans/scan-progress";
 import { ScanStatusBadge } from "@/components/scans/scan-status-badge";
 import { ScanTypeBadge } from "@/components/scans/scan-type-badge";
 import { SeverityBadge } from "@/components/severity/severity-badge";
@@ -89,18 +90,6 @@ function timeAgo(dateStr: string) {
   if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? "" : "s"} ago`;
-}
-
-// How long the scan has been in its current phase. Coarse on purpose: the useful signal is
-// "cloning for 40 minutes" vs "cloning for 20 seconds", not the exact second.
-function stageElapsed(since: string) {
-  // parseApiDate, not new Date: the backend serializes naive UTC, which new Date() reads as
-  // local time — a scan that started seconds ago rendered as "for 5 hours" at UTC+5:30.
-  const mins = Math.floor((Date.now() - parseApiDate(since).getTime()) / 60000);
-  if (mins < 1) return "just started";
-  if (mins < 60) return `for ${mins} minute${mins === 1 ? "" : "s"}`;
-  const hours = Math.floor(mins / 60);
-  return `for ${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 // Re-scanning a manual (non-connected) repo needs the token re-entered — the original
@@ -690,23 +679,14 @@ export default function ScanDetailPage() {
 
       {scan.status === "queued" && <QueueNotice kind="cloud_scan" refId={scan.id} />}
 
-      {!completed && scan.status !== "failed" && scan.status !== "queued" && (
+      {scan.status === "running" && (
+        <ScanProgress stage={scan.stage} stageStartedAt={scan.stage_started_at} startedAt={scan.started_at} />
+      )}
+
+      {!completed && scan.status === "pending" && (
         <Alert>
-          <AlertTitle>{scan.status === "running" ? "Scan in progress" : "Waiting for the scanner"}</AlertTitle>
-          <AlertDescription>
-            {scan.status === "running"
-              ? "The scan is running on the server. This page updates automatically — no need to refresh."
-              : "Waiting for the scanner to report…"}
-            {/* Which phase it is in, and how long it has been there. Without this a scan that
-                sits here for an hour looks identical to one that is about to finish, which is
-                what made a stuck large-repo scan impossible to tell from a slow one. */}
-            {scan.stage && (
-              <span className="mt-1 block text-xs">
-                {SCAN_STAGE_LABELS[scan.stage]}
-                {scan.stage_started_at ? ` · ${stageElapsed(scan.stage_started_at)}` : ""}
-              </span>
-            )}
-          </AlertDescription>
+          <AlertTitle>Waiting for the scanner</AlertTitle>
+          <AlertDescription>Waiting for the scanner to report…</AlertDescription>
         </Alert>
       )}
 
