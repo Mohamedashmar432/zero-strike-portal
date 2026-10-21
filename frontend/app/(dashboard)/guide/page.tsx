@@ -450,7 +450,7 @@ export default function GuidePage() {
                 </p>
                 <Cmd>
                   {`curl -fsSL ${PORTAL}/api/v1/downloads/zerostrike/latest/linux-amd64 -o zerostrike && chmod +x zerostrike
-./zerostrike scan . --server ${PORTAL} --token <PROJECT_TOKEN>`}
+./zerostrike scan . --server ${PORTAL} --token <PROJECT_TOKEN> --enable-secrets --enable-sca --enable-framework-checks`}
                 </Cmd>
                 <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
                   That is the Linux line. The wizard has a macOS and a Windows (PowerShell) variant too.
@@ -495,7 +495,7 @@ export default function GuidePage() {
                   pipeline fails on what the workspace decided is unacceptable — not on a per-repo guess. The
                   download step verifies the binary against the portal&apos;s published checksums.
                 </p>
-                <Cmd>{`- run: ./zerostrike scan . --server ${PORTAL} --token \${{ secrets.ZEROSTRIKE_TOKEN }}`}</Cmd>
+                <Cmd>{`- run: ./zerostrike scan . --server ${PORTAL} --token \${{ secrets.ZEROSTRIKE_TOKEN }} --enable-secrets --enable-sca --enable-framework-checks`}</Cmd>
                 <p className="max-w-[80ch] text-sm leading-relaxed text-muted-foreground">
                   That is the GitHub Actions step. Take the full snippet from the wizard — it is generated with
                   this portal&apos;s real URL, the download step, and the right secret syntax for GitLab (

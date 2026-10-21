@@ -177,6 +177,9 @@ function cicdScanLines(origin: string, token: string, warn: string[], soft: stri
     "./zerostrike scan . \\",
     `  --server ${origin} \\`,
     `  --token ${token} \\`,
+    // Same analysers as a cloud scan; without them the scanner runs SAST rules only and a
+    // pipeline reports fewer findings than the portal for the identical commit.
+    "  --enable-secrets --enable-sca --enable-framework-checks \\",
     `  --format json --output ${REPORT_FILE} || rc=$?`,
     // 1 = findings were found (not an error); anything higher is a genuine failure.
     'if [ "$rc" -gt 1 ]; then echo "thinkShield scan failed (exit code $rc)"; exit "$rc"; fi',
