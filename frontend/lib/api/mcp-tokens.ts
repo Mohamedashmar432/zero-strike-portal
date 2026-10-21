@@ -24,6 +24,10 @@ export function createMcpToken(input: { label: string; expires_in_days: number }
   return apiFetch<McpTokenCreated>("/admin/mcp-tokens", { method: "POST", body: JSON.stringify(input) });
 }
 
+export function renameMcpToken(id: string, label: string) {
+  return apiFetch<McpToken>(`/admin/mcp-tokens/${id}`, { method: "PATCH", body: JSON.stringify({ label }) });
+}
+
 export function revokeMcpToken(id: string) {
   return apiFetch<void>(`/admin/mcp-tokens/${id}`, { method: "DELETE" });
 }
@@ -38,6 +42,8 @@ export function mcpServerOrigin(): string {
   return "https://your-portal";
 }
 
+// --scope user: without it Claude Code files the server under the current folder (local scope), keyed by
+// that path's exact spelling, so a different folder or an editor that opens it as `c:\` vs `C:\` never sees it.
 export function mcpAddCommand(origin: string, token: string): string {
-  return `claude mcp add --transport http thinkshield ${origin}/mcp --header "Authorization: Bearer ${token}"`;
+  return `claude mcp add --scope user --transport http thinkshield ${origin}/mcp --header "Authorization: Bearer ${token}"`;
 }

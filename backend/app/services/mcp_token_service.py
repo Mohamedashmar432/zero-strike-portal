@@ -41,6 +41,16 @@ async def list_for_user(user: User) -> list[McpToken]:
     return await McpToken.find(McpToken.user_id == str(user.id)).sort("-created_at").to_list()
 
 
+async def rename(user: User, token_id: str, label: str) -> McpToken | None:
+    """Relabel one of the caller's own tokens. The secret, expiry and revocation are untouched."""
+    token = await McpToken.get(token_id)
+    if not token or token.user_id != str(user.id):
+        return None
+    token.label = label
+    await token.save()
+    return token
+
+
 async def revoke(user: User, token_id: str) -> McpToken | None:
     """Revoke one of the caller's own tokens. None when it does not exist or is not theirs."""
     token = await McpToken.get(token_id)

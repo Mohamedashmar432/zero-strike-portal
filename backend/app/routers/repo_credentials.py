@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, status
 
 from app.core.deps import get_current_user
@@ -7,7 +9,10 @@ from app.schemas.repo_credential import (
     AdoProjectResponse,
     BranchResponse,
     RepoCredentialCreateRequest,
+    RepoCredentialReconnectRequest,
     RepoCredentialResponse,
+    RepoCredentialStatusResponse,
+    RepoCredentialUpdateRequest,
     RepoResponse,
 )
 from app.services import audit_service, repo_credential_service
@@ -38,6 +43,46 @@ async def create_credential(payload: RepoCredentialCreateRequest, user: User = D
     )
     await audit_service.record(
         "Repo Credential Added",
+        actor_user_id=str(user.id),
+        target_type="repo_credential",
+        target_id=str(credential.id),
+        metadata={"provider": credential.provider, "organization": credential.organization},
+    )
+    return _to_response(credential)
+
+
+@router.get("/{credential_id}/status", response_model=RepoCredentialStatusResponse)
+async def credential_status(credential_id: str, user: User = Depends(get_current_user)):
+    connected, detail = await repo_credential_service.check_status(user, credential_id)
+    return RepoCredentialStatusResponse(
+        status="connected" if connected else "invalid", detail=detail, checked_at=datetime.now(timezone.utc)
+    )
+
+
+@router.patch("/{credential_id}", response_model=RepoCredentialResponse)
+async def update_credential(
+    credential_id: str, payload: RepoCredentialUpdateRequest, user: User = Depends(get_current_user)
+):
+    credential = await repo_credential_service.update_credential(
+        user, credential_id, payload.model_dump(include=payload.model_fields_set)
+    )
+    await audit_service.record(
+        "Repo Credential Updated",
+        actor_user_id=str(user.id),
+        target_type="repo_credential",
+        target_id=str(credential.id),
+        metadata={"provider": credential.provider, "fields": sorted(payload.model_fields_set)},
+    )
+    return _to_response(credential)
+
+
+@router.put("/{credential_id}/token", response_model=RepoCredentialResponse)
+async def reconnect_credential(
+    credential_id: str, payload: RepoCredentialReconnectRequest, user: User = Depends(get_current_user)
+):
+    credential = await repo_credential_service.reconnect_credential(user, credential_id, payload.pat)
+    await audit_service.record(
+        "Repo Credential Reconnected",
         actor_user_id=str(user.id),
         target_type="repo_credential",
         target_id=str(credential.id),

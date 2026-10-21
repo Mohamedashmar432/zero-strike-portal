@@ -238,3 +238,116 @@ def test_list_repos_and_branches_azure_devops(client, monkeypatch):
         f"/api/v1/repo-credentials/{credential['id']}/repos/guid-1/branches", headers=_headers(owner)
     ).json()
     assert branches == [{"name": "main"}]
+
+
+# --- status / edit / reconnect (the Integrations page's row actions) --------------------------------
+
+
+def _save_github_credential(client, monkeypatch, email, pat="ghp_old", label="Personal"):
+    monkeypatch.setattr(github, "list_repos", _fake_github_list_repos)
+    owner = register_and_login(client, email=email)
+    r = client.post(
+        "/api/v1/repo-credentials",
+        json={"provider": "github", "pat": pat, "organization": "octocat", "label": label},
+        headers=_headers(owner),
+    )
+    assert r.status_code == 201
+    return owner, r.json()["id"]
+
+
+def test_credential_status_reports_connected_then_invalid_when_the_token_stops_working(client, monkeypatch):
+    owner, cid = _save_github_credential(client, monkeypatch, "st1@zerostrike.dev")
+
+    ok = client.get(f"/api/v1/repo-credentials/{cid}/status", headers=_headers(owner)).json()
+    assert ok["status"] == "connected" and ok["detail"] is None
+
+    async def _revoked(pat, query=None, page=1):
+        raise RepoPatError("Bad credentials")
+
+    monkeypatch.setattr(github, "list_repos", _revoked)
+    bad = client.get(f"/api/v1/repo-credentials/{cid}/status", headers=_headers(owner)).json()
+    assert bad == {**bad, "status": "invalid", "detail": "Bad credentials"}
+
+
+def test_credential_status_is_invalid_not_a_500_when_the_stored_token_cannot_be_decrypted(client, monkeypatch):
+    from cryptography.fernet import InvalidToken
+
+    owner, cid = _save_github_credential(client, monkeypatch, "st2@zerostrike.dev")
+
+    def _unreadable(_credential):
+        raise InvalidToken()
+
+    from app.services import repo_credential_service
+
+    monkeypatch.setattr(repo_credential_service, "decrypt_pat", _unreadable)
+    r = client.get(f"/api/v1/repo-credentials/{cid}/status", headers=_headers(owner))
+    assert r.status_code == 200 and r.json()["status"] == "invalid"
+
+
+def test_editing_the_label_does_not_call_the_provider_and_can_clear_it(client, monkeypatch):
+    owner, cid = _save_github_credential(client, monkeypatch, "ed1@zerostrike.dev")
+
+    async def _must_not_run(*a, **k):
+        raise AssertionError("a label edit must not hit the provider")
+
+    monkeypatch.setattr(github, "list_repos", _must_not_run)
+    r = client.patch(f"/api/v1/repo-credentials/{cid}", json={"label": "Work"}, headers=_headers(owner))
+    assert r.status_code == 200 and r.json()["label"] == "Work"
+    r = client.patch(f"/api/v1/repo-credentials/{cid}", json={"label": "  "}, headers=_headers(owner))
+    assert r.json()["label"] is None and r.json()["organization"] == "octocat"
+
+
+def test_changing_organization_revalidates_and_a_failure_changes_nothing(client, monkeypatch):
+    owner, cid = _save_github_credential(client, monkeypatch, "ed2@zerostrike.dev")
+
+    async def _nope(pat, org, project=None):
+        raise RepoPatError("No access to that organization")
+
+    monkeypatch.setattr(azure_devops, "list_projects", _nope)
+    # GitHub credentials ignore org changes for validation but still accept the new name...
+    r = client.patch(f"/api/v1/repo-credentials/{cid}", json={"organization": "other"}, headers=_headers(owner))
+    assert r.status_code == 200 and r.json()["organization"] == "other"
+
+    async def _fail(pat, query=None, page=1):
+        raise RepoPatError("token lost access")
+
+    monkeypatch.setattr(github, "list_repos", _fail)
+    r = client.patch(f"/api/v1/repo-credentials/{cid}", json={"organization": "third"}, headers=_headers(owner))
+    assert r.status_code == 400 and "lost access" in r.json()["detail"]
+    listed = client.get("/api/v1/repo-credentials", headers=_headers(owner)).json()
+    assert listed[0]["organization"] == "other"
+
+
+def test_reconnect_replaces_the_token_only_when_the_new_one_validates(client, monkeypatch):
+    owner, cid = _save_github_credential(client, monkeypatch, "rc1@zerostrike.dev", pat="ghp_old")
+
+    async def _reject(pat, query=None, page=1):
+        raise RepoPatError("Bad credentials")
+
+    monkeypatch.setattr(github, "list_repos", _reject)
+    r = client.put(f"/api/v1/repo-credentials/{cid}/token", json={"pat": "ghp_bad"}, headers=_headers(owner))
+    assert r.status_code == 400
+
+    monkeypatch.setattr(github, "list_repos", _fake_github_list_repos)
+    r = client.put(f"/api/v1/repo-credentials/{cid}/token", json={"pat": "ghp_new"}, headers=_headers(owner))
+    assert r.status_code == 200 and "pat" not in r.json() and "pat_encrypted" not in r.json()
+
+    async def _check():
+        from app.models.repo_credential import RepoCredential
+
+        stored = await RepoCredential.get(cid)
+        assert security.decrypt_secret(stored.pat_encrypted) == "ghp_new"
+
+    import asyncio
+
+    asyncio.run(_check())
+    assert client.put(f"/api/v1/repo-credentials/{cid}/token", json={"pat": ""}, headers=_headers(owner)).status_code == 422
+
+
+def test_status_edit_and_reconnect_404_for_someone_elses_credential(client, monkeypatch):
+    _owner, cid = _save_github_credential(client, monkeypatch, "idor1@zerostrike.dev")
+    intruder = register_and_login(client, email="idor2@zerostrike.dev")
+    h = _headers(intruder)
+    assert client.get(f"/api/v1/repo-credentials/{cid}/status", headers=h).status_code == 404
+    assert client.patch(f"/api/v1/repo-credentials/{cid}", json={"label": "x"}, headers=h).status_code == 404
+    assert client.put(f"/api/v1/repo-credentials/{cid}/token", json={"pat": "p"}, headers=h).status_code == 404

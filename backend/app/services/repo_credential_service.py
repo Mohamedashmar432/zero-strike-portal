@@ -5,6 +5,7 @@ zero-strike-cli uses) and is only ever usable by the user who saved it, no admin
 
 from datetime import datetime, timezone
 
+from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 
 from app.core import security
@@ -61,6 +62,60 @@ async def get_own_credential_or_404(user: User, credential_id: str) -> RepoCrede
     credential = await RepoCredential.get(credential_id)
     if not credential or credential.user_id != str(user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
+    return credential
+
+
+async def check_status(user: User, credential_id: str) -> tuple[bool, str | None]:
+    """(is_connected, reason). Proves the stored token still works with a real provider call — there
+    is no introspection endpoint for either provider — so it costs one API request."""
+    credential = await get_own_credential_or_404(user, credential_id)
+    try:
+        pat = decrypt_pat(credential)
+    except InvalidToken:
+        return False, "The stored token can no longer be read. Reconnect to save it again."
+    try:
+        await validate_pat(credential.provider, pat, credential.organization, credential.ado_project)
+    except RepoPatError as e:
+        return False, str(e)
+    return True, None
+
+
+async def update_credential(user: User, credential_id: str, changes: dict) -> RepoCredential:
+    """Apply label / organization / ado_project edits. Moving to a different org or project re-checks
+    the stored token against it first, so a typo can't leave a credential pointing nowhere."""
+    credential = await get_own_credential_or_404(user, credential_id)
+    if "label" in changes:
+        credential.label = (changes["label"] or "").strip() or None
+    organization = (changes.get("organization") or credential.organization).strip()
+    ado_project = (changes["ado_project"] if "ado_project" in changes else credential.ado_project) or None
+    if ado_project:
+        ado_project = ado_project.strip() or None
+    if credential.provider == "github":
+        ado_project = None
+    if (organization, ado_project) != (credential.organization, credential.ado_project):
+        try:
+            await validate_pat(credential.provider, decrypt_pat(credential), organization, ado_project)
+        except InvalidToken:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The stored token can no longer be read. Reconnect first.")
+        except RepoPatError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        credential.organization, credential.ado_project = organization, ado_project
+    credential.updated_at = datetime.now(timezone.utc)
+    await credential.save()
+    return credential
+
+
+async def reconnect_credential(user: User, credential_id: str, pat: str) -> RepoCredential:
+    """Replace the stored token with a new one, validated against the credential's own org/project.
+    Project connections hold their own copy of the token (see ProjectRepo), so they are unaffected."""
+    credential = await get_own_credential_or_404(user, credential_id)
+    try:
+        await validate_pat(credential.provider, pat, credential.organization, credential.ado_project)
+    except RepoPatError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    credential.pat_encrypted = security.encrypt_secret(pat)
+    credential.updated_at = datetime.now(timezone.utc)
+    await credential.save()
     return credential
 
 

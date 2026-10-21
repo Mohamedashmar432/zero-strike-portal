@@ -72,11 +72,13 @@ role/status only.
 
 - Backend: `models/mcp_token.py`, `services/mcp_token_service.py`, `mcp/server.py` (FastMCP +
   tools), `mcp/auth.py` (ASGI wrapper + contextvar), `routers/admin_mcp_tokens.py`
-  (`GET/POST/DELETE /api/v1/admin/mcp-tokens`, `require_admin`, a caller sees and revokes only
-  their own tokens).
-- Frontend: admin page `admin/mcp` — issue a token (label, expiry), copy-once reveal, list with
-  last used, revoke, and a copyable client config snippet (`claude mcp add --transport http
-  thinkshield <origin>/mcp --header "Authorization: Bearer …"`).
+  (`GET/POST/PATCH/DELETE /api/v1/admin/mcp-tokens`, `require_admin`, a caller sees, renames and
+  revokes only their own tokens).
+- Frontend: Settings > Integrations > AI agents (`/settings/integrations/mcp`; `/admin/mcp` redirects
+  there) — issue a token (label, expiry), copy-once reveal dialog, and per-row Edit (rename), Reissue
+  (new secret, old one revoked) and Remove (revoke). The copyable client command uses `--scope user`:
+  without it Claude Code files the server under the exact spelling of the current folder, so an editor
+  that opens it as `c:\...` instead of `C:\...` never sees the server.
 
 ## Testing
 
@@ -85,7 +87,7 @@ role/status only.
   data; secrets redacted in log output; tool call writes an audit row; `limit` capped.
 - Live: start backend on :8001, connect with the `mcp` SDK client using a real token, list tools,
   call each one.
-- Browser: admin issues/revokes a token on `admin/mcp`; member cannot reach the page or the API.
+- Browser: admin issues/renames/reissues/revokes a token on `/settings/integrations/mcp`; member cannot reach the page or the API.
 
 ## Follow-ups (not phase 1)
 

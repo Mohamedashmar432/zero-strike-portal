@@ -39,6 +39,30 @@ export function createRepoCredential(input: {
   });
 }
 
+export type CredentialStatus = {
+  status: "connected" | "invalid";
+  detail: string | null;
+  checked_at: string;
+};
+
+// A live provider call (there is no token-introspection endpoint), so cache it rather than refetch on focus.
+export function getCredentialStatus(id: string) {
+  return apiFetch<CredentialStatus>(`/repo-credentials/${id}/status`);
+}
+
+// Only the keys present are changed; `ado_project: null` clears the default project.
+export function updateRepoCredential(
+  id: string,
+  input: { label?: string | null; organization?: string; ado_project?: string | null }
+) {
+  return apiFetch<RepoCredential>(`/repo-credentials/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+// Replaces the stored token; the backend validates it against the credential's own org/project first.
+export function reconnectRepoCredential(id: string, pat: string) {
+  return apiFetch<RepoCredential>(`/repo-credentials/${id}/token`, { method: "PUT", body: JSON.stringify({ pat }) });
+}
+
 export function deleteRepoCredential(id: string) {
   return apiFetch<void>(`/repo-credentials/${id}`, { method: "DELETE" });
 }

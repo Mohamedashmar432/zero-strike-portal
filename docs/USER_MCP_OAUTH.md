@@ -54,7 +54,7 @@ the provider over Mongo; the SDK handles request validation, PKCE checks and the
 - **Scope** is a single `mcp:read`. All phase-2 tools are read-only.
 - **Every request** re-checks that the user is active and approved. Project membership is checked
   **per tool call**, never baked into the token, so removing a member takes effect on the next call.
-- **Connected apps.** A settings page `/settings/connected-apps` lists the user's grants (client
+- **Connected apps.** The Connected apps section of Settings > Integrations > AI agents (`/settings/integrations/mcp`; the old `/settings/connected-apps` redirects there) lists the user's grants (client
   name, redirect host, created, last used) and revokes them. Revoking kills both access and refresh
   tokens.
 - **Audit:** `MCP app authorized`, `MCP app access denied`, `MCP app revoked` (the privilege bucket

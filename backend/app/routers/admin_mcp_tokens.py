@@ -4,7 +4,12 @@ from app.core.deps import require_admin
 from app.core.timeutils import as_utc
 from app.models.mcp_token import McpToken
 from app.models.user import User
-from app.schemas.mcp_token import McpTokenCreateRequest, McpTokenCreateResponse, McpTokenResponse
+from app.schemas.mcp_token import (
+    McpTokenCreateRequest,
+    McpTokenCreateResponse,
+    McpTokenRenameRequest,
+    McpTokenResponse,
+)
 from app.services import audit_service, mcp_token_service
 
 router = APIRouter(prefix="/admin/mcp-tokens", tags=["admin"])
@@ -41,6 +46,21 @@ async def issue_mcp_token(payload: McpTokenCreateRequest, user: User = Depends(r
         metadata={"label": token.label, "prefix": token.prefix, "expires_at": token.expires_at.isoformat()},
     )
     return McpTokenCreateResponse(**_to_response(token).model_dump(), raw_token=raw)
+
+
+@router.patch("/{token_id}", response_model=McpTokenResponse)
+async def rename_mcp_token(token_id: str, payload: McpTokenRenameRequest, user: User = Depends(require_admin)):
+    token = await mcp_token_service.rename(user, token_id, payload.label.strip())
+    if token is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP token not found")
+    await audit_service.record(
+        "MCP credential renamed",
+        actor_user_id=str(user.id),
+        target_type="mcp_token",
+        target_id=str(token.id),
+        metadata={"label": token.label, "prefix": token.prefix},
+    )
+    return _to_response(token)
 
 
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)

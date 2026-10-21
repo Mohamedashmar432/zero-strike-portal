@@ -9,7 +9,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         <div className="md:w-48 md:shrink-0">
           <SettingsNav />
         </div>
-        <div className="flex-1">{children}</div>
+        <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>
   );

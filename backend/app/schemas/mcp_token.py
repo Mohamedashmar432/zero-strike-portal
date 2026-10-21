@@ -9,6 +9,10 @@ class McpTokenCreateRequest(BaseModel):
     expires_in_days: Literal[7, 30, 90] = 30
 
 
+class McpTokenRenameRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+
+
 class McpTokenResponse(BaseModel):
     id: str
     label: str

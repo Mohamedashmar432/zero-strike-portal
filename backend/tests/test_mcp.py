@@ -354,3 +354,19 @@ def test_overview_health_scanner_and_ai_tools_have_the_expected_shape(client, ad
     assert {"engine_available", "binaries", "queue"} <= _call(client, token, "get_scanner_status").keys()
     ai = _call(client, token, "get_ai_health")
     assert "analytics" in ai and ai["recent_failed_calls"] == []
+
+
+def test_an_admin_can_rename_their_own_token_and_it_is_audited(client):
+    headers = _admin(client)
+    issued = _issue(client, headers, label="old name")
+    r = client.patch(f"/api/v1/admin/mcp-tokens/{issued['id']}", json={"label": "  new name "}, headers=headers)
+    assert r.status_code == 200 and r.json()["label"] == "new name"
+    assert r.json()["prefix"] == issued["prefix"] and r.json()["is_active"] is True
+    assert client.patch(f"/api/v1/admin/mcp-tokens/{issued['id']}", json={"label": ""}, headers=headers).status_code == 422
+    assert "MCP credential renamed" in {a.action for a in _run(AuditLog.find_all().to_list())}
+
+
+def test_an_admin_cannot_rename_another_admins_token(client):
+    first = _issue(client, _admin(client, "ren1@zerostrike.dev"))
+    other = _admin(client, "ren2@zerostrike.dev")
+    assert client.patch(f"/api/v1/admin/mcp-tokens/{first['id']}", json={"label": "x"}, headers=other).status_code == 404
