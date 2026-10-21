@@ -137,6 +137,21 @@ async def sync_overviews(project_id: str, repos: list[ProjectRepo]) -> dict[str,
     return out
 
 
+async def _record_sync_failure(repo: ProjectRepo, user: User, message: str, now: datetime) -> None:
+    await ProjectRepo.get_pymongo_collection().update_one(
+        {"_id": repo.id},
+        {"$set": {"last_sync_error": message, "remote_head_checked_at": now}},
+    )
+    await audit_service.record(
+        "Repo Sync Failed",
+        actor_user_id=str(user.id),
+        project_id=repo.project_id,
+        target_type="project_repo",
+        target_id=str(repo.id),
+        metadata={"error": message},
+    )
+
+
 async def sync_repo(
     project: Project,
     repo: ProjectRepo,
@@ -174,25 +189,20 @@ async def sync_repo(
             target_id=repo_id,
             metadata={"branch": repo.selected_branch, "force": force},
         )
-        await _refresh_pr_states(project_id, repo, user)
-        token = project_repo_service.decrypt_pat(repo)
         now = datetime.now(timezone.utc)
+        try:
+            token = project_repo_service.decrypt_pat(repo)
+        except project_repo_service.RepoTokenUnreadable as exc:
+            # Was an anonymous 500 with nothing recorded. It is a normal, fixable state (re-authenticate),
+            # so it gets the same treatment as an unreachable remote: shown on the repo row and audited.
+            await _record_sync_failure(repo, user, str(exc), now)
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+        await _refresh_pr_states(project_id, repo, user)
         try:
             head = await git_workspace.remote_head(repo.clone_url, repo.selected_branch, token, "basic")
         except git_workspace.GitWorkspaceError as exc:
             message = git_workspace.sanitize(str(exc), token)
-            await ProjectRepo.get_pymongo_collection().update_one(
-                {"_id": repo.id},
-                {"$set": {"last_sync_error": message, "remote_head_checked_at": now}},
-            )
-            await audit_service.record(
-                "Repo Sync Failed",
-                actor_user_id=str(user.id),
-                project_id=project_id,
-                target_type="project_repo",
-                target_id=repo_id,
-                metadata={"error": message},
-            )
+            await _record_sync_failure(repo, user, message, now)
             raise HTTPException(status.HTTP_409_CONFLICT, f"Could not check the remote: {message}")
 
         await ProjectRepo.get_pymongo_collection().update_one(

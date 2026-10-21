@@ -307,3 +307,34 @@ def test_reaped_scan_names_the_stage_it_was_stuck_in(client, monkeypatch):
         assert requeued.stage_started_at is None
 
     asyncio.run(run())
+
+
+def test_a_claimed_scan_with_an_unreadable_token_is_failed_with_a_reason_not_left_running(client, monkeypatch):
+    # Regression: decrypt_secret raised inside drain_queue AFTER the claim had marked the scan running and
+    # cleared its token, stranding it "running" until the reaper (and raising into the caller).
+    async def run():
+        started = []
+
+        async def fake_run(*a, **k):
+            started.append(a)
+
+        monkeypatch.setattr(cloud_scan_service, "run_cloud_scan", fake_run)
+        scan = _make_queued_scan(datetime.now(timezone.utc))
+        scan.repo_token = "gAAAAAB-not-decryptable-with-the-current-key"
+        await scan.insert()
+        good = _make_queued_scan(datetime.now(timezone.utc) + timedelta(seconds=1), repo_token="ghp_ok")
+        await good.insert()
+
+        await scan_queue_service.drain_queue()
+        for _ in range(20):  # the failure is finished by a spawned task
+            await asyncio.sleep(0.05)
+            if (await Scan.get(scan.id)).status == "failed":
+                break
+
+        failed = await Scan.get(scan.id)
+        assert failed.status == "failed" and "can no longer be read" in failed.error_message
+        assert failed.completed_at is not None
+        assert len(started) == 1  # the healthy scan behind it still started
+        assert (await Scan.get(good.id)).status == "running"
+
+    asyncio.run(run())

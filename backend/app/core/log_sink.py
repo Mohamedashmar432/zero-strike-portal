@@ -66,9 +66,12 @@ class MongoLogHandler(logging.Handler):
 
 
 def install(level: int = logging.WARNING) -> None:
-    root = logging.getLogger()
-    if not any(isinstance(h, MongoLogHandler) for h in root.handlers):
-        root.addHandler(MongoLogHandler(level))
+    # `uvicorn` is attached separately: its logger has propagate=False, so the "Exception in ASGI
+    # application" traceback behind every unhandled 500 never reaches the root handler. Prod showed
+    # 500s in the container console and an empty System logs tab / MCP log tools.
+    for logger in (logging.getLogger(), logging.getLogger("uvicorn")):
+        if not any(isinstance(h, MongoLogHandler) for h in logger.handlers):
+            logger.addHandler(MongoLogHandler(level))
 
 
 def _drain() -> list[dict]:

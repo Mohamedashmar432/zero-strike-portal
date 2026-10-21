@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 
+from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 
 from app.core import security
@@ -126,10 +127,26 @@ async def update_branch(project_id: str, repo_id: str, branch: str) -> ProjectRe
     return repo
 
 
+class RepoTokenUnreadable(Exception):
+    """The stored token no longer decrypts: it was saved under an encryption key that is not in
+    OAUTH_ENCRYPTION_KEY / OAUTH_ENCRYPTION_KEY_PREVIOUS any more. The only recovery is a new token."""
+
+
+UNREADABLE_TOKEN_MESSAGE = (
+    "The saved token for this repository can no longer be read (it was stored under an earlier "
+    "encryption key). Re-authenticate the repository with a new token."
+)
+
+
 def decrypt_pat(repo: ProjectRepo) -> str | None:
     # None for a public repo connected with no credential at all (see add_repo) — the clone runs
     # anonymously, so there's nothing to decrypt.
-    return security.decrypt_secret(repo.pat_encrypted) if repo.pat_encrypted else None
+    if not repo.pat_encrypted:
+        return None
+    try:
+        return security.decrypt_secret(repo.pat_encrypted)
+    except InvalidToken as exc:
+        raise RepoTokenUnreadable(UNREADABLE_TOKEN_MESSAGE) from exc
 
 
 async def reauth_repo(project_id: str, repo_id: str, new_pat: str) -> ProjectRepo:

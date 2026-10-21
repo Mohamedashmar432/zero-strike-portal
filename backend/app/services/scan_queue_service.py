@@ -13,6 +13,7 @@ import asyncio
 from datetime import timedelta
 
 import structlog
+from cryptography.fernet import InvalidToken
 
 from app.core import security
 from app.core.config import settings
@@ -69,7 +70,22 @@ async def drain_queue() -> None:
             scan = await _claim_next()
             if scan is None:
                 break
-            plaintext_token = security.decrypt_secret(scan.repo_token) if scan.repo_token else None
+            try:
+                plaintext_token = security.decrypt_secret(scan.repo_token) if scan.repo_token else None
+            except InvalidToken:
+                # The claim already marked it running and cleared the token, so raising here would strand it
+                # "running" until the reaper. Fail it with the reason instead. As a task, because _fail()
+                # re-enters drain_queue(), whose lock this loop still holds.
+                _track(
+                    asyncio.create_task(
+                        cloud_scan_service._fail(
+                            scan,
+                            "The repository token saved with this scan can no longer be read (it was stored under "
+                            "an earlier encryption key). Re-authenticate the repository and start the scan again.",
+                        )
+                    )
+                )
+                continue
             task = asyncio.create_task(
                 cloud_scan_service.run_cloud_scan(str(scan.id), plaintext_token, scan.repo_token_auth_scheme)
             )

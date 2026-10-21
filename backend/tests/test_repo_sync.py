@@ -696,3 +696,46 @@ def test_single_repo_responses_report_never_not_unknown(client, monkeypatch):
         headers=headers,
     )
     assert created.status_code == 201 and created.json()["sync_state"] == "never"
+
+
+def _corrupt_stored_token(rid):
+    """Simulate a token saved under an encryption key that is no longer configured (what prod hit)."""
+
+    async def go():
+        repo = await ProjectRepo.get(rid)
+        repo.pat_encrypted = "gAAAAAB-not-decryptable-with-the-current-key"
+        await repo.save()
+
+    asyncio.run(go())
+
+
+def test_sync_with_an_unreadable_stored_token_is_a_readable_409_not_a_500(client, monkeypatch):
+    # Prod: POST /projects/{id}/scans -> sync_repo -> decrypt_pat -> InvalidToken -> bare 500, nothing recorded.
+    calls = _fake_head(monkeypatch)
+    headers, pid, rid = _setup(client, "unread1@zerostrike.dev")
+    _corrupt_stored_token(rid)
+
+    for r in (_sync(client, headers, pid, rid), client.post(f"/api/v1/projects/{pid}/scans",
+              json={"scan_type": "cloud", "project_repo_id": rid}, headers=headers)):
+        assert r.status_code == 409
+        assert "Re-authenticate" in r.json()["detail"]
+
+    assert calls == []  # never reached the remote with a garbage token
+
+    async def check():
+        repo = await ProjectRepo.get(rid)
+        assert "can no longer be read" in repo.last_sync_error
+        rows = [a for a in await AuditLog.find_all().to_list() if a.action == "Repo Sync Failed"]
+        assert rows and "can no longer be read" in rows[0].metadata["error"]
+        assert await Scan.find(Scan.project_id == pid).count() == 0
+
+    asyncio.run(check())
+
+    # ...and re-authenticating with a fresh token is the way out: the next sync works.
+    monkeypatch.setattr(project_repo_service.repo_credential_service, "validate_pat", _ok_validate)
+    assert client.post(f"/api/v1/projects/{pid}/repos/{rid}/reauth", json={"pat": "ghp_new"}, headers=headers).status_code == 200
+    assert _sync(client, headers, pid, rid).status_code == 202
+
+
+async def _ok_validate(*args, **kwargs):
+    return None
