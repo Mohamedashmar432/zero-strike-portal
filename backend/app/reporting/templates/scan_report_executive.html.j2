@@ -199,7 +199,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
 {% endif %}
 <p class="finding-msg">{{ f.message }}</p>
 {% if f.evidence and f.evidence[0].snippet %}
-<pre class="code-block wrap">{{ f.evidence[0].snippet | dedent }}</pre>
+<pre class="code-block">{{ f.evidence[0].snippet | snippet }}</pre>
 {% endif %}
 {% if f.remediation %}<div class="rec"><b>Recommendation:</b> {{ f.remediation }}</div>{% endif %}
 {% endfor %}

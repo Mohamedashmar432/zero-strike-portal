@@ -109,7 +109,7 @@
 {% if f.evidence %}
 <div class="finding-section-label">Evidence</div>
 {% for e in f.evidence %}
-{% if e.snippet %}<pre class="code wrap">{{ e.snippet | dedent }}</pre>{% endif %}
+{% if e.snippet %}<pre class="code">{{ e.snippet | snippet }}</pre>{% endif %}
 {% endfor %}
 {% endif %}
 

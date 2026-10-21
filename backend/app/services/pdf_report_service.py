@@ -50,7 +50,29 @@ _env = Environment(
     loader=FileSystemLoader(Path(__file__).parent.parent / "reporting" / "templates"),
     autoescape=select_autoescape(["html", "j2"]),
 )
-_env.filters["dedent"] = lambda s: textwrap.dedent(s or "").strip("\n")
+
+# A code block that wraps AND must split across pages crashes xhtml2pdf: reportlab raises a
+# layout error, then builds its message through xhtml2pdf's buggy `getPlainText` and the real
+# error surfaces as "TypeError: sequence item 0: expected str instance, list found" — a 500 on
+# the PDF download. Observed with a 400-line snippet, a 2000-char line, or 60 lines x 120 chars.
+# 100 columns is about one page-width of 8pt Courier, so capped lines never wrap; ASCII "..."
+# because the built-in fonts have no ellipsis glyph in every encoding.
+_SNIPPET_MAX_LINES = 40
+_SNIPPET_MAX_COLS = 100
+
+
+def _snippet(text: str | None) -> str:
+    # The built-in Courier covers Windows-1252 only: emoji, arrows, a BOM etc. would print as black
+    # boxes and log one xhtml2pdf warning per glyph, so unencodable characters become "?".
+    text = (text or "").encode("cp1252", "replace").decode("cp1252")
+    lines = textwrap.dedent(text).strip("\n").splitlines()
+    shown = [ln if len(ln) <= _SNIPPET_MAX_COLS else ln[: _SNIPPET_MAX_COLS - 3] + "..." for ln in lines[:_SNIPPET_MAX_LINES]]
+    if len(lines) > _SNIPPET_MAX_LINES:
+        shown.append(f"... ({len(lines) - _SNIPPET_MAX_LINES} more lines not shown)")
+    return "\n".join(shown)
+
+
+_env.filters["snippet"] = _snippet
 
 
 def _severity_sort_key(finding: Finding) -> tuple[int, str]:

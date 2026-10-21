@@ -228,6 +228,53 @@ def test_build_report_filename_falls_back_to_root_path_for_local_scans():
     assert filename.endswith(".pdf")
 
 
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("template", ["standard", "executive"])
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        pytest.param("\n".join(f"line {i}" for i in range(400)), id="tall-400-lines"),
+        pytest.param("x" * 5000, id="one-5000-char-line"),
+        pytest.param("\n".join("y" * 120 for _ in range(60)), id="60-lines-x-120-cols"),
+        pytest.param("﻿" + "label = '\U0001F4D6 ▶ → ✓ ⚠ ₱' # <b>&", id="unicode-symbols"),
+    ],
+)
+def test_pdf_renders_oversized_or_unencodable_snippets(template, snippet):
+    # Regression: a code block that wraps and must split across pages made xhtml2pdf raise
+    # "TypeError: sequence item 0: expected str instance, list found" (reportlab's layout error
+    # masked by xhtml2pdf's buggy getPlainText) — a 500 on the PDF download. Snippets are capped.
+    from datetime import datetime, timezone
+
+    from app.models.finding import EvidenceEmbedded, Finding, LocationEmbedded
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services import pdf_report_service
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(project_id="p1", scan_type="cicd", created_at=now, updated_at=now)
+    report = Report(scan_id="s1", project_id="p1", stats=ScanStatsEmbedded(by_severity={"high": 1}), json_uploaded_at=now)
+    findings = [
+        Finding(scan_id="s1", project_id="p1", rule_id=f"R-{i}", severity="high", message="m",
+                location=LocationEmbedded(file="a.py"), evidence=[EvidenceEmbedded(snippet=snippet)])
+        for i in range(8)
+    ]
+
+    html = pdf_report_service.render_scan_report_html(scan, report, findings, template)
+    assert "\U0001F4D6" not in html and "﻿" not in html
+    assert pdf_report_service._html_to_pdf_sync(html).startswith(b"%PDF")
+
+
+def test_snippet_filter_caps_lines_and_columns():
+    from app.services.pdf_report_service import _SNIPPET_MAX_COLS, _SNIPPET_MAX_LINES, _snippet
+
+    out = _snippet("\n".join("z" * 500 for _ in range(_SNIPPET_MAX_LINES + 5))).splitlines()
+    assert len(out) == _SNIPPET_MAX_LINES + 1
+    assert all(len(ln) <= _SNIPPET_MAX_COLS for ln in out[:-1])
+    assert out[-1].startswith("... (5 more lines")
+
+
 def test_long_paths_wrap_via_css_not_zero_width_spaces():
     # xhtml2pdf's built-in Helvetica has no U+200B glyph — it rendered as a black box in
     # every path/URL — and doesn't break on it either. Long tokens must wrap via the
