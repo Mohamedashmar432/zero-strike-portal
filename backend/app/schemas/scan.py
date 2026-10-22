@@ -1,12 +1,17 @@
+import re
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.git_ref import validate_branch_name
 from app.core.repo_url import sanitize_repo_url
-from app.models.scan import ScanStage, ScanStatus
+from app.models.scan import CiProvider, ScanStage, ScanStatus
 from app.schemas.dashboard import SeverityCounts
+
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class ScanCreateRequest(BaseModel):
@@ -14,7 +19,7 @@ class ScanCreateRequest(BaseModel):
     scan_label: str | None = None
     repo_url: str | None = None
     branch: str | None = None
-    ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
+    ci_provider: CiProvider | None = None
     # Transient: used to clone a private repo for a cloud scan, never persisted on the Scan.
     repo_token: str | None = None
     # Alternative to repo_token: resolve the clone credential from a connected GitHub/Azure DevOps
@@ -58,7 +63,10 @@ class ScanResponse(BaseModel):
     scan_label: str | None
     repo_url: str | None
     project_repo_id: str | None
-    ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None
+    ci_provider: CiProvider | None
+    ci_build_id: str | None = None
+    ci_build_number: str | None = None
+    ci_build_url: str | None = None
     created_by: str | None
     started_at: datetime | None
     completed_at: datetime | None
@@ -116,6 +124,54 @@ class ScannerCreateScanRequest(BaseModel):
         """Strip userinfo/query/fragment (a token can ride in any of them) and syntax-check. A bad
         value becomes None rather than a 422: the scan upload must never fail over display metadata."""
         return sanitize_repo_url(v)
+
+    # Optional CI context. Older scanners omit all of it (and the model ignores unknown keys), so a
+    # legacy body still means triggered_by="cli". "cloud"/"manual"/"sync" are portal-originated and
+    # can never be claimed by a scanner.
+    triggered_by: Literal["cli", "ci"] | None = None
+    ci_provider: CiProvider | None = None
+    ci_build_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ci_build_number: str | None = Field(default=None, max_length=128)
+    ci_build_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("ci_provider", "ci_build_id", "ci_build_number", "ci_build_url", mode="before")
+    @classmethod
+    def _blank_ci_to_none(cls, v):
+        """Pipeline variables that did not resolve arrive as "" -- treat as absent, not as an error."""
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("ci_build_number")
+    @classmethod
+    def _clean_build_number(cls, v: str | None) -> str | None:
+        if v is not None and _CONTROL_CHARS.search(v):
+            raise ValueError("ci_build_number must not contain control characters")
+        return v
+
+    @field_validator("ci_build_url")
+    @classmethod
+    def _clean_build_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if _CONTROL_CHARS.search(v) or re.search(r"\s", v):
+            raise ValueError("ci_build_url must not contain whitespace or control characters")
+        parts = urlsplit(v)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("ci_build_url must be an http(s) URL with a host")
+        if parts.username or parts.password:
+            raise ValueError("ci_build_url must not contain credentials")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_ci_metadata(self):
+        has_ci = any((self.ci_provider, self.ci_build_id, self.ci_build_number, self.ci_build_url))
+        if has_ci and self.triggered_by != "ci":
+            raise ValueError("CI metadata requires triggered_by='ci'")
+        if self.triggered_by == "ci" and not self.ci_provider:
+            raise ValueError("ci_provider is required when triggered_by='ci'")
+        return self
 
 
 class ScannerCreateScanResponse(BaseModel):

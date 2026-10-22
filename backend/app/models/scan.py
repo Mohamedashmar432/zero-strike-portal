@@ -8,6 +8,8 @@ from pymongo import IndexModel
 # is typed (schemas, etc.) instead of repeating the Literal, which used to drift.
 ScanStatus = Literal["pending", "queued", "running", "completed", "failed"]
 ScanType = Literal["cloud", "cicd"]
+# Classic (visual-designer) Azure DevOps pipelines are stored as "azure_pipelines" too.
+CiProvider = Literal["github_actions", "gitlab_ci", "azure_pipelines"]
 
 # Observability-only sub-phase of status="running" for a cloud scan (see Scan.stage), in order:
 #   validating -> cloning -> scanning -> ingesting
@@ -39,7 +41,11 @@ class Scan(Document):
     # credentials" rejection -- so every GitHub-sourced token uses "basic". "bearer" is for Azure
     # DevOps OAuth (AAD) tokens; Azure DevOps PATs also use "basic".
     repo_token_auth_scheme: Literal["bearer", "basic"] = "bearer"
-    ci_provider: Literal["github_actions", "gitlab_ci", "azure_pipelines"] | None = None
+    ci_provider: CiProvider | None = None
+    # CI build identity, set by scanners that report it (triggered_by="ci"); None otherwise.
+    ci_build_id: str | None = None
+    ci_build_number: str | None = None
+    ci_build_url: str | None = None
     created_by: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None

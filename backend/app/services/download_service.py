@@ -70,7 +70,9 @@ async def resolve_binary(version: str, os_: str, arch: str) -> ScannerBinary:
     doc = await ScannerBinary.find(*query).sort("-uploaded_at").first_or_none()
     if not doc:
         raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"no zerostrike binary for {os_}-{arch} at version '{version}'"
+            status.HTTP_404_NOT_FOUND,
+            f"no zerostrike binary for {os_}-{arch} at version '{version}' — a portal admin must "
+            "publish it (POST /api/v1/admin/downloads/zerostrike; see docs/AZURE_DEVOPS_CLASSIC_PIPELINE.md)",
         )
     return doc
 

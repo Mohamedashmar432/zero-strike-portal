@@ -63,6 +63,9 @@ class ScanHistoryItem(BaseModel):
     triggered_by: str | None = None
     branch: str | None = None
     git_commit: str | None = None
+    ci_provider: str | None = None
+    ci_build_number: str | None = None
+    ci_build_url: str | None = None
 
 
 class OwaspSummaryResponse(BaseModel):

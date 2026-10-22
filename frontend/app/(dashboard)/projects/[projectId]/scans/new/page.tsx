@@ -21,6 +21,7 @@ import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
+import { findingsGateLines } from "@/lib/cicd/findings-gate";
 import { FAIL_ON_OPTIONS, type FailOn } from "@/lib/cicd-fail-on";
 import {
   createCloudScan,
@@ -31,6 +32,8 @@ import {
 } from "@/lib/api/scans";
 import { cn } from "@/lib/utils";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
+import { AzureClassicSetup } from "@/components/cicd/azure-classic-setup";
+import { CopyBlock } from "@/components/common/copy-block";
 import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
 function scannerServerOrigin(): string {
@@ -45,52 +48,12 @@ const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: t
   { value: "cicd", label: "CI/CD", description: "Add thinkShield to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
 
-const CI_PROVIDERS: { value: CiProvider; label: string }[] = [
+const CI_PROVIDER_OPTIONS: { value: CiProvider | "azure_classic"; label: string }[] = [
   { value: "github_actions", label: "GitHub Actions" },
   { value: "gitlab_ci", label: "GitLab CI" },
   { value: "azure_pipelines", label: "Azure Pipelines" },
+  { value: "azure_classic", label: "Azure DevOps Classic" },
 ];
-
-function downloadTextFile(filename: string, text: string) {
-  const blob = new Blob([text], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function CopyBlock({ text, label, filename }: { text: string; label?: string; filename?: string }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div>{label && <Label>{label}</Label>}</div>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              navigator.clipboard.writeText(text);
-              toast.success("Copied");
-            }}
-          >
-            Copy
-          </Button>
-          {filename && (
-            <Button type="button" size="sm" variant="outline" onClick={() => downloadTextFile(filename, text)}>
-              Download
-            </Button>
-          )}
-        </div>
-      </div>
-      <code className="block overflow-x-auto rounded bg-muted px-3 py-2.5 text-xs leading-relaxed whitespace-pre">
-        {text}
-      </code>
-    </div>
-  );
-}
 
 function BackToTypes({ onBack }: { onBack: () => void }) {
   return (
@@ -183,29 +146,9 @@ function cicdScanLines(origin: string, token: string, warn: string[], soft: stri
     `  --format json --output ${REPORT_FILE} || rc=$?`,
     // 1 = findings were found (not an error); anything higher is a genuine failure.
     'if [ "$rc" -gt 1 ]; then echo "thinkShield scan failed (exit code $rc)"; exit "$rc"; fi',
-    // One "Severity" line per finding at this indent, so this does not count nested fields.
-    `crit=$(grep -c '^      "Severity": "critical"' ${REPORT_FILE} || true)`,
-    `high=$(grep -c '^      "Severity": "high"' ${REPORT_FILE} || true)`,
-    "crit=${crit:-0}",
-    "high=${high:-0}",
-    'if [ "$crit" -gt 0 ] || [ "$high" -gt 0 ]; then',
-    `  msg="${FINDINGS_MSG}"`,
-    ...block(warn, 2),
-    '  case "${ZEROSTRIKE_FAIL_ON:-none}" in',
-    "    critical) blocking=$crit ;;",
-    "    high) blocking=$((crit + high)) ;;",
-    "    *) blocking=0 ;;",
-    "  esac",
-    '  if [ "$blocking" -gt 0 ]; then',
-    '    echo "thinkShield: failing the pipeline (ZEROSTRIKE_FAIL_ON=$ZEROSTRIKE_FAIL_ON, $blocking blocking)"',
-    "    exit 1",
-    "  fi",
-    ...block(soft, 2),
-    "fi",
+    ...findingsGateLines(REPORT_FILE, warn, soft),
   ];
 }
-
-const FINDINGS_MSG = "thinkShield: $crit critical and $high high severity findings. See the thinkShield portal.";
 
 function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): string {
   const install = cicdInstallLines(origin);
@@ -303,7 +246,7 @@ function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): stri
 }
 
 function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () => void }) {
-  const [provider, setProvider] = useState<CiProvider>();
+  const [provider, setProvider] = useState<CiProvider | "azure_classic">();
   const { data: project } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
@@ -350,7 +293,7 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
       <div className="space-y-2">
         <Label>CI provider</Label>
         <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
-          {CI_PROVIDERS.map((p) => (
+          {CI_PROVIDER_OPTIONS.map((p) => (
             <Button
               key={p.value}
               type="button"
@@ -363,7 +306,10 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
           ))}
         </div>
       </div>
-      {provider && (
+      {provider === "azure_classic" && (
+        <AzureClassicSetup origin={scannerServerOrigin()} failOn={failOn} projectId={projectId} />
+      )}
+      {provider && provider !== "azure_classic" && (
         <div className="space-y-1">
           <CopyBlock
             label="Pipeline snippet"

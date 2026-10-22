@@ -43,7 +43,7 @@ async def scanner_create_scan(
         project_id=ctx.project_id,
         api_key_id=ctx.key_id,
         scan_type="cicd",
-        triggered_by="cli",
+        triggered_by=payload.triggered_by or "cli",
         status="pending",
         scanner_version=payload.scanner_version,
         hostname=payload.hostname,
@@ -51,6 +51,10 @@ async def scanner_create_scan(
         branch=payload.branch,
         repo_url=payload.repo_url,
         scan_label=payload.scan_label,
+        ci_provider=payload.ci_provider,
+        ci_build_id=payload.ci_build_id,
+        ci_build_number=payload.ci_build_number,
+        ci_build_url=payload.ci_build_url,
         created_at=now,
         updated_at=now,
     )
@@ -62,7 +66,12 @@ async def scanner_create_scan(
         project_id=ctx.project_id,
         target_type="scan",
         target_id=str(scan.id),
-        metadata={"scanner_version": payload.scanner_version or "", "scan_label": payload.scan_label or ""},
+        metadata={
+            "scanner_version": payload.scanner_version or "",
+            "scan_label": payload.scan_label or "",
+            "triggered_by": scan.triggered_by,
+            "ci_provider": payload.ci_provider or "",
+        },
     )
     return ScannerCreateScanResponse(
         scan_id=str(scan.id), status="pending", project_id=ctx.project_id, project_name=project.name

@@ -6,6 +6,11 @@ import type { Page } from "./users";
 export type ScanType = "cloud" | "cicd";
 export type ScanStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type CiProvider = "github_actions" | "gitlab_ci" | "azure_pipelines";
+export const CI_PROVIDER_LABELS: Record<CiProvider, string> = {
+  github_actions: "GitHub Actions",
+  gitlab_ci: "GitLab CI",
+  azure_pipelines: "Azure Pipelines",
+};
 // Which phase of the cloud-scan pipeline a scan is in (running) or stopped in (failed).
 // Diagnostics only -- key behaviour off `status`, never off this.
 export type ScanStage = "validating" | "cloning" | "scanning" | "ingesting";
@@ -32,6 +37,9 @@ export type Scan = {
   repo_url: string | null;
   project_repo_id: string | null;
   ci_provider: CiProvider | null;
+  ci_build_id: string | null;
+  ci_build_number: string | null;
+  ci_build_url: string | null;
   created_by: string | null;
   started_at: string | null;
   completed_at: string | null;

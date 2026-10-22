@@ -155,3 +155,34 @@ def test_publish_requires_admin(client):
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     r = _publish(client, headers, "v0.23.0", "linux", "amd64", b"x")
     assert r.status_code == 403
+
+
+def test_info_returns_sha256_and_version_after_publish(client):
+    headers = _admin_headers(client, email="dlAdminInfo@zerostrike.dev")
+    content = b"fake-binary-for-info"
+    assert _publish(client, headers, "v0.40.0", "linux", "amd64", content).status_code == 200
+
+    r = client.get("/api/v1/downloads/zerostrike/v0.40.0/linux-amd64/info")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["version"] == "v0.40.0"
+    assert (body["os"], body["arch"]) == ("linux", "amd64")
+    assert body["sha256"] == hashlib.sha256(content).hexdigest()
+    assert body["size_bytes"] == len(content)
+    assert body["filename"] == "zerostrike_linux_amd64"
+    assert client.get("/api/v1/downloads/zerostrike/latest/linux-amd64/info").json()["version"] == "v0.40.0"
+
+
+def test_missing_platform_404_is_actionable_for_info_and_download(client):
+    headers = _admin_headers(client, email="dlAdminInfo2@zerostrike.dev")
+    assert _publish(client, headers, "v0.41.0", "windows", "amd64", b"win").status_code == 200
+
+    for suffix in ("/info", ""):
+        r = client.get(f"/api/v1/downloads/zerostrike/latest/linux-amd64{suffix}")
+        assert r.status_code == 404
+        assert "portal admin must publish" in r.json()["detail"]
+        assert "linux-amd64" in r.json()["detail"]
+
+
+def test_info_invalid_os_arch_is_400(client):
+    assert client.get("/api/v1/downloads/zerostrike/latest/bad-os/info").status_code == 400

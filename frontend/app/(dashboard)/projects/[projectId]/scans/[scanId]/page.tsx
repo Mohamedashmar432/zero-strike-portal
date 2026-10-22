@@ -56,7 +56,7 @@ import { refetchWhileStatusActive } from "@/lib/api/polling";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
-import { createCloudScan, getScan, SCAN_STAGE_LABELS, type Scan } from "@/lib/api/scans";
+import { CI_PROVIDER_LABELS, createCloudScan, getScan, SCAN_STAGE_LABELS, type Scan } from "@/lib/api/scans";
 import { repoIdentity, safeRepoHref } from "@/lib/repo-identity";
 
 // Client-side verdict derivation -- the backend has no separate `verdict` enum, only
@@ -681,6 +681,23 @@ export default function ScanDetailPage() {
             {scan.scan_label && <ScanFact label="Label">{scan.scan_label}</ScanFact>}
             <ScanFact label="Created">{new Date(scan.created_at).toLocaleString()}</ScanFact>
             {scan.triggered_by === "sync" && <ScanFact label="Trigger">Repo sync</ScanFact>}
+            {scan.triggered_by === "ci" && (
+              <ScanFact label="Trigger">
+                CI{scan.ci_provider ? ` (${CI_PROVIDER_LABELS[scan.ci_provider] ?? scan.ci_provider})` : ""}
+              </ScanFact>
+            )}
+            {scan.ci_build_url && /^https?:\/\//.test(scan.ci_build_url) && (
+              <ScanFact label="Build">
+                <a
+                  href={scan.ci_build_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  {scan.ci_build_number || "Build"}
+                </a>
+              </ScanFact>
+            )}
           </dl>
         </div>
         <div className="flex flex-wrap items-center gap-2">

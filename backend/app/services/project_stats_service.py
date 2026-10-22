@@ -506,6 +506,9 @@ async def get_project_scan_activity(project_id: str, limit_per_repo: int = 50) -
             triggered_by=scan.triggered_by,
             branch=scan.branch,
             git_commit=scan.git_commit,
+            ci_provider=scan.ci_provider,
+            ci_build_number=scan.ci_build_number,
+            ci_build_url=scan.ci_build_url,
         )
 
     # Bucket scans (already newest-first) per repo key.

@@ -78,6 +78,11 @@ function ScanRow({ projectId, scan, isLatest }: { projectId: string; scan: FlatS
                 Sync
               </Badge>
             )}
+            {scan.triggered_by === "ci" && (
+              <Badge variant="secondary" className="font-mono uppercase">
+                CI
+              </Badge>
+            )}
             {scan.status !== "completed" && <ScanStatusBadge status={scan.status} scanId={scan.scan_id} />}
           </div>
           {scan.git_commit && (

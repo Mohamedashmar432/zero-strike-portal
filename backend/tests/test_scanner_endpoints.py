@@ -270,3 +270,100 @@ def test_health_reports_which_scanner_build_is_deployed(client, monkeypatch):
     # hypothetical one.
     monkeypatch.setattr(settings, "scanner_build_ref", "")
     assert client.get("/health").json()["scanner_build"] == "unknown"
+
+
+# --- CI metadata on scan registration (classic Azure DevOps pipelines etc.) ---
+
+_ADO_BODY = {
+    "triggered_by": "ci",
+    "ci_provider": "azure_pipelines",
+    "ci_build_id": "4821",
+    "ci_build_number": "20261022.3",
+    "ci_build_url": "https://dev.azure.com/acme/proj/_build/results?buildId=4821&view=results",
+}
+
+
+def _setup(client, email):
+    owner = register_and_login(client, email=email)
+    project = _project(client, _headers(owner))
+    return owner, project, _raw_key(client, _headers(owner), project["id"])
+
+
+def _post_scan(client, token, body):
+    return client.post("/api/v1/scans", json=body, headers=_scanner(token))
+
+
+def test_legacy_body_defaults_to_cli_with_no_ci_metadata(client):
+    owner, project, token = _setup(client, "ci-legacy@zerostrike.dev")
+    sid = _create_scan(client, token, project["id"])["scan_id"]
+    d = client.get(f"/api/v1/scans/{sid}", headers=_headers(owner)).json()
+    assert (d["triggered_by"], d["scan_type"]) == ("cli", "cicd")
+    assert d["ci_provider"] is d["ci_build_id"] is d["ci_build_number"] is d["ci_build_url"] is None
+
+
+def test_full_ado_body_is_persisted_and_shown_in_detail(client):
+    owner, project, token = _setup(client, "ci-ado@zerostrike.dev")
+    r = _post_scan(client, token, {"project_id": project["id"], **_ADO_BODY})
+    assert r.status_code == 201
+    d = client.get(f"/api/v1/scans/{r.json()['scan_id']}", headers=_headers(owner)).json()
+    assert (d["triggered_by"], d["scan_type"], d["ci_provider"]) == ("ci", "cicd", "azure_pipelines")
+    assert d["ci_build_id"] == "4821"
+    assert d["ci_build_number"] == "20261022.3"
+    assert d["ci_build_url"] == _ADO_BODY["ci_build_url"]
+
+
+def test_invalid_ci_metadata_is_422(client):
+    _, project, token = _setup(client, "ci-422@zerostrike.dev")
+    bad = [
+        {"triggered_by": "cloud"},
+        {"triggered_by": "manual"},
+        {"triggered_by": "sync"},
+        {"triggered_by": "bogus"},
+        {**_ADO_BODY, "ci_provider": "azure_devops"},
+        {**_ADO_BODY, "ci_provider": "jenkins"},
+        {"ci_provider": "azure_pipelines"},
+        {"triggered_by": "cli", "ci_build_id": "1"},
+        {"triggered_by": "ci", "ci_build_id": "1"},
+        {**_ADO_BODY, "ci_build_url": "javascript:alert(1)"},
+        {**_ADO_BODY, "ci_build_url": "ftp://dev.azure.com/x"},
+        {**_ADO_BODY, "ci_build_url": "https://u:p@dev.azure.com/x"},
+        {**_ADO_BODY, "ci_build_url": "https://dev.azure.com/" + "a" * 2048},
+        {**_ADO_BODY, "ci_build_id": "48 21"},
+    ]
+    for body in bad:
+        r = _post_scan(client, token, body)
+        assert r.status_code == 422, body
+
+
+def test_blank_ci_values_become_none_and_are_accepted(client):
+    owner, project, token = _setup(client, "ci-blank@zerostrike.dev")
+    r = _post_scan(
+        client,
+        token,
+        {"ci_provider": "", "ci_build_id": " ", "ci_build_number": "", "ci_build_url": ""},
+    )
+    assert r.status_code == 201
+    d = client.get(f"/api/v1/scans/{r.json()['scan_id']}", headers=_headers(owner)).json()
+    assert d["triggered_by"] == "cli"
+    assert d["ci_provider"] is d["ci_build_id"] is d["ci_build_number"] is d["ci_build_url"] is None
+
+
+def test_unknown_extra_field_is_ignored(client):
+    _, project, token = _setup(client, "ci-extra@zerostrike.dev")
+    r = _post_scan(client, token, {"some_future_field": "x", **_ADO_BODY})
+    assert r.status_code == 201
+
+
+def test_project_id_mismatch_is_still_403_with_ci_metadata(client):
+    _, project, token = _setup(client, "ci-403@zerostrike.dev")
+    r = _post_scan(client, token, {"project_id": "0" * 24, **_ADO_BODY})
+    assert r.status_code == 403
+
+
+def test_project_scan_list_includes_ci_fields(client):
+    owner, project, token = _setup(client, "ci-list@zerostrike.dev")
+    assert _post_scan(client, token, _ADO_BODY).status_code == 201
+    items = client.get(f"/api/v1/projects/{project['id']}/scans", headers=_headers(owner)).json()["items"]
+    assert items[0]["ci_provider"] == "azure_pipelines"
+    assert items[0]["ci_build_number"] == "20261022.3"
+    assert items[0]["ci_build_url"] == _ADO_BODY["ci_build_url"]
