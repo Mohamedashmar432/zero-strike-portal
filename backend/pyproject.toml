@@ -11,7 +11,7 @@ dependencies = [
     # this stack has moved off motor onto pymongo's native async driver.
     "beanie>=1.27,<2.1",
     "motor>=3.6",
-    "python-jose[cryptography]>=3.3",
+    "PyJWT>=2.10",
     "bcrypt>=4.1",
     "pydantic-settings>=2.6",
     "email-validator>=2.2",
@@ -29,7 +29,7 @@ dependencies = [
     # Custom scanner rules are parsed (id, language) before they are validated by the scanner.
     "pyyaml>=6.0",
     # Admin MCP server (app/mcp, docs/ADMIN_MCP.md).
-    "mcp>=1.9",
+    "mcp>=1.32",
 ]
 
 [project.optional-dependencies]

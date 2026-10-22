@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from app.core.config import settings
 
@@ -57,7 +58,7 @@ def create_refresh_token(user_id: str) -> tuple[str, str, datetime]:
 
 
 def decode_token(token: str) -> dict:
-    """Raises jose.JWTError on invalid/expired token — caller translates to 401."""
+    """Raises JWTError on invalid/expired token — caller translates to 401."""
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
 
 
