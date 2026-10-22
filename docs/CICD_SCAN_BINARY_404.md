@@ -131,3 +131,5 @@ to prod automatically, so "latest" is never missing an arch. Note it doesn't ret
 **Left for you to decide (both need credentials I don't have and shouldn't handle):**
 - Adding the two GitHub Actions secrets.
 - Running the Part 1 one-time manual publish for `v0.24.0` (needs your admin password).
+
+See also: [`AZURE_DEVOPS_CLASSIC_PIPELINE.md`](./AZURE_DEVOPS_CLASSIC_PIPELINE.md) for the Classic Azure DevOps setup, the binary `/info` check and the actionable 404 message.

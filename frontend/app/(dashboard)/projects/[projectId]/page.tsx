@@ -543,6 +543,11 @@ function ScansTab({ projectId }: { projectId: string }) {
                           Sync
                         </Badge>
                       )}
+                      {s.triggered_by === "ci" && (
+                        <Badge variant="secondary" className="font-mono uppercase">
+                          CI
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-64" title={s.repo_url ?? undefined}>

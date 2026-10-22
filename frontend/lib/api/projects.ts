@@ -1,6 +1,6 @@
 import { apiFetch } from "./client";
 import type { SeverityCounts } from "./dashboard";
-import type { ScanStatus, ScanType } from "./scans";
+import type { CiProvider, ScanStatus, ScanType } from "./scans";
 import type { Page } from "./users";
 
 export type ScanStatusCounts = Record<ScanStatus, number>;
@@ -52,6 +52,9 @@ export type ScanHistoryItem = {
   triggered_by?: string | null;
   branch?: string | null;
   git_commit?: string | null;
+  ci_provider?: CiProvider | null;
+  ci_build_number?: string | null;
+  ci_build_url?: string | null;
 };
 
 export type OwaspSummary = {

@@ -216,7 +216,7 @@ All under `/api/v1`. List endpoints return `{items, total, page, page_size}`.
 **`/apikeys`**: `POST /projects/{id}/apikeys {label,expires_at}` → `201 {token,...}` (shown once); `GET /projects/{id}/apikeys` (no raw token); `DELETE /apikeys/{key_id}` → `204`; `GET /apikeys/me` (Bearer `<token>`, scanner preflight) → `{valid,project_id,project_name,expires_at}`.
 
 **`/scans`** — user-facing (JWT): `GET /projects/{id}/scans` (filter by status); `GET /scans/{id}`; `DELETE /scans/{id}`.
-Scanner-facing (API-key Bearer): `POST /scans {project_id,scanner_version,hostname?,git_commit?,branch?,scan_label?}` → `201 {scan_id,status:"pending"}`; `PUT /scans/{id}/status {status:"failed",error_message}`; `POST /scans/{id}/upload/json` (raw Report JSON body) → `{status:"completed",findings_ingested}`; `POST /scans/{id}/upload/html` (multipart `file`) → `{html_available:true}`.
+Scanner-facing (API-key Bearer): `POST /scans {project_id,scanner_version,hostname?,git_commit?,branch?,scan_label?,triggered_by?,ci_provider?,ci_build_id?,ci_build_number?,ci_build_url?}` (the optional `triggered_by`/`ci_*` fields record CI context; any `ci_*` value requires `triggered_by:"ci"`; see `AZURE_DEVOPS_CLASSIC_PIPELINE.md`) → `201 {scan_id,status:"pending"}`; `PUT /scans/{id}/status {status:"failed",error_message}`; `POST /scans/{id}/upload/json` (raw Report JSON body) → `{status:"completed",findings_ingested}`; `POST /scans/{id}/upload/html` (multipart `file`) → `{html_available:true}`.
 
 **`/reports`**: `GET /scans/{id}/report` → `{scan,stats,findings[...paginated],diagnostics}`; `GET /scans/{id}/report/download?format=json|html`; `GET /projects/{id}/findings` (filter severity/kind/category/fingerprint, paginated); `GET /findings/{id}`.
 

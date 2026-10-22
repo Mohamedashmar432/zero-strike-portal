@@ -155,3 +155,25 @@ def test_scan_activity_items_carry_trigger_branch_and_commit(client):
     body = client.get(f"/api/v1/projects/{project['id']}/scan-activity", headers=_headers(owner)).json()
     item = body["repos"][0]["scans"][0]
     assert (item["triggered_by"], item["branch"], item["git_commit"]) == ("sync", "main", "a" * 40)
+
+
+def test_scan_activity_items_carry_ci_provider_and_build_link(client):
+    owner = register_and_login(client, email="activity-ci@zerostrike.dev")
+    project = _create_project(client, _headers(owner))
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    async def seed():
+        repo = await _repo(project["id"], "acme/ci")
+        await Scan(
+            project_id=project["id"], scan_type="cicd", triggered_by="ci", status="completed",
+            project_repo_id=str(repo.id), ci_provider="azure_pipelines", ci_build_number="20260101.1",
+            ci_build_url="https://dev.azure.com/acme/p/_build/results?buildId=1",
+            created_at=now, completed_at=now, updated_at=now,
+        ).insert()
+
+    asyncio.run(seed())
+    body = client.get(f"/api/v1/projects/{project['id']}/scan-activity", headers=_headers(owner)).json()
+    item = body["repos"][0]["scans"][0]
+    assert item["ci_provider"] == "azure_pipelines"
+    assert item["ci_build_number"] == "20260101.1"
+    assert item["ci_build_url"] == "https://dev.azure.com/acme/p/_build/results?buildId=1"

@@ -3,6 +3,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { listApiKeys } from "@/lib/api/api-keys";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
+import { ApiError } from "@/lib/api/client";
+import { getScannerBinaryInfo } from "@/lib/api/downloads";
 import { getProject } from "@/lib/api/projects";
 import { createCloudScan, type CreatedScan } from "@/lib/api/scans";
 import NewScanPage from "./page";
@@ -15,6 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/api/projects", () => ({ getProject: vi.fn() }));
+vi.mock("@/lib/api/downloads", () => ({ getScannerBinaryInfo: vi.fn() }));
 vi.mock("@/lib/api/api-keys", () => ({ listApiKeys: vi.fn() }));
 vi.mock("@/lib/api/project-repos", () => ({ listProjectRepos: vi.fn() }));
 vi.mock("@/lib/api/scans", async (importOriginal) => ({
@@ -153,5 +156,42 @@ describe("New scan: CI/CD setup", () => {
     // The scan command is split with line continuations, so nothing needs a horizontal scrollbar.
     expect(code()).toContain("./zerostrike scan . \\\n");
     expect(Math.max(...code().split("\n").map((l) => l.length))).toBeLessThan(120);
+  });
+
+  const binaryInfo = {
+    version: "v1.2.3",
+    os: "linux",
+    arch: "amd64",
+    filename: "zerostrike_linux_amd64",
+    sha256: "x",
+    size_bytes: 1,
+    uploaded_at: "2026-10-01T00:00:00Z",
+  };
+
+  test("Azure DevOps Classic renders instructions and a script pinned to the published version, with no key details", async () => {
+    vi.mocked(getScannerBinaryInfo).mockResolvedValue(binaryInfo);
+    await openCicdStep(true);
+    vi.mocked(listApiKeys).mockResolvedValue({
+      items: [{ id: "k1", is_active: true, name: "SecretKeyName", key_prefix: "zs_abc123" }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    } as never);
+    fireEvent.click(screen.getByRole("button", { name: "Azure DevOps Classic" }));
+    expect(await screen.findByText(/Pinned to v1\.2\.3/)).toBeTruthy();
+    expect(screen.getByText(/Bash task script/)).toBeTruthy();
+    const body = document.body.textContent ?? "";
+    expect(body).toContain("ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)");
+    expect(body).toContain("--config -");
+    expect(body).not.toContain("SecretKeyName");
+    expect(body).not.toContain("zs_abc123");
+  });
+
+  test("Azure DevOps Classic warns when no Linux scanner is published, and still renders the script", async () => {
+    vi.mocked(getScannerBinaryInfo).mockRejectedValue(new ApiError(404, { detail: "Not found" }));
+    await openCicdStep(true);
+    fireEvent.click(screen.getByRole("button", { name: "Azure DevOps Classic" }));
+    expect(await screen.findByText(/will fail with HTTP 404/)).toBeTruthy();
+    expect(document.body.textContent).toContain("<ZEROSTRIKE_VERSION>");
   });
 });

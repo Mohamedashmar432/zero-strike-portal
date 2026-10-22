@@ -46,6 +46,7 @@ const TOC: { id: string; label: string }[] = [
   { id: "onboard", label: "1. Onboard a project" },
   { id: "team", label: "Invite your team" },
   { id: "scan", label: "2. Run a scan" },
+  { id: "azure-devops-classic", label: "Azure DevOps Classic pipelines" },
   { id: "results", label: "3. Read the results" },
   { id: "ai", label: "4. Turn on AI analysis" },
   { id: "autofix", label: "5. Auto-Fix a scan" },
@@ -511,6 +512,37 @@ export default function GuidePage() {
               are project-scoped — they can create and upload scans for one project and nothing else. Manage
               them under the project&apos;s <span className="font-mono text-foreground">Project Tokens</span>{" "}
               tab. The raw token is shown exactly once; regenerate if it is lost.
+            </Note>
+          </Section>
+
+          <Section
+            id="azure-devops-classic"
+            title="Azure DevOps Classic pipelines"
+            icon={Terminal}
+            lede="Scan from a Classic (designer) pipeline with one inline Bash task on an Ubuntu agent. Build runs show up in the portal as CI scans with a link back to the build."
+          >
+            <Steps>
+              <Step n={1} title="Add the variables">
+                <p>
+                  Add <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN</span> (a project token, locked
+                  as secret), <span className="font-mono text-foreground">ZEROSTRIKE_PORTAL_URL</span>,{" "}
+                  <span className="font-mono text-foreground">ZEROSTRIKE_VERSION</span> and{" "}
+                  <span className="font-mono text-foreground">ZEROSTRIKE_FAIL_ON</span>.
+                </p>
+              </Step>
+              <Step n={2} title="Add a Bash task">
+                <p>
+                  Type Inline, working directory <span className="font-mono text-foreground">$(Build.SourcesDirectory)</span>,
+                  and map <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)</span> under
+                  Environment Variables. Generate the script from the new-scan wizard (CI/CD, Azure DevOps Classic).
+                </p>
+              </Step>
+            </Steps>
+            <Note>
+              Linux (amd64) agents only in this phase: use the Azure Pipelines <span className="font-mono text-foreground">ubuntu-latest</span>{" "}
+              image, or a self-hosted agent with curl, jq and sha256sum. Windows and PowerShell agents are not supported.
+              A portal admin must publish the Linux scanner binary first. Full reference:{" "}
+              <span className="font-mono text-foreground">docs/AZURE_DEVOPS_CLASSIC_PIPELINE.md</span>.
             </Note>
           </Section>
 
