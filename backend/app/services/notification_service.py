@@ -100,6 +100,15 @@ async def notify(
             logger.error("unknown notification event", event_key=event_key)
             return 0
 
+        # Webhook/mailbox alerts are independent of who has an account or what they subscribed to.
+        # Local import: alert_service pulls in workspace settings, which imports back into services.
+        from app.services import alert_service
+
+        if BY_KEY[event_key].audience == "admin":
+            await alert_service.send_global(title, body, link)
+        elif event_key == "scan.failed" and project_id:
+            await alert_service.on_scan_failed(project_id, title, body, link)
+
         users = await _recipients(event_key, project_id)
         if only_user_ids is not None:
             users = [u for u in users if str(u.id) in only_user_ids]

@@ -20,6 +20,7 @@ from app.mcp import user_server as mcp_user_server
 from app.models.scan import Scan
 from app.db.mongo import close_mongo_connection, connect_to_mongo, get_database
 from app.routers import (
+    alerts,
     admin_ai_analytics,
     admin_data,
     auto_fix_quota,
@@ -191,6 +192,7 @@ def create_app() -> FastAPI:
     app.include_router(vulnerabilities.router, prefix="/api/v1")
     app.include_router(workspace_settings.router, prefix="/api/v1")
     app.include_router(workspace_settings.project_router, prefix="/api/v1")
+    app.include_router(alerts.router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
     app.include_router(operations.queue_router, prefix="/api/v1")

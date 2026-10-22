@@ -136,6 +136,10 @@ export const queryKeys = {
     workspace: () => ["settings", "workspace"] as const,
     emailTemplates: () => ["settings", "email-templates"] as const,
   },
+  alerts: {
+    project: (projectId: string) => ["alerts", "project", projectId] as const,
+    global: () => ["alerts", "global"] as const,
+  },
   notifications: {
     list: () => ["notifications"] as const,
     preferences: () => ["notifications", "preferences"] as const,

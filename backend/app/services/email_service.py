@@ -8,6 +8,7 @@ wrap these in `asyncio.to_thread` rather than this module growing an async API.
 
 import smtplib
 import ssl
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -52,7 +53,13 @@ Sent by thinkShield Portal. Manage which emails you receive in
 </body></html>"""
 
 
-def send_email(to_address: str, subject: str, text_body: str, html_body: str | None = None) -> None:
+def send_email(
+    to_address: str,
+    subject: str,
+    text_body: str,
+    html_body: str | None = None,
+    attachments: list[tuple[str, bytes]] | None = None,
+) -> None:
     """Send a plaintext + branded HTML email via settings.smtp_*. Without an `html_body`, the
     HTML part is derived from the text, so plain-text senders get the same layout.
 
@@ -64,13 +71,22 @@ def send_email(to_address: str, subject: str, text_body: str, html_body: str | N
         logger.warning("SMTP not configured (smtp_host empty) — skipping email")
         return
 
-    message = MIMEMultipart("alternative")
+    body = MIMEMultipart("alternative")
+    body.attach(MIMEText(text_body, "plain"))
+    content = html_body if html_body is not None else to_html(escape(text_body, quote=False))
+    body.attach(MIMEText(_layout(content, subject), "html"))
+    # `attachments` is (filename, PDF bytes); without any the message stays the plain two-part body.
+    message = body
+    if attachments:
+        message = MIMEMultipart("mixed")
+        message.attach(body)
+        for filename, data in attachments:
+            part = MIMEApplication(data, _subtype="pdf", Name=filename)
+            part["Content-Disposition"] = f'attachment; filename="{filename}"'
+            message.attach(part)
     message["Subject"] = subject
     message["From"] = settings.smtp_from_address
     message["To"] = to_address
-    message.attach(MIMEText(text_body, "plain"))
-    content = html_body if html_body is not None else to_html(escape(text_body, quote=False))
-    message.attach(MIMEText(_layout(content, subject), "html"))
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
         if settings.smtp_use_tls:

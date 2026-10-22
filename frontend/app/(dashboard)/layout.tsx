@@ -14,7 +14,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [pinned, setPinned] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticating && !isRestoringSession && !user) router.replace("/login");
+    if (isAuthenticating || isRestoringSession || user) return;
+    // Keep the page they were heading to. A link from an alert (?src=alert) is most likely opened by
+    // someone who may not have an account yet, so it lands on Register first; everyone else on Sign in.
+    const here = window.location.pathname + window.location.search;
+    const gate = new URLSearchParams(window.location.search).get("src") === "alert" ? "register" : "login";
+    router.replace(`/${gate}?next=${encodeURIComponent(here)}`);
   }, [user, isAuthenticating, isRestoringSession, router]);
 
   if (!user) return null;

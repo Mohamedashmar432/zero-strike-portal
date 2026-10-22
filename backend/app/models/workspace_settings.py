@@ -74,6 +74,12 @@ class WorkspaceSettings(Document):
     noisy_rule_min_fp_tags: int = 5
     noisy_rule_min_fp_percent: int = 40
 
+    # --- global alert channel ------------------------------------------------
+    # Webhook that receives every admin-audience notification (signups, scanner health, quota
+    # requests, ...). Encrypted at rest; the URL is a bearer secret and is never returned.
+    alert_webhook_enc: str | None = None
+    alert_webhook_enabled: bool = False
+
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by: str | None = None
 

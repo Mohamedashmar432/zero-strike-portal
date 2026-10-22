@@ -53,6 +53,15 @@ class Project(Document):
     # "YYYY-MM:<metric>:<threshold>" keys already alerted, so each threshold emails once a month.
     ai_budget_alerts_sent: list[str] = []
 
+    # --- alert channels (services/alert_service.py) --------------------------
+    # Teams-style incoming webhook (the URL is a bearer secret, so it is stored encrypted and never
+    # returned) plus up to three alert mailboxes. `alert_triggers` is the on/off set of what fires.
+    alert_webhook_enc: str | None = None
+    alert_webhook_enabled: bool = False
+    alert_email_enabled: bool = False
+    alert_emails: list[str] = []
+    alert_triggers: list[str] = ["critical", "high", "vulnerable_package"]
+
     created_at: datetime
     updated_at: datetime
 

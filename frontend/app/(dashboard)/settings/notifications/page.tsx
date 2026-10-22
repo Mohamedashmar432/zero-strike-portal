@@ -14,6 +14,7 @@ import {
   updateNotificationPreferences,
   type NotificationPreferences,
 } from "@/lib/api/notifications";
+import { GlobalAlertsCard } from "@/components/alerts/alert-cards";
 import { SignupApprovalCard } from "@/components/settings/signup-approval-card";
 import { queryKeys } from "@/lib/api/query-keys";
 import { useAuth } from "@/providers/auth-provider";
@@ -154,6 +155,7 @@ export default function NotificationSettingsPage() {
         </CardContent>
       </Card>
 
+      {user?.role === "admin" && <GlobalAlertsCard />}
       {user?.role === "admin" && <SignupApprovalCard />}
     </div>
   );

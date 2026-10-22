@@ -17,7 +17,6 @@ import { CodeSnippet } from "@/components/findings/code-snippet";
 import { OwaspChart } from "@/components/common/owasp-chart";
 import { FilterBar } from "@/components/common/filter-bar";
 import { DataTableCard } from "@/components/common/data-table-card";
-import { EmptyState } from "@/components/common/empty-state";
 import { MetricStrip } from "@/components/common/metric-strip";
 import { StatCard } from "@/components/common/stat-card";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
@@ -35,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, parseApiDate } from "@/lib/utils";
@@ -485,7 +485,7 @@ export default function ScanDetailPage() {
     queryFn: () => getProject(projectId),
   });
 
-  const { data: scan, isLoading: scanLoading } = useQuery({
+  const { data: scan, isLoading: scanLoading, error: scanError } = useQuery({
     queryKey: queryKeys.scans.detail(scanId),
     queryFn: () => getScan(scanId),
     refetchInterval: refetchWhileStatusActive<Scan>(),
@@ -603,6 +603,29 @@ export default function ScanDetailPage() {
       (f) => f.message.toLowerCase().includes(q) || (f.rule_id ?? "").toLowerCase().includes(q)
     );
   }, [findings, search]);
+
+  if (scanError && !scan) {
+    // A link from an alert is opened by people who may not be on the project: say so, don't spin.
+    const status = scanError instanceof ApiError ? scanError.status : null;
+    return (
+      <EmptyState
+        title={
+          status === 403
+            ? "You don't have access to this project"
+            : status === 404
+              ? "Scan not found"
+              : "Couldn't load this scan"
+        }
+        description={
+          status === 403
+            ? "Ask a project owner to add you as a member, then open the link again."
+            : status === 404
+              ? "It may have been deleted, or the link is wrong."
+              : scanError.message
+        }
+      />
+    );
+  }
 
   if (scanLoading || !scan) {
     return <Skeleton className="h-40 w-full" />;

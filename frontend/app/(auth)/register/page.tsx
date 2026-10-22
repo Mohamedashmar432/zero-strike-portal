@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api/client";
+import { safeNextPath } from "@/lib/safe-redirect";
 import { registerSchema, type RegisterInput } from "@/lib/validation/auth.schema";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -20,6 +21,9 @@ function RegisterForm() {
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite_token");
   const invitedEmail = searchParams.get("email");
+  // Where a signed-out visitor was heading (an alert link); carried through to sign-in and back.
+  const next = safeNextPath(searchParams.get("next"));
+  const nextQuery = next ? `?next=${encodeURIComponent(next)}` : "";
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(null);
   const {
     register,
@@ -37,7 +41,7 @@ function RegisterForm() {
         setSubmittedEmail(created.email);
         return;
       }
-      router.push("/dashboard");
+      router.push(next ?? "/dashboard");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Registration failed");
     }
@@ -55,7 +59,7 @@ function RegisterForm() {
             An administrator will review your request. We&apos;ll email {submittedEmail} as soon as
             a decision is made, and you can sign in after your access is approved.
           </p>
-          <Link href="/login" className="text-foreground underline underline-offset-4">
+          <Link href={`/login${nextQuery}`} className="text-foreground underline underline-offset-4">
             Back to sign in
           </Link>
         </CardContent>
@@ -67,7 +71,11 @@ function RegisterForm() {
     <Card>
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
-        <CardDescription>Start scanning your projects with thinkShield.</CardDescription>
+        <CardDescription>
+          {next
+            ? "Create an account to open this report. You will also need to be a member of the project."
+            : "Start scanning your projects with thinkShield."}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -92,7 +100,7 @@ function RegisterForm() {
         </form>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
-          <Link href="/login" className="text-foreground underline underline-offset-4">
+          <Link href={`/login${nextQuery}`} className="text-foreground underline underline-offset-4">
             Sign in
           </Link>
         </p>

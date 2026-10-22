@@ -18,7 +18,7 @@ import { queryKeys } from "@/lib/api/query-keys";
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
   const { projectId } = useParams<{ projectId: string }>();
 
-  const { data: project } = useQuery({
+  const { data: project, isError } = useQuery({
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
     // ponytail: errors are rendered by the page itself; the rail just stays absent on 403/404.
@@ -47,7 +47,8 @@ export default function ProjectLayout({ children }: { children: React.ReactNode 
             />
           </Suspense>
         ) : (
-          <Skeleton className="h-96 w-full rounded-lg lg:w-56" />
+          // Placeholder only while loading: on a 403/404 it would pulse forever beside the error.
+          !isError && <Skeleton className="h-96 w-full rounded-lg lg:w-56" />
         )}
       </div>
       <div className="w-full min-w-0 flex-1">{children}</div>

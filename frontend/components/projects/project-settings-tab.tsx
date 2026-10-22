@@ -10,6 +10,7 @@ import { deleteProject, getProject, updateProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { FAIL_ON_OPTIONS, type FailOn } from "@/lib/cicd-fail-on";
 import { ProjectAiProviderCard } from "@/components/projects/project-ai-provider-card";
+import { ProjectAlertsCard } from "@/components/alerts/alert-cards";
 import { ProjectAiBudgetCard } from "@/components/projects/project-ai-budget-card";
 import { ProjectPolicyCard } from "@/components/projects/project-policy-card";
 import { ReportTemplatePicker, type ReportTemplateValue } from "@/components/reports/report-template-picker";
@@ -41,6 +42,7 @@ const SECTIONS = [
   "report template pdf executive standard",
   "archive restore sync",
   "danger zone delete project remove",
+  "alerts webhook teams email notify critical high vulnerable package scan failed",
 ];
 
 export function ProjectSettingsTab({ projectId }: { projectId: string }) {
@@ -164,6 +166,8 @@ export function ProjectSettingsTab({ projectId }: { projectId: string }) {
       {show(SECTIONS[1]) && <ProjectAiProviderCard projectId={projectId} canManage={canManage(project.my_role)} />}
 
       {show(SECTIONS[2]) && <ProjectAiBudgetCard projectId={projectId} canManage={canManage(project.my_role)} />}
+
+      {show(SECTIONS[8]) && <ProjectAlertsCard projectId={projectId} />}
 
       {show(SECTIONS[3]) && <ProjectPolicyCard projectId={projectId} />}
 

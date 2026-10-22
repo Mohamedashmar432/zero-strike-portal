@@ -3,8 +3,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Clock, OctagonAlert } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,8 @@ import { safeNextPath } from "@/lib/safe-redirect";
 import { loginSchema, type LoginInput } from "@/lib/validation/auth.schema";
 import { useAuth } from "@/providers/auth-provider";
 
-export default function LoginPage() {
+function LoginForm() {
+  const next = safeNextPath(useSearchParams().get("next"));
   const { login, isAuthenticating } = useAuth();
   const router = useRouter();
   // A toast is dismissable and easy to miss — a failed sign-in needs feedback
@@ -36,7 +37,7 @@ export default function LoginPage() {
       await login(values.email, values.password);
       // `next` brings a user back to what sent them here (the OAuth consent page); only a plain
       // same-origin path is honoured, anything else falls back to the dashboard.
-      router.push(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/dashboard");
+      router.push(next ?? "/dashboard");
     } catch (err) {
       // Three genuinely different failures. Collapsing them into "Login failed"
       // sends people hunting for a password problem when the backend is simply
@@ -126,7 +127,7 @@ export default function LoginPage() {
         <p className="mt-5 border-t border-hairline pt-4 text-center font-mono text-[11px] text-muted-foreground">
           No account?{" "}
           <Link
-            href="/register"
+            href={`/register${next ? `?next=${encodeURIComponent(next)}` : ""}`}
             className="text-foreground underline underline-offset-4 transition-colors hover:text-signal"
           >
             Register
@@ -134,5 +135,13 @@ export default function LoginPage() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
