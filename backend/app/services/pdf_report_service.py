@@ -16,6 +16,7 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote, urlsplit
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from xhtml2pdf import pisa
@@ -73,6 +74,32 @@ def _snippet(text: str | None) -> str:
 
 
 _env.filters["snippet"] = _snippet
+
+
+def repo_identity(source: str | None) -> tuple[str, str | None]:
+    """(name, owner) for a clone URL, an scp-style remote or a local path — what a report should say
+    instead of a raw URL. Mirrors `repoIdentity` in frontend/lib/repo-identity.ts.
+
+    https://dev.azure.com/acme/Platform/_git/Visitor%20management -> ("Visitor management", "acme / Platform")
+    https://github.com/octocat/hello-world.git                    -> ("hello-world", "octocat")
+    """
+    raw = (source or "").strip()
+    if not raw:
+        return "-", None
+    if "://" in raw:
+        raw = urlsplit(raw).path  # drops credentials, query and fragment with the host
+    elif re.match(r"^[\w.-]+@[\w.-]+:", raw):
+        raw = raw.split(":", 1)[1]
+    parts = [unquote(p) for p in re.split(r"[\\/]", raw) if p]
+    if not parts:
+        return (source or "").strip() or "-", None
+    git = parts.index("_git") if "_git" in parts else -1
+    if git >= 0 and git + 1 < len(parts):
+        name, owner_parts = parts[git + 1], parts[:git]
+    else:
+        name, owner_parts = parts[-1], parts[:-1]
+    name = re.sub(r"\.git$", "", name, flags=re.IGNORECASE) or (source or "").strip()
+    return name, (" / ".join(owner_parts) or None)
 
 
 def _severity_sort_key(finding: Finding) -> tuple[int, str]:
@@ -135,7 +162,10 @@ def render_scan_report_html(
     ordered = sorted(findings, key=_severity_sort_key)
     limited = ordered[:_MAX_FINDINGS]
     jinja_template = _env.get_template(_TEMPLATE_FILES[template])
+    repo_name, repo_owner = repo_identity(scan.repo_url or report.root_path)
     context: dict = {
+        "repo_name": repo_name,
+        "repo_owner": repo_owner,
         "scan": scan,
         "report": report,
         "findings": limited,
@@ -185,12 +215,9 @@ def _repo_name(scan: Scan, report: Report) -> str:
     source = scan.repo_url or report.root_path
     if not source:
         return "unknown-repo"
-    # A repo_url ("https://host/org/name(.git)") or a local root_path both end in the
-    # repo's own directory/name segment — take the last path component either way.
-    name = source.rstrip("/").split("/")[-1]
-    if name.endswith(".git"):
-        name = name[: -len(".git")]
-    return _slugify(name)
+    # Same naming as the report body (repo_identity): it URL-decodes, so an Azure DevOps repo called
+    # "Visitor management" is "visitor-management" here, not "visitor-20management" from its %20.
+    return _slugify(repo_identity(source)[0])
 
 
 def build_report_filename(scan: Scan, report: Report, project_name: str) -> str:

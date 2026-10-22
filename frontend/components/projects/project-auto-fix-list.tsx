@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/auto-fix";
 import { refetchWhileAnyItemActive } from "@/lib/api/polling";
 import { listProjectRepos } from "@/lib/api/project-repos";
+import { repoName } from "@/lib/repo-identity";
 import { queryKeys } from "@/lib/api/query-keys";
 
 const RISK_TONE: Record<AutoFixRiskRating, string> = {
@@ -54,7 +55,7 @@ export function ProjectAutoFixList({ projectId }: { projectId: string }) {
   function repoLabel(item: ProjectAutoFixScanItem) {
     const repo = item.project_repo_id ? repoById.get(item.project_repo_id) : undefined;
     if (repo) return repo.label || repo.repo_full_name;
-    return item.repo_url ?? "—";
+    return repoName(item.repo_url);
   }
 
   const items = data?.items ?? [];

@@ -57,6 +57,7 @@ import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { downloadReportPdf, getReport } from "@/lib/api/reports";
 import { createCloudScan, getScan, SCAN_STAGE_LABELS, type Scan } from "@/lib/api/scans";
+import { repoIdentity, safeRepoHref } from "@/lib/repo-identity";
 
 // Client-side verdict derivation -- the backend has no separate `verdict` enum, only
 // is_false_positive/false_positive_confidence (see docs/ARCHITECTURE_REVIEW_AND_AI_ROADMAP.md).
@@ -416,6 +417,26 @@ export function FindingItem({
   );
 }
 
+/** One labelled fact in the scan header: the label is quiet, the value is what the eye should land on. */
+function ScanFact({
+  label,
+  mono = false,
+  title,
+  children,
+}: {
+  label: string;
+  mono?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-1.5" title={title}>
+      <dt className="legend text-muted-foreground">{label}</dt>
+      <dd className={mono ? "font-mono text-foreground" : "text-foreground"}>{children}</dd>
+    </div>
+  );
+}
+
 export default function ScanDetailPage() {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
   const router = useRouter();
@@ -502,6 +523,8 @@ export default function ScanDetailPage() {
   });
 
   const completed = scan?.status === "completed";
+  const repo = repoIdentity(scan?.repo_url);
+  const repoHref = safeRepoHref(scan?.repo_url);
 
   const { data: report } = useQuery({
     queryKey: queryKeys.scans.report(scanId),
@@ -593,11 +616,13 @@ export default function ScanDetailPage() {
             items={[
               { label: "Projects", href: "/projects" },
               { label: project?.name ?? projectId, href: `/projects/${projectId}?tab=scans` },
-              { label: scan.scan_label || "Scan" },
+              { label: "Scan" },
             ]}
           />
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{scan.scan_label || "Scan"}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight" title={scan.repo_url ?? undefined}>
+              {repo?.name ?? "Scan"}
+            </h1>
             <ScanTypeBadge scanType={scan.scan_type} />
             <ScanStatusBadge status={scan.status} scanId={scan.id} />
             <AiStatusBadge
@@ -608,14 +633,32 @@ export default function ScanDetailPage() {
               progressTotal={scanAnalysis?.progress_total}
             />
           </div>
-          <p className="text-sm text-muted-foreground">
-            Created {new Date(scan.created_at).toLocaleString()}
-            {scan.repo_url ? ` · ${scan.repo_url}` : ""}
-            {scan.branch || scan.git_commit
-              ? ` (${scan.branch ?? ""}${scan.git_commit ? `@${scan.git_commit.slice(0, 7)}` : ""})`
-              : ""}
-            {scan.triggered_by === "sync" ? " · Repo sync" : ""}
-          </p>
+          <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
+            {repo && (
+              <ScanFact label="Repository">
+                {repoHref ? (
+                  <a href={repoHref} target="_blank" rel="noreferrer noopener" className="underline-offset-2 hover:underline">
+                    {repo.owner ? `${repo.owner} / ${repo.name}` : repo.name}
+                  </a>
+                ) : (
+                  repo.owner ? `${repo.owner} / ${repo.name}` : repo.name
+                )}
+              </ScanFact>
+            )}
+            {scan.branch && (
+              <ScanFact label="Branch" mono>
+                {scan.branch}
+              </ScanFact>
+            )}
+            {scan.git_commit && (
+              <ScanFact label="Commit" mono title={scan.git_commit}>
+                {scan.git_commit.slice(0, 7)}
+              </ScanFact>
+            )}
+            {scan.scan_label && <ScanFact label="Label">{scan.scan_label}</ScanFact>}
+            <ScanFact label="Created">{new Date(scan.created_at).toLocaleString()}</ScanFact>
+            {scan.triggered_by === "sync" && <ScanFact label="Trigger">Repo sync</ScanFact>}
+          </dl>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {scan.scan_type === "cloud" && (scan.project_repo_id || scan.repo_url) && (

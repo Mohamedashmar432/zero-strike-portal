@@ -82,7 +82,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
   <table class="cover-meta">
     <tr>
       <td width="50%"><div class="meta-label">Project</div><div class="meta-value wrap">{{ project_name }}</div></td>
-      <td width="50%"><div class="meta-label">Repository</div><div class="meta-value wrap">{{ scan.repo_url or report.root_path or "—" }}</div></td>
+      <td width="50%"><div class="meta-label">Repository</div><div class="meta-value wrap">{{ repo_name }}{% if repo_owner %}<br/><span style="font-size:8pt;color:#6b7280;">{{ repo_owner }}</span>{% endif %}</div></td>
     </tr>
     <tr>
       <td><div class="meta-label">Branch</div><div class="meta-value wrap">{{ report.branch or scan.branch or "—" }}</div></td>
@@ -90,7 +90,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
     </tr>
     <tr>
       <td><div class="meta-label">AI Provider</div><div class="meta-value">Not tracked</div></td>
-      <td><div class="meta-label">Scan ID</div><div class="meta-value">{{ (scan.id | string)[:8] }}</div></td>
+      <td><div class="meta-label">Scan ID</div><div class="meta-value">{{ (scan.id | string)[:8] }}</div>{% if scan.scan_label %}<div class="meta-label" style="margin-top:6px;">Label</div><div class="meta-value wrap">{{ scan.scan_label }}</div>{% endif %}</td>
     </tr>
   </table>
 

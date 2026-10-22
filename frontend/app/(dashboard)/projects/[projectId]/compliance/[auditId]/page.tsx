@@ -358,11 +358,7 @@ function EvidenceRow({ evidence, projectId }: { evidence: ControlEvidence; proje
           className="h-6 px-2 text-[11px]"
           nativeButton={false}
           render={
-            <Link
-              href={`/projects/${projectId}/scans/${evidence.scan_id}`}
-              target="_blank"
-              rel="noreferrer"
-            />
+            <Link href={`/projects/${projectId}/scans/${evidence.scan_id}`} />
           }
         >
           View Scan <ExternalLink className="ml-1 size-3" />

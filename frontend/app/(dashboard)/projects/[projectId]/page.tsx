@@ -25,6 +25,7 @@ import {
   updateProjectRepoBranch,
   type ProjectRepo,
 } from "@/lib/api/project-repos";
+import { repoName } from "@/lib/repo-identity";
 import { getScanRegression, getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
 import { getProject, getProjectScanActivity, hasCompletedScan } from "@/lib/api/projects";
 import { getProjectAiUsage } from "@/lib/api/ai";
@@ -441,7 +442,7 @@ function ScansTab({ projectId }: { projectId: string }) {
   function repoLabel(s: { project_repo_id: string | null; repo_url: string | null }) {
     const repo = s.project_repo_id ? repoById.get(s.project_repo_id) : undefined;
     if (repo) return repo.label || repo.repo_full_name;
-    return s.repo_url ?? "—";
+    return repoName(s.repo_url);
   }
 
   const [search, setSearch] = useState("");
@@ -508,7 +509,6 @@ function ScansTab({ projectId }: { projectId: string }) {
           <TableHeader>
             <TableRow>
               <TableHead>Type</TableHead>
-              <TableHead>Label</TableHead>
               <TableHead>Repository</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Findings</TableHead>
@@ -532,13 +532,12 @@ function ScansTab({ projectId }: { projectId: string }) {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell>{s.scan_label || "—"}</TableCell>
-                  <TableCell className="max-w-48 truncate font-mono text-xs" title={repoLabel(s)}>
-                    {repoLabel(s)}
-                    {s.git_commit && (
-                      <span className="block text-muted-foreground" title={s.git_commit}>
-                        {s.branch ? `${s.branch}@` : ""}
-                        {shortSha(s.git_commit)}
+                  <TableCell className="max-w-64" title={s.repo_url ?? undefined}>
+                    <span className="block truncate text-sm font-medium text-foreground">{repoLabel(s)}</span>
+                    {(s.branch || s.git_commit) && (
+                      <span className="block truncate font-mono text-xs text-muted-foreground" title={s.git_commit ?? undefined}>
+                        {s.branch ?? ""}
+                        {s.git_commit ? `${s.branch ? " @ " : ""}${shortSha(s.git_commit)}` : ""}
                       </span>
                     )}
                   </TableCell>

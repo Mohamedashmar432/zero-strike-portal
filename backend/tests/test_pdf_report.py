@@ -299,3 +299,69 @@ def test_long_paths_wrap_via_css_not_zero_width_spaces():
         assert "​" not in html
         assert long_path in html
         assert "-pdf-word-wrap: CJK" in html
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("https://dev.azure.com/thinkbridge-dev/thinkbridge-DevOps/_git/Visitor%20management",
+         ("Visitor management", "thinkbridge-dev / thinkbridge-DevOps")),
+        ("https://github.com/octocat/hello-world.git", ("hello-world", "octocat")),
+        ("https://github.com/octocat/hello-world/", ("hello-world", "octocat")),
+        ("https://gitlab.com/group/sub/proj", ("proj", "group / sub")),
+        ("https://user:tok@github.com/o/r.git?x=1#frag", ("r", "o")),
+        ("git@github.com:org/repo.git", ("repo", "org")),
+        ("/home/dev/my_app", ("my_app", "home / dev")),
+        ("C:\work\my-app", ("my-app", "C: / work")),
+        ("", ("-", None)),
+        (None, ("-", None)),
+    ],
+)
+def test_repo_identity_names_a_repo_instead_of_echoing_its_url(source, expected):
+    from app.services.pdf_report_service import repo_identity
+
+    assert repo_identity(source) == expected
+
+
+@pytest.mark.parametrize("template", ["standard", "executive"])
+def test_report_names_the_repo_and_shows_the_label_only_when_one_was_set(template):
+    from datetime import datetime, timezone
+
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services import pdf_report_service
+
+    now = datetime.now(timezone.utc)
+    url = "https://dev.azure.com/acme/Platform/_git/Visitor%20management"
+    report = Report(scan_id="s1", project_id="p1", stats=ScanStatsEmbedded(), json_uploaded_at=now)
+
+    def render(label):
+        scan = Scan(project_id="p1", scan_type="cicd", created_at=now, updated_at=now, repo_url=url, scan_label=label)
+        return pdf_report_service.render_scan_report_html(scan, report, [], template, "Proj")
+
+    labelled, plain = render("nightly build"), render(None)
+    assert "Visitor management" in labelled and "acme / Platform" in labelled
+    assert "dev.azure.com" not in labelled and "%20" not in labelled  # no URL-form repo any more
+    assert "nightly build" in labelled
+    assert "nightly" not in plain and "Untitled scan" not in plain
+    assert pdf_report_service._html_to_pdf_sync(labelled).startswith(b"%PDF")
+
+
+def test_report_filename_decodes_an_azure_devops_repo_name_instead_of_leaking_percent_20():
+    from datetime import datetime, timezone
+
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services.pdf_report_service import build_report_filename
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(
+        project_id="p1",
+        scan_type="cicd",
+        repo_url="https://dev.azure.com/acme/Platform/_git/Visitor%20management",
+        started_at=datetime(2026, 10, 21, tzinfo=timezone.utc),
+        created_at=now,
+        updated_at=now,
+    )
+    report = Report(scan_id="s1", project_id="p1", stats=ScanStatsEmbedded(), json_uploaded_at=now)
+    assert build_report_filename(scan, report, "Visitor Thinkbridge") == "visitor-thinkbridge-visitor-management-2026-10-21.pdf"

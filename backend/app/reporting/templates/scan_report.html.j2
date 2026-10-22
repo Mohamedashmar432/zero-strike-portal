@@ -32,11 +32,12 @@
 <body>
 
 <h1>thinkShield Scan Report</h1>
-<div class="subtitle">{{ scan.scan_label or "Untitled scan" }} &middot; {{ scan.scan_type }}</div>
+<div class="subtitle">{{ repo_name }} &middot; {{ scan.scan_type }}</div>
 
 <table class="meta-table">
-  <tr><td class="label" width="25%">Repository</td><td class="wrap" width="75%">{{ scan.repo_url or report.root_path or "-" }}</td></tr>
+  <tr><td class="label" width="25%">Repository</td><td class="wrap" width="75%"><b>{{ repo_name }}</b>{% if repo_owner %} &middot; {{ repo_owner }}{% endif %}</td></tr>
   <tr><td class="label">Branch / commit</td><td class="wrap">{{ report.branch or scan.branch or "-" }} {% set commit = report.git_commit or scan.git_commit %}{% if commit %}({{ commit[:12] }}){% endif %}</td></tr>
+  {% if scan.scan_label %}<tr><td class="label">Label</td><td class="wrap">{{ scan.scan_label }}</td></tr>{% endif %}
   <tr><td class="label">Scanner version</td><td>{{ report.scanner_version or scan.scanner_version or "-" }}</td></tr>
   <tr><td class="label">Started</td><td>{% set started = report.started_at or scan.started_at %}{{ started.strftime('%Y-%m-%d %H:%M:%S UTC') if started else "-" }}</td></tr>
   <tr><td class="label">Duration</td><td>{% if report.duration_ms is not none %}{{ "%.1f"|format(report.duration_ms / 1000) }}s{% else %}-{% endif %}</td></tr>
