@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -424,14 +424,25 @@ function invalidateSyncViews(queryClient: QueryClient, projectId: string) {
   queryClient.invalidateQueries({ queryKey: queryKeys.projects.scans(projectId) });
 }
 
+const SCANS_PAGE_SIZES = [10, 15, 20];
+
 function ScansTab({ projectId }: { projectId: string }) {
+  // Status/type filters are sent to the server so they apply across every page, not just the
+  // 20 rows loaded. Search stays client-side (it matches the repo label, resolved here).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(SCANS_PAGE_SIZES[0]);
+  const [statusFilter, setStatusFilter] = useState<ScanStatus>();
+  const [typeFilter, setTypeFilter] = useState<ScanType>();
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.projects.scans(projectId),
-    queryFn: () => listScans(projectId),
+    // Extends the base scans key, so invalidating it still refreshes every page.
+    queryKey: [...queryKeys.projects.scans(projectId), { page, pageSize, statusFilter, typeFilter }],
+    queryFn: () => listScans(projectId, page, pageSize, { status: statusFilter, scanType: typeFilter }),
+    placeholderData: keepPreviousData,
     // Poll while any scan is running OR mid-AI-analysis, so both the scan status and the
     // "AI analyzing…" tag update live (a completed scan can still be enriching).
     refetchInterval: refetchWhileAnyScanOrAiActive<Scan>(),
   });
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
   // Shared query key with RepositoriesTab so this reuses the same cache entry.
   const { data: repos } = useQuery({
@@ -446,11 +457,7 @@ function ScansTab({ projectId }: { projectId: string }) {
   }
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ScanStatus>();
-  const [typeFilter, setTypeFilter] = useState<ScanType>();
   function matchesFilter(s: Scan) {
-    if (statusFilter && s.status !== statusFilter) return false;
-    if (typeFilter && s.scan_type !== typeFilter) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!(s.scan_label ?? "").toLowerCase().includes(q) && !repoLabel(s).toLowerCase().includes(q)) {
@@ -480,7 +487,10 @@ function ScansTab({ projectId }: { projectId: string }) {
           {
             type: "toggle",
             value: statusFilter,
-            onChange: (v) => setStatusFilter(v as ScanStatus | undefined),
+            onChange: (v) => {
+              setStatusFilter(v as ScanStatus | undefined);
+              setPage(1);
+            },
             options: (["pending", "queued", "running", "completed", "failed"] as ScanStatus[]).map((s) => ({
               value: s,
               label: s,
@@ -489,7 +499,10 @@ function ScansTab({ projectId }: { projectId: string }) {
           {
             type: "toggle",
             value: typeFilter,
-            onChange: (v) => setTypeFilter(v as ScanType | undefined),
+            onChange: (v) => {
+              setTypeFilter(v as ScanType | undefined);
+              setPage(1);
+            },
             options: (["cloud", "cicd"] as ScanType[]).map((t) => ({ value: t, label: t })),
           },
         ]}
@@ -500,7 +513,7 @@ function ScansTab({ projectId }: { projectId: string }) {
         isEmpty={visibleCount === 0}
         emptyState={
           <EmptyState
-            title={data?.items.length ? "No scans match this filter" : "No scans yet"}
+            title={data?.items.length || statusFilter || typeFilter ? "No scans match this filter" : "No scans yet"}
             description="Set up a local, cloud, or CI/CD scan to get started."
           />
         }
@@ -571,6 +584,38 @@ function ScansTab({ projectId }: { projectId: string }) {
           </TableBody>
         </Table>
       </DataTableCard>
+      {data && data.total > 0 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Page {data.page} of {totalPages} · {data.total} scans
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              Rows per page
+              <select
+                className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+              >
+                {SCANS_PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

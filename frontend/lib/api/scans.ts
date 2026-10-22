@@ -55,8 +55,16 @@ export type Scan = {
   custom_rules_ran: boolean;
 };
 
-export function listScans(projectId: string, page = 1, pageSize = 20) {
-  return apiFetch<Page<Scan>>(`/projects/${projectId}/scans?page=${page}&page_size=${pageSize}`);
+export function listScans(
+  projectId: string,
+  page = 1,
+  pageSize = 20,
+  filters: { status?: ScanStatus; scanType?: ScanType } = {},
+) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (filters.status) params.set("status", filters.status);
+  if (filters.scanType) params.set("scan_type", filters.scanType);
+  return apiFetch<Page<Scan>>(`/projects/${projectId}/scans?${params}`);
 }
 
 // What POST /projects/{id}/scans did. Only `scan_queued` creates a scan; for the other two the
