@@ -7,9 +7,11 @@ import { getProject } from "@/lib/api/projects";
 import { createCloudScan, type CreatedScan } from "@/lib/api/scans";
 import NewScanPage from "./page";
 
+const nav = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: nav.replace }),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@/lib/api/projects", () => ({ getProject: vi.fn() }));
@@ -86,15 +88,54 @@ async function openCicdStep(activeKeys: boolean) {
   fireEvent.click(screen.getByRole("button", { name: /CI\/CD/ }));
 }
 
+describe("New scan: the wizard step lives in the URL", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    nav.search = "";
+  });
+
+  function renderPage() {
+    vi.mocked(getProject).mockResolvedValue({ id: "p1", name: "Demo" } as never);
+    vi.mocked(listApiKeys).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <NewScanPage />
+      </QueryClientProvider>
+    );
+  }
+
+  test("coming back to ?type=cicd (e.g. with Back from the tokens page) lands on that step", async () => {
+    nav.search = "type=cicd";
+    renderPage();
+    expect(await screen.findByText(/Step 2 of 2 — CI\/CD scan/)).toBeTruthy();
+  });
+
+  test("an unknown ?type is ignored and the wizard starts at step 1", () => {
+    nav.search = "type=bogus";
+    renderPage();
+    expect(screen.getByText(/Step 1 of 2/)).toBeTruthy();
+  });
+
+  test("choosing a type records it in the URL without adding a history entry, and going back clears it", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /CI\/CD/ }));
+    expect(nav.replace).toHaveBeenLastCalledWith("/projects/p1/scans/new?type=cicd", { scroll: false });
+    fireEvent.click(screen.getByRole("button", { name: /Change scan type/ }));
+    expect(nav.replace).toHaveBeenLastCalledWith("/projects/p1/scans/new", { scroll: false });
+  });
+});
+
 describe("New scan: CI/CD setup", () => {
   afterEach(() => vi.clearAllMocks());
 
-  test("a project with no token gets a link to generate one, in a new tab so the wizard keeps its place", async () => {
+  test("a project with no token gets a link to generate one, in the SAME tab so the session survives", async () => {
     await openCicdStep(false);
     // The button component renders the anchor with role="button", so find it by its text.
     const link = (await screen.findByText(/Generate a project token/)).closest("a")!;
     expect(link.getAttribute("href")).toBe("/projects/p1?tab=keys");
-    expect(link.getAttribute("target")).toBe("_blank");
+    // A new tab starts signed out (the session is in-memory + this tab's sessionStorage).
+    expect(link.getAttribute("target")).toBeNull();
   });
 
   test("a project that already has a token says so and offers to manage tokens instead", async () => {

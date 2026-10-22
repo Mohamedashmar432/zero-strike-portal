@@ -2,10 +2,10 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Cloud, ExternalLink, GitBranch } from "lucide-react";
+import { ArrowLeft, Cloud, GitBranch } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
@@ -335,15 +335,16 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
                 : "This project has no active token yet. Generate one, then store it in your CI as a secret named ZEROSTRIKE_TOKEN."}
           </p>
         </div>
-        {/* New tab: the wizard keeps its place while the token is created. */}
+        {/* Same tab, on purpose: the access token lives in memory and the refresh token in this tab's
+            sessionStorage, so a new tab opens signed out. The wizard step is in the URL (?type=cicd),
+            so Back returns here to this step. */}
         <Button
           size="sm"
           variant={noToken ? "default" : "outline"}
           nativeButton={false}
-          render={<Link href={`/projects/${projectId}?tab=keys`} target="_blank" rel="noopener" />}
+          render={<Link href={`/projects/${projectId}?tab=keys`} />}
         >
           {noToken ? "Generate a project token" : "Manage project tokens"}
-          <ExternalLink />
         </Button>
       </div>
       <div className="space-y-2">
@@ -646,10 +647,18 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
   );
 }
 
-export default function NewScanPage() {
+function NewScanWizard() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
-  const [scanType, setScanType] = useState<ScanType | null>(null);
+  const searchParams = useSearchParams();
+  // The step lives in the URL as well as in state: leaving for another page (e.g. to create a project token)
+  // and coming back, by Back or a link, lands on the same step instead of resetting to "Choose scan type".
+  const fromUrl = SCAN_TYPES.find((t) => t.value === searchParams.get("type"))?.value ?? null;
+  const [scanType, setScanTypeState] = useState<ScanType | null>(fromUrl);
+  function setScanType(type: ScanType | null) {
+    setScanTypeState(type);
+    router.replace(`/projects/${projectId}/scans/new${type ? `?type=${type}` : ""}`, { scroll: false });
+  }
 
   const { data: project } = useQuery({
     queryKey: ["projects", projectId],
@@ -701,5 +710,14 @@ export default function NewScanPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// useSearchParams needs a Suspense boundary above it in the App Router.
+export default function NewScanPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewScanWizard />
+    </Suspense>
   );
 }
