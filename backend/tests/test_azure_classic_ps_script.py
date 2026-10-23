@@ -86,8 +86,9 @@ def _run(client, tmp_path, engine, binary, severities=(), fail_on="high", token=
     server = _portal(script, binary, calls, bad_sha, platform="windows-amd64", script_name="azure-classic.ps1")
     origin = origin or f"http://127.0.0.1:{server.server_port}"
     try:
-        agent_tmp, sources = tmp_path / "agent_tmp", tmp_path / "s"
-        agent_tmp.mkdir()
+        # Spaces on purpose: self-hosted agents often live under paths like "C:\agent work\_temp".
+        agent_tmp, sources = tmp_path / "agent work" / "_temp", tmp_path / "agent work" / "s src"
+        agent_tmp.mkdir(parents=True)
         sources.mkdir()
         for name, text in (sources_files or {}).items():
             (sources / name).write_text(text)

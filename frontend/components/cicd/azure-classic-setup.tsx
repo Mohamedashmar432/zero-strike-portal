@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { CopyBlock } from "@/components/common/copy-block";
@@ -277,9 +277,14 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
                 >
                   {isDone ? <Check className="size-3.5" /> : i + 1}
                 </span>
-                <span className={cn("text-sm font-medium", isDone ? "text-muted-foreground" : "text-foreground")}>
+                <span className={cn("flex-1 text-sm font-medium", isDone ? "text-muted-foreground" : "text-foreground")}>
                   {s.title}
                 </span>
+                {/* Shows the header toggles: clicking an open step closes it. */}
+                <ChevronDown
+                  aria-hidden
+                  className={cn("size-4 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-180")}
+                />
               </button>
               {isOpen && (
                 <div className="space-y-3 px-3 pb-3 pl-12 text-sm text-muted-foreground">
