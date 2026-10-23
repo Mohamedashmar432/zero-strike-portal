@@ -39,8 +39,8 @@ def _fake_scanner(severities: list[str]) -> bytes:
     ).encode()
 
 
-def _portal(script: str, binary: bytes, calls: list):
-    sha = hashlib.sha256(binary).hexdigest()
+def _portal(script: str, binary: bytes, calls: list, bad_sha: bool = False):
+    sha = "0" * 64 if bad_sha else hashlib.sha256(binary).hexdigest()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -80,15 +80,18 @@ def _portal(script: str, binary: bytes, calls: list):
     return server
 
 
-def _run(client, tmp_path, severities, fail_on="high", token=TOKEN, extra_env=None):
+def _run(client, tmp_path, severities, fail_on="high", token=TOKEN, extra_env=None, scanner=None, bad_sha=False,
+         origin=None, sources_files=None):
     script = client.get("/api/v1/downloads/ci/azure-classic.sh").text
     calls: list = []
-    server = _portal(script, _fake_scanner(severities), calls)
-    origin = f"http://127.0.0.1:{server.server_port}"
+    server = _portal(script, scanner or _fake_scanner(severities), calls, bad_sha)
+    origin = origin or f"http://127.0.0.1:{server.server_port}"
     try:
         agent_tmp, sources = tmp_path / "agent_tmp", tmp_path / "s"
         agent_tmp.mkdir()
         sources.mkdir()
+        for name, text in (sources_files or {}).items():
+            (sources / name).write_text(text, newline="\n")
         task = tmp_path / "task.sh"
         task.write_text(INLINE.format(origin=origin, fail_on=fail_on), newline="\n")
         env = {
@@ -167,3 +170,42 @@ def test_missing_token_fails_before_any_download(client, tmp_path):
     assert proc.returncode == 2
     assert "ZEROSTRIKE_TOKEN is not set" in proc.stdout
     assert [p for _, p, _ in calls] == ["/api/v1/downloads/ci/azure-classic.sh"]
+
+
+def test_checksum_mismatch_fails_with_exit_2(client, tmp_path):
+    proc, calls = _run(client, tmp_path, [], bad_sha=True)
+    assert proc.returncode == 2
+    assert "checksum" in proc.stdout
+    assert not any(p == "/api/v1/scans" for _, p, _ in calls)
+
+
+def test_unreachable_portal_fails_the_task_at_the_download(client, tmp_path):
+    # set -e in the inline script: a failed download must not fall through to a passing task.
+    proc, _ = _run(client, tmp_path, [], origin="http://127.0.0.1:9")
+    assert proc.returncode != 0
+
+
+# Set by the Linux CI job to a real CGO build of the scanner (linux-amd64), so the gate's grep is
+# checked against the scanner's actual report layout, not the stub's.
+REAL_SCANNER = os.environ.get("ZEROSTRIKE_REAL_SCANNER")
+VULN_PY = "import os\nfrom flask import request\ndef handler():\n    cmd = request.args.get('cmd')\n    os.system(cmd)\n"
+
+
+@pytest.mark.skipif(not REAL_SCANNER, reason="ZEROSTRIKE_REAL_SCANNER not set")
+def test_real_scanner_report_matches_the_gate(client, tmp_path):
+    with open(REAL_SCANNER, "rb") as f:
+        binary = f.read()
+    proc, calls = _run(client, tmp_path, [], fail_on="none", scanner=binary, sources_files={"vuln.py": VULN_PY})
+    print(proc.stdout)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    report = json.loads(next(b for m, p, b in calls if p == "/api/v1/scans/scan123/upload/json"))
+    findings = [f for v in report.values() if isinstance(v, list) for f in v if isinstance(f, dict) and "Severity" in f]
+    assert findings, "real scanner found nothing in the vulnerable fixture (CGO build?)"
+    expected = sum(f["Severity"] in ("critical", "high") for f in findings)
+    # The gate counts '      "Severity": ...' lines; the message proves how many it saw.
+    crit = sum(f["Severity"] == "critical" for f in findings)
+    high = sum(f["Severity"] == "high" for f in findings)
+    if expected:
+        assert f"{crit} critical and {high} high severity findings" in proc.stdout
+    else:
+        assert "severity findings" not in proc.stdout

@@ -1,0 +1,53 @@
+# Throwaway: proves the Azure DevOps Classic script on a real Ubuntu agent (the same image ADO's
+# hosted ubuntu-latest pool uses), including a real CGO build of the scanner. Delete once green.
+name: Classic script on Linux
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - backend/app/ci_scripts/**
+      - backend/tests/test_azure_classic_script.py
+      - .github/workflows/classic-script-linux.yml
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the real scanner (CGO on; a CGO-off build finds nothing)
+        run: git clone --depth 1 --branch v0.38.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scanner/go.mod
+          cache: false
+      - run: CGO_ENABLED=1 go build -o "$RUNNER_TEMP/zerostrike_linux_amd64" ./cmd/zerostrike
+        working-directory: scanner
+
+      - name: Tools the script needs (preinstalled on ubuntu-latest)
+        run: |
+          bash --version | head -1; curl --version | head -1; jq --version; sha256sum --version | head -1
+
+      - name: shellcheck (all notes, then fail on warnings)
+        run: |
+          shellcheck backend/app/ci_scripts/azure-classic.sh || true
+          shellcheck -S warning backend/app/ci_scripts/azure-classic.sh
+
+      # The steps below still run if shellcheck fails, so one run reports everything.
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+        if: ${{ !cancelled() }}
+        working-directory: backend
+
+      - name: Run the inline script exactly as the Bash task does (stub portal, stub + real scanner)
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        env:
+          ZEROSTRIKE_REAL_SCANNER: ${{ runner.temp }}/zerostrike_linux_amd64
+        run: pytest tests/test_azure_classic_script.py -v -rs -s
