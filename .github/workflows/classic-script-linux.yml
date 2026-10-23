@@ -26,6 +26,19 @@ jobs:
       - run: CGO_ENABLED=1 go build -o "$RUNNER_TEMP/zerostrike_linux_amd64" ./cmd/zerostrike
         working-directory: scanner
 
+      - name: Real scanner on a vulnerable sample (published as annotations)
+        run: |
+          mkdir -p "$RUNNER_TEMP/fx"
+          printf '%s\n' 'import os' 'from flask import request' 'def handler():' \
+            "    cmd = request.args.get('cmd')" '    os.system(cmd)' > "$RUNNER_TEMP/fx/vuln.py"
+          rc=0
+          "$RUNNER_TEMP/zerostrike_linux_amd64" scan "$RUNNER_TEMP/fx" --enable-secrets --enable-sca \
+            --enable-framework-checks --format json --output "$RUNNER_TEMP/fx.json" || rc=$?
+          echo "::notice title=Real scanner exit code::$rc (0 clean, 1 findings found, 2+ error)"
+          echo "::notice title=Real scanner findings::$(jq -c '[.. | objects | select(has("RuleID")) | "\(.RuleID) \(.Severity)"]' "$RUNNER_TEMP/fx.json")"
+          echo "::notice title=Severity lines (the gate greps a 6-space indent)::$(grep -n '"Severity"' "$RUNNER_TEMP/fx.json" | head -5 | sed 's/^/[/;s/$/]/' | tr '\n' ' ')"
+          [ "$rc" -le 1 ]
+
       - name: Tools the script needs (preinstalled on ubuntu-latest)
         run: |
           bash --version | head -1; curl --version | head -1; jq --version; sha256sum --version | head -1
@@ -50,4 +63,15 @@ jobs:
         working-directory: backend
         env:
           ZEROSTRIKE_REAL_SCANNER: ${{ runner.temp }}/zerostrike_linux_amd64
-        run: pytest tests/test_azure_classic_script.py -v -rs -s
+        run: pytest tests/test_azure_classic_script.py -v -rA -s 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+
+      # Job logs need a GitHub sign-in to read; annotations and the step summary do not, so the
+      # evidence is published there too.
+      - name: Publish test evidence
+        if: ${{ !cancelled() }}
+        run: |
+          L="$RUNNER_TEMP/pytest.log"
+          echo "::notice title=pytest result::$(grep -E '^=+ .*(passed|failed|error)' "$L" | tail -1 | tr -d '=')"
+          echo "::notice title=pytest per test::$(grep -E '^(PASSED|FAILED|SKIPPED|ERROR) ' "$L" | sed 's#tests/test_azure_classic_script.py::##' | tr '\n' ';')"
+          echo "::notice title=Real scanner through the inline script (gate none)::$(grep -E 'thinkShield:|##vso' "$L" | sed 's/##vso/vso/' | tr '\n' ';')"
+          { echo '## Classic script on Linux'; echo '```'; grep -E '^(PASSED|FAILED|SKIPPED|ERROR) |thinkShield:' "$L"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
