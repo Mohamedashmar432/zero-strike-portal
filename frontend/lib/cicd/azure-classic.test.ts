@@ -1,45 +1,28 @@
 import { describe, expect, test } from "vitest";
-import { azureClassicBashScript } from "./azure-classic";
+import { azureClassicInlineScript, azureClassicScriptUrl } from "./azure-classic";
 
-const gen = (origin: string, version: string | null = "v1.2.3") =>
-  azureClassicBashScript({ origin, version, failOn: "high" });
+const gen = (origin: string) => azureClassicInlineScript({ origin, failOn: "high" });
 
-describe("azureClassicBashScript", () => {
-  test("downloads the pinned version exactly once and never doubles /api/v1", () => {
+describe("azureClassicInlineScript", () => {
+  test("fits Azure DevOps' 5000-character inline limit", () => {
+    expect(gen("https://a-very-long-portal-hostname.example.com").length).toBeLessThan(5000);
+  });
+
+  test("never doubles /api/v1 and bakes in the origin and gate as overridable defaults", () => {
     for (const origin of ["https://p.example", "https://p.example/", "https://p.example/api/v1/"]) {
       const s = gen(origin);
-      expect(s.split("/api/v1/downloads/zerostrike/v1.2.3/linux-amd64")).toHaveLength(2);
       expect(s).not.toContain("/api/v1/api/v1");
-      expect(s).toContain("https://p.example/api/v1/downloads");
+      expect(s).toContain('ZEROSTRIKE_PORTAL_URL="${ZEROSTRIKE_PORTAL_URL:-https://p.example}"');
+      expect(s).toContain('ZEROSTRIKE_FAIL_ON="${ZEROSTRIKE_FAIL_ON:-high}"');
     }
+    expect(azureClassicScriptUrl("https://p.example/")).toBe("https://p.example/api/v1/downloads/ci/azure-classic.sh");
   });
 
-  test("has the required hardening and payload pieces", () => {
+  test("fails the task when the download fails, and never carries the token", () => {
     const s = gen("https://p.example");
-    for (const t of [
-      "set -euo pipefail",
-      "curl --fail --location",
-      "chmod +x",
-      "sha256sum -c",
-      "BUILD_SOURCESDIRECTORY",
-      "azure_pipelines",
-      "_build/results?buildId=",
-      "--config -",
-      "ZEROSTRIKE_FAIL_ON",
-    ]) {
-      expect(s).toContain(t);
-    }
-  });
-
-  test("never leaks the token or traces", () => {
-    const s = gen("https://p.example");
-    expect(s).not.toContain("--token");
-    expect(s).not.toContain('echo "$ZEROSTRIKE_TOKEN"');
-    expect(s).not.toContain("set -x");
-    expect(s).not.toContain("--server");
-  });
-
-  test("an unpublished version renders the placeholder", () => {
-    expect(gen("https://p.example", null)).toContain("<ZEROSTRIKE_VERSION>");
+    expect(s.startsWith("set -e")).toBe(true);
+    expect(s).toContain("curl -fsSL");
+    expect(s).not.toContain("ZEROSTRIKE_TOKEN");
+    expect(s).not.toContain("| bash");
   });
 });

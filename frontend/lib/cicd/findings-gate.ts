@@ -6,9 +6,15 @@ export const FINDINGS_MSG = "thinkShield: $crit critical and $high high severity
 /**
  * The severity gate shared by every CI snippet: counts critical/high findings in the JSON report,
  * runs `warn` whenever there are any, exits 1 when they trip ZEROSTRIKE_FAIL_ON, and otherwise
- * runs `soft`. An unrecognised ZEROSTRIKE_FAIL_ON value is treated as "none".
+ * runs `soft`. `fallback` applies when ZEROSTRIKE_FAIL_ON is unset (the snippet's chosen gate, so
+ * deleting the env line does not silently loosen it). An unrecognised value is treated as "none".
  */
-export function findingsGateLines(reportFile: string, warn: string[], soft: string[] = []): string[] {
+export function findingsGateLines(
+  reportFile: string,
+  warn: string[],
+  soft: string[] = [],
+  fallback: string = "none"
+): string[] {
   return [
     // One "Severity" line per finding at this indent, so this does not count nested fields.
     `crit=$(grep -c '^      "Severity": "critical"' ${reportFile} || true)`,
@@ -18,7 +24,7 @@ export function findingsGateLines(reportFile: string, warn: string[], soft: stri
     'if [ "$crit" -gt 0 ] || [ "$high" -gt 0 ]; then',
     `  msg="${FINDINGS_MSG}"`,
     ...block(warn, 2),
-    '  case "${ZEROSTRIKE_FAIL_ON:-none}" in',
+    `  case "\${ZEROSTRIKE_FAIL_ON:-${fallback}}" in`,
     "    critical) blocking=$crit ;;",
     "    high) blocking=$((crit + high)) ;;",
     "    *) blocking=0 ;;",

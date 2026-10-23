@@ -522,19 +522,21 @@ export default function GuidePage() {
             lede="Scan from a Classic (designer) pipeline with one inline Bash task on an Ubuntu agent. Build runs show up in the portal as CI scans with a link back to the build."
           >
             <Steps>
-              <Step n={1} title="Add the variables">
+              <Step n={1} title="Add the token">
                 <p>
                   Add <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN</span> (a project token, locked
-                  as secret), <span className="font-mono text-foreground">ZEROSTRIKE_PORTAL_URL</span>,{" "}
-                  <span className="font-mono text-foreground">ZEROSTRIKE_VERSION</span> and{" "}
-                  <span className="font-mono text-foreground">ZEROSTRIKE_FAIL_ON</span>.
+                  as secret). <span className="font-mono text-foreground">ZEROSTRIKE_VERSION</span> (default{" "}
+                  <span className="font-mono text-foreground">latest</span>) and{" "}
+                  <span className="font-mono text-foreground">ZEROSTRIKE_FAIL_ON</span> are optional overrides.
                 </p>
               </Step>
               <Step n={2} title="Add a Bash task">
                 <p>
                   Type Inline, working directory <span className="font-mono text-foreground">$(Build.SourcesDirectory)</span>,
                   and map <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)</span> under
-                  Environment Variables. Generate the script from the new-scan wizard (CI/CD, Azure DevOps Classic).
+                  Environment Variables. Copy the five-line inline script from the new-scan wizard (CI/CD, Azure DevOps
+                  Classic); it downloads the full scan script from the portal, so it stays under the task&apos;s
+                  5000-character limit.
                 </p>
               </Step>
             </Steps>

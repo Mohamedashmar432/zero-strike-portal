@@ -149,10 +149,14 @@ describe("New scan: CI/CD setup", () => {
 
   test("the snippet carries the project's fail-on setting (default high), and keeps every line short", async () => {
     await openCicdStep(true);
-    fireEvent.click(screen.getByRole("button", { name: "Azure Pipelines" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Azure Pipelines/ }));
     const code = () => screen.getByText(/# azure-pipelines\.yml/).textContent ?? "";
     expect(code()).toContain("ZEROSTRIKE_FAIL_ON: high"); // default: critical or high fails the pipeline
-    expect(screen.queryByText("When findings are found")).toBeNull(); // now a project setting
+    // The gate sidebar rewrites the snippet for this copy only.
+    fireEvent.click(screen.getByRole("radio", { name: /^critical/ }));
+    expect(code()).toContain("ZEROSTRIKE_FAIL_ON: critical");
+    // Deleting the env line must not loosen the gate: the shell fallback is the chosen value too.
+    expect(code()).toContain('"${ZEROSTRIKE_FAIL_ON:-critical}"');
     // The scan command is split with line continuations, so nothing needs a horizontal scrollbar.
     expect(code()).toContain("./zerostrike scan . \\\n");
     expect(Math.max(...code().split("\n").map((l) => l.length))).toBeLessThan(120);
@@ -168,7 +172,7 @@ describe("New scan: CI/CD setup", () => {
     uploaded_at: "2026-10-01T00:00:00Z",
   };
 
-  test("Azure DevOps Classic renders instructions and a script pinned to the published version, with no key details", async () => {
+  test("Azure DevOps Classic is a short inline script that runs the latest scanner, with no key details", async () => {
     vi.mocked(getScannerBinaryInfo).mockResolvedValue(binaryInfo);
     await openCicdStep(true);
     vi.mocked(listApiKeys).mockResolvedValue({
@@ -177,21 +181,37 @@ describe("New scan: CI/CD setup", () => {
       page: 1,
       page_size: 20,
     } as never);
-    fireEvent.click(screen.getByRole("button", { name: "Azure DevOps Classic" }));
-    expect(await screen.findByText(/Pinned to v1\.2\.3/)).toBeTruthy();
-    expect(screen.getByText(/Bash task script/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
+    expect(await screen.findByText(/latest \(now v1\.2\.3\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Paste the script/ }));
+    const inline = screen.getByText(/thinkshield-scan\.sh/, { selector: "code" }).textContent ?? "";
+    expect(inline.length).toBeLessThan(5000);
+    expect(inline).toContain('ZEROSTRIKE_FAIL_ON:-high');
+    fireEvent.click(screen.getByRole("button", { name: /Map the token/ }));
     const body = document.body.textContent ?? "";
-    expect(body).toContain("ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)");
-    expect(body).toContain("--config -");
+    expect(body).toContain("$(ZEROSTRIKE_TOKEN)");
     expect(body).not.toContain("SecretKeyName");
     expect(body).not.toContain("zs_abc123");
   });
 
-  test("Azure DevOps Classic warns when no Linux scanner is published, and still renders the script", async () => {
+  test("Azure DevOps Classic checklist progress survives switching provider and back", async () => {
+    vi.mocked(getScannerBinaryInfo).mockResolvedValue(binaryInfo);
+    sessionStorage.clear();
+    await openCicdStep(true);
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Done, next step" }));
+    expect(screen.getByText("1 of 5 steps done")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^GitHub Actions/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
+    expect(await screen.findByText("1 of 5 steps done")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    expect(screen.getByText("0 of 5 steps done")).toBeTruthy();
+  });
+
+  test("Azure DevOps Classic warns when no Linux scanner is published", async () => {
     vi.mocked(getScannerBinaryInfo).mockRejectedValue(new ApiError(404, { detail: "Not found" }));
     await openCicdStep(true);
-    fireEvent.click(screen.getByRole("button", { name: "Azure DevOps Classic" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
     expect(await screen.findByText(/will fail with HTTP 404/)).toBeTruthy();
-    expect(document.body.textContent).toContain("<ZEROSTRIKE_VERSION>");
   });
 });

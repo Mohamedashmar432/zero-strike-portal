@@ -1,9 +1,24 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Response
 
 from app.schemas.download import ScannerBinaryInfo
 from app.services import download_service
 
 router = APIRouter(prefix="/downloads/zerostrike", tags=["downloads"])
+ci_router = APIRouter(prefix="/downloads/ci", tags=["downloads"])
+
+# Strip CR: a Windows checkout (core.autocrlf) would otherwise hand bash a "\r" on every line.
+_AZURE_CLASSIC_SCRIPT = (
+    (Path(__file__).resolve().parent.parent / "ci_scripts" / "azure-classic.sh").read_text().replace("\r\n", "\n")
+)
+
+
+@ci_router.get("/azure-classic.sh")
+async def azure_classic_script() -> Response:
+    """The full Azure DevOps Classic scan script. Public, like the binaries: it holds no secrets, and
+    the Bash task's inline field (max 5000 chars) only has to download and run it."""
+    return Response(content=_AZURE_CLASSIC_SCRIPT, media_type="text/x-shellscript; charset=utf-8")
 
 
 @router.get("/{version}/checksums.txt")

@@ -171,6 +171,7 @@ def create_app() -> FastAPI:
     app.include_router(public_repos.router, prefix="/api/v1")
     app.include_router(repo_lookup.router, prefix="/api/v1")
     app.include_router(downloads.router, prefix="/api/v1")
+    app.include_router(downloads.ci_router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
     app.include_router(admin_mcp_tokens.router, prefix="/api/v1")
     app.include_router(oauth_consent.router, prefix="/api/v1")

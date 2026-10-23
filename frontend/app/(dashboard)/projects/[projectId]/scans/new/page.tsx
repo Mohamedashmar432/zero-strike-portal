@@ -22,7 +22,7 @@ import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { findingsGateLines } from "@/lib/cicd/findings-gate";
-import { FAIL_ON_OPTIONS, type FailOn } from "@/lib/cicd-fail-on";
+import type { FailOn } from "@/lib/cicd-fail-on";
 import {
   createCloudScan,
   formatAlreadyScanned,
@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { newCloudScanSchema, type NewCloudScanInput } from "@/lib/validation/scan.schema";
 import { AzureClassicSetup } from "@/components/cicd/azure-classic-setup";
+import { GateReference } from "@/components/cicd/gate-reference";
 import { CopyBlock } from "@/components/common/copy-block";
 import { RepoConnectWizard } from "@/components/repos/repo-connect-wizard";
 
@@ -48,11 +49,11 @@ const SCAN_TYPES: { value: ScanType; label: string; description: string; icon: t
   { value: "cicd", label: "CI/CD", description: "Add thinkShield to your pipeline (GitHub Actions, GitLab CI, Azure Pipelines).", icon: GitBranch },
 ];
 
-const CI_PROVIDER_OPTIONS: { value: CiProvider | "azure_classic"; label: string }[] = [
-  { value: "github_actions", label: "GitHub Actions" },
-  { value: "gitlab_ci", label: "GitLab CI" },
-  { value: "azure_pipelines", label: "Azure Pipelines" },
-  { value: "azure_classic", label: "Azure DevOps Classic" },
+const CI_PROVIDER_OPTIONS: { value: CiProvider | "azure_classic"; label: string; hint: string }[] = [
+  { value: "github_actions", label: "GitHub Actions", hint: "Workflow file" },
+  { value: "gitlab_ci", label: "GitLab CI", hint: ".gitlab-ci.yml job" },
+  { value: "azure_pipelines", label: "Azure Pipelines", hint: "YAML pipeline" },
+  { value: "azure_classic", label: "Azure DevOps Classic", hint: "Designer, Bash task" },
 ];
 
 function BackToTypes({ onBack }: { onBack: () => void }) {
@@ -134,7 +135,7 @@ const block = (lines: string[], indent: number) => lines.map((l) => " ".repeat(i
  * only when there is something critical or high. An unrecognised ZEROSTRIKE_FAIL_ON value is
  * treated as "none".
  */
-function cicdScanLines(origin: string, token: string, warn: string[], soft: string[] = []): string[] {
+function cicdScanLines(origin: string, token: string, failOn: FailOn, warn: string[], soft: string[] = []): string[] {
   return [
     "rc=0",
     "./zerostrike scan . \\",
@@ -146,7 +147,7 @@ function cicdScanLines(origin: string, token: string, warn: string[], soft: stri
     `  --format json --output ${REPORT_FILE} || rc=$?`,
     // 1 = findings were found (not an error); anything higher is a genuine failure.
     'if [ "$rc" -gt 1 ]; then echo "thinkShield scan failed (exit code $rc)"; exit "$rc"; fi',
-    ...findingsGateLines(REPORT_FILE, warn, soft),
+    ...findingsGateLines(REPORT_FILE, warn, soft, failOn),
   ];
 }
 
@@ -154,7 +155,7 @@ function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): stri
   const install = cicdInstallLines(origin);
   if (provider === "github_actions") {
     // ::error draws a red annotation on the run but does not fail the step.
-    const scan = cicdScanLines(origin, "${{ secrets.ZEROSTRIKE_TOKEN }}", [
+    const scan = cicdScanLines(origin, "${{ secrets.ZEROSTRIKE_TOKEN }}", failOn, [
       'echo "::error title=thinkShield::$msg"',
     ]);
     return [
@@ -191,6 +192,7 @@ function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): stri
     const scan = cicdScanLines(
       origin,
       "$ZEROSTRIKE_TOKEN",
+      failOn,
       ["printf '\\033[0;31m%s\\033[0m\\n' \"$msg\""],
       ["exit 3"]
     );
@@ -220,6 +222,7 @@ function cicdSnippet(provider: CiProvider, origin: string, failOn: FailOn): stri
   const scan = cicdScanLines(
     origin,
     "$(ZEROSTRIKE_TOKEN)",
+    failOn,
     ['echo "##vso[task.logissue type=error]$msg"'],
     ['echo "##vso[task.complete result=SucceededWithIssues;]thinkShield findings"']
   );
@@ -251,8 +254,11 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
     queryKey: queryKeys.projects.detail(projectId),
     queryFn: () => getProject(projectId),
   });
-  // The gate is a project setting (default: critical or high), not chosen per snippet.
-  const failOn: FailOn = project?.cicd_fail_on ?? "high";
+  // The project setting (default: critical or high) seeds the gate; the sidebar can change it for the
+  // copied snippet without touching the project.
+  const projectFailOn: FailOn = project?.cicd_fail_on ?? "high";
+  const [gate, setGate] = useState<FailOn>();
+  const failOn = gate ?? projectFailOn;
   const { data: keys, isLoading: keysLoading } = useQuery({
     queryKey: queryKeys.projects.apiKeys(projectId),
     queryFn: () => listApiKeys(projectId),
@@ -292,47 +298,60 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
       </div>
       <div className="space-y-2">
         <Label>CI provider</Label>
-        <div className="flex flex-wrap gap-1 rounded-lg border border-border p-0.5">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {CI_PROVIDER_OPTIONS.map((p) => (
-            <Button
+            <button
               key={p.value}
               type="button"
-              size="sm"
-              variant={provider === p.value ? "secondary" : "ghost"}
+              aria-pressed={provider === p.value}
               onClick={() => setProvider(p.value)}
+              className={cn(
+                "rounded-lg border px-3 py-2.5 text-left transition-colors",
+                provider === p.value ? "border-primary/60 bg-accent" : "border-border hover:border-primary/30 hover:bg-accent/50"
+              )}
             >
-              {p.label}
-            </Button>
+              <span className="block text-sm font-medium text-foreground">{p.label}</span>
+              <span className="block text-xs text-muted-foreground">{p.hint}</span>
+            </button>
           ))}
         </div>
       </div>
-      {provider === "azure_classic" && (
-        <AzureClassicSetup origin={scannerServerOrigin()} failOn={failOn} projectId={projectId} />
-      )}
-      {provider && provider !== "azure_classic" && (
-        <div className="space-y-1">
-          <CopyBlock
-            label="Pipeline snippet"
-            text={cicdSnippet(provider, scannerServerOrigin(), failOn)}
-            filename={cicdFilename(provider)}
-          />
-          <p className="text-xs text-muted-foreground">
-            {FAIL_ON_OPTIONS.find((o) => o.value === failOn)?.description} Change this in{" "}
-            <Link href={`/projects/${projectId}?tab=settings`} className="underline underline-offset-2">
-              Project Settings
-            </Link>
-            . The pipeline also fails if the scan itself errors (for example a bad token). Full results are in
-            the portal, and the JSON report is kept as a pipeline artifact.
-          </p>
-          {provider === "github_actions" && (
-            <p className="text-xs text-muted-foreground">
-              Save the downloaded file as <code>.github/workflows/zerostrike.yml</code>.
-            </p>
-          )}
+      {provider ? (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+          <div className="min-w-0">
+            {provider === "azure_classic" ? (
+              <AzureClassicSetup origin={scannerServerOrigin()} failOn={failOn} projectId={projectId} />
+            ) : (
+              <div className="space-y-1">
+                <CopyBlock
+                  label="Pipeline snippet"
+                  text={cicdSnippet(provider, scannerServerOrigin(), failOn)}
+                  filename={cicdFilename(provider)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Always runs the latest published scanner. The pipeline also fails if the scan itself errors (for
+                  example a bad token). Full results are in the portal, and the JSON report is kept as a pipeline
+                  artifact.
+                </p>
+                {provider === "github_actions" && (
+                  <p className="text-xs text-muted-foreground">
+                    Save the downloaded file as <code>.github/workflows/zerostrike.yml</code>.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <GateReference value={failOn} projectDefault={projectFailOn} onChange={setGate} projectId={projectId} />
         </div>
+      ) : (
+        <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          Pick where your pipeline runs to get its setup.
+        </p>
       )}
       <div className="flex justify-end border-t border-border pt-4">
-        <Button onClick={onDone}>Done</Button>
+        <Button variant="outline" onClick={onDone}>
+          Back to scans
+        </Button>
       </div>
     </div>
   );
