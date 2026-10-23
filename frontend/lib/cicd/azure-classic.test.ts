@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { azureClassicInlineScript, azureClassicScriptUrl } from "./azure-classic";
+import { azureClassicInlineScript, azureClassicPowerShellInlineScript, azureClassicScriptUrl } from "./azure-classic";
 
 const gen = (origin: string) => azureClassicInlineScript({ origin, failOn: "high" });
 
@@ -24,5 +24,26 @@ describe("azureClassicInlineScript", () => {
     expect(s).toContain("curl -fsSL");
     expect(s).not.toContain("ZEROSTRIKE_TOKEN");
     expect(s).not.toContain("| bash");
+  });
+});
+
+describe("azureClassicPowerShellInlineScript", () => {
+  const ps = (origin: string) => azureClassicPowerShellInlineScript({ origin, failOn: "critical" });
+
+  test("is a short download-and-run of the .ps1, with overridable defaults and no token", () => {
+    const s = ps("https://p.example/api/v1/");
+    expect(s.length).toBeLessThan(5000);
+    expect(s).toContain("$env:ZEROSTRIKE_PORTAL_URL = 'https://p.example'");
+    expect(s).toContain("$env:ZEROSTRIKE_FAIL_ON = 'critical'");
+    expect(s).toContain("/api/v1/downloads/ci/azure-classic.ps1");
+    expect(s).toContain("-ExecutionPolicy Bypass");
+    expect(s.startsWith("$ErrorActionPreference = 'Stop'")).toBe(true);
+    expect(s.trimEnd().endsWith("exit $LASTEXITCODE")).toBe(true);
+    expect(s).not.toContain("ZEROSTRIKE_TOKEN");
+    // ADO expands $(name) macros in inline scripts before running them; none may appear here.
+    expect(s).not.toMatch(/\$\([A-Za-z_.]+\)/);
+    expect(azureClassicScriptUrl("https://p.example", "windows")).toBe(
+      "https://p.example/api/v1/downloads/ci/azure-classic.ps1"
+    );
   });
 });

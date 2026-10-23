@@ -1,6 +1,7 @@
-# Throwaway: proves the Azure DevOps Classic script on a real Ubuntu agent (the same image ADO's
-# hosted ubuntu-latest pool uses), including a real CGO build of the scanner. Delete once green.
-name: Classic script on Linux
+# Throwaway: proves the Azure DevOps Classic scripts on real agents, the same images ADO's hosted
+# pools use: Ubuntu (Bash task) and Windows Server 2022 (PowerShell task, under both Windows
+# PowerShell 5.1 and pwsh 7), each with a real CGO build of the scanner. Delete once green.
+name: Classic script on Linux and Windows
 
 on:
   push:
@@ -8,6 +9,7 @@ on:
     paths:
       - backend/app/ci_scripts/**
       - backend/tests/test_azure_classic_script.py
+      - backend/tests/test_azure_classic_ps_script.py
       - .github/workflows/classic-script-linux.yml
   workflow_dispatch:
 
@@ -75,3 +77,77 @@ jobs:
           echo "::notice title=pytest per test::$(grep -E '^(PASSED|FAILED|SKIPPED|ERROR) ' "$L" | sed 's#tests/test_azure_classic_script.py::##' | tr '\n' ';')"
           echo "::notice title=Real scanner through the inline script (gate none)::$(grep -E 'thinkShield:|##vso' "$L" | sed 's/##vso/vso/' | tr '\n' ';')"
           { echo '## Classic script on Linux'; echo '```'; grep -E '^(PASSED|FAILED|SKIPPED|ERROR) |thinkShield:' "$L"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the real scanner (CGO on; the image ships MinGW-w64 gcc)
+        run: git clone --depth 1 --branch v0.38.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scanner/go.mod
+          cache: false
+      - run: go build -o "$RUNNER_TEMP/zerostrike_windows_amd64.exe" ./cmd/zerostrike
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        working-directory: scanner
+
+      - name: Real scanner on a vulnerable sample (published as annotations)
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/fx"
+          printf '%s\n' 'import os' 'from flask import request' 'def handler():' \
+            "    cmd = request.args.get('cmd')" '    os.system(cmd)' > "$RUNNER_TEMP/fx/vuln.py"
+          rc=0
+          "$RUNNER_TEMP/zerostrike_windows_amd64.exe" scan "$RUNNER_TEMP/fx" --enable-secrets --enable-sca \
+            --enable-framework-checks --format json --output "$RUNNER_TEMP/fx.json" || rc=$?
+          echo "::notice title=Windows real scanner exit code::$rc (0 clean, 1 findings found, 2+ error)"
+          echo "::notice title=Windows real scanner findings::$(jq -c '[.. | objects | select(has("RuleID")) | "\(.RuleID) \(.Severity)"]' "$RUNNER_TEMP/fx.json")"
+          echo "::notice title=Windows Severity lines (the gate matches a 6-space indent)::$(grep -n '"Severity"' "$RUNNER_TEMP/fx.json" | head -5 | tr -d '\r' | sed 's/^/[/;s/$/]/' | tr '\n' ' ')"
+          [ "$rc" -le 1 ]
+
+      - name: PowerShell engines on the agent
+        shell: pwsh
+        run: |
+          $v5 = powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          Write-Host "::notice title=PowerShell engines::Windows PowerShell $v5, pwsh $($PSVersionTable.PSVersion)"
+
+      - name: PSScriptAnalyzer (informational)
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $r = Invoke-ScriptAnalyzer -Path backend/app/ci_scripts/azure-classic.ps1 -Severity Error,Warning
+          $r | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+          $summary = ($r | ForEach-Object { "$($_.Severity) $($_.RuleName) line $($_.Line)" }) -join '; '
+          Write-Host "::notice title=PSScriptAnalyzer::$(@($r).Count) error/warning(s). $summary"
+
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+        if: ${{ !cancelled() }}
+        working-directory: backend
+
+      - name: Run the inline script exactly as the PowerShell task does (5.1 and pwsh; stub + real scanner)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: backend
+        env:
+          ZEROSTRIKE_REAL_SCANNER_WINDOWS: ${{ runner.temp }}\zerostrike_windows_amd64.exe
+        run: pytest tests/test_azure_classic_ps_script.py -v -rA -s 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+
+      - name: Publish test evidence
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          L="$RUNNER_TEMP/pytest.log"
+          echo "::notice title=Windows pytest result::$(grep -E '^=+ .*(passed|failed|error)' "$L" | tail -1 | tr -d '=')"
+          echo "::notice title=Windows pytest per test::$(grep -E '^(PASSED|FAILED|SKIPPED|ERROR) ' "$L" | sed 's#tests/test_azure_classic_ps_script.py::##' | tr '\n' ';')"
+          echo "::notice title=Windows real scanner through the inline script (gate none)::$(grep -E 'thinkShield:|##vso' "$L" | tr -d '\r' | sed 's/##vso/vso/' | tr '\n' ';')"
+          { echo '## Classic script on Windows Server 2022'; echo '```'; grep -E '^(PASSED|FAILED|SKIPPED|ERROR) |thinkShield:' "$L"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

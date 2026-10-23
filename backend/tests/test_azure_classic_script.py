@@ -39,8 +39,11 @@ def _fake_scanner(severities: list[str]) -> bytes:
     ).encode()
 
 
-def _portal(script: str, binary: bytes, calls: list, bad_sha: bool = False):
+def _portal(script: str, binary: bytes, calls: list, bad_sha: bool = False, platform: str = "linux-amd64",
+            script_name: str = "azure-classic.sh"):
+    """Stub portal. Also used by test_azure_classic_ps_script.py with platform="windows-amd64"."""
     sha = "0" * 64 if bad_sha else hashlib.sha256(binary).hexdigest()
+    filename = "zerostrike_" + platform.replace("-", "_") + (".exe" if platform.startswith("windows") else "")
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -55,10 +58,10 @@ def _portal(script: str, binary: bytes, calls: list, bad_sha: bool = False):
             p = self.path
             calls.append(("GET", p, None))
             routes = {
-                "/api/v1/downloads/ci/azure-classic.sh": script,
-                "/api/v1/downloads/zerostrike/latest/linux-amd64/info": json.dumps({"version": "v9.9.9"}),
-                "/api/v1/downloads/zerostrike/v9.9.9/linux-amd64": binary,
-                "/api/v1/downloads/zerostrike/v9.9.9/checksums.txt": f"{sha}  zerostrike_linux_amd64\n",
+                f"/api/v1/downloads/ci/{script_name}": script,
+                f"/api/v1/downloads/zerostrike/latest/{platform}/info": json.dumps({"version": "v9.9.9"}),
+                f"/api/v1/downloads/zerostrike/v9.9.9/{platform}": binary,
+                "/api/v1/downloads/zerostrike/v9.9.9/checksums.txt": f"{sha}  {filename}\n",
             }
             self._send(200, routes[p]) if p in routes else self._send(404)
 

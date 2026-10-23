@@ -5,9 +5,31 @@ export function normalizeOrigin(origin: string): string {
   return origin.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/+$/, "");
 }
 
-/** The full scan script, served by the backend (backend/app/ci_scripts/azure-classic.sh). */
-export function azureClassicScriptUrl(origin: string): string {
-  return `${normalizeOrigin(origin)}/api/v1/downloads/ci/azure-classic.sh`;
+export type AgentOs = "linux" | "windows";
+
+/** The full scan script, served by the backend (backend/app/ci_scripts/azure-classic.{sh,ps1}). */
+export function azureClassicScriptUrl(origin: string, os: AgentOs = "linux"): string {
+  return `${normalizeOrigin(origin)}/api/v1/downloads/ci/azure-classic.${os === "windows" ? "ps1" : "sh"}`;
+}
+
+/**
+ * Inline script for a Classic PowerShell task on a Windows agent: the same download-and-run as the
+ * Bash one. The hosted script runs in a child of the same engine (Windows PowerShell 5.1 or pwsh,
+ * whichever the task uses) with -ExecutionPolicy Bypass, so a restrictive agent policy cannot block
+ * the downloaded file. Exit code passes through. The test suite runs a copy of this exactly as the
+ * task does.
+ */
+export function azureClassicPowerShellInlineScript(opts: { origin: string; failOn: FailOn }): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `if (-not $env:ZEROSTRIKE_PORTAL_URL) { $env:ZEROSTRIKE_PORTAL_URL = '${normalizeOrigin(opts.origin)}' }`,
+    `if (-not $env:ZEROSTRIKE_FAIL_ON) { $env:ZEROSTRIKE_FAIL_ON = '${opts.failOn}' }`,
+    "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12",
+    "$s = Join-Path $env:AGENT_TEMPDIRECTORY 'thinkshield-scan.ps1'",
+    'Invoke-WebRequest -UseBasicParsing "$env:ZEROSTRIKE_PORTAL_URL/api/v1/downloads/ci/azure-classic.ps1" -OutFile $s',
+    "& (Get-Process -Id $PID).Path -NoProfile -ExecutionPolicy Bypass -File $s",
+    "exit $LASTEXITCODE",
+  ].join("\n");
 }
 
 /**

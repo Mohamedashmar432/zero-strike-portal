@@ -212,6 +212,22 @@ describe("New scan: CI/CD setup", () => {
     vi.mocked(getScannerBinaryInfo).mockRejectedValue(new ApiError(404, { detail: "Not found" }));
     await openCicdStep(true);
     fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
-    expect(await screen.findByText(/will fail with HTTP 404/)).toBeTruthy();
+    expect(await screen.findByText(/No Linux \(amd64\) scanner is published/)).toBeTruthy();
+  });
+
+  test("Azure DevOps Classic on a Windows agent gives a PowerShell task and checks the Windows scanner", async () => {
+    vi.mocked(getScannerBinaryInfo).mockResolvedValue({ ...binaryInfo, os: "windows" });
+    sessionStorage.clear();
+    await openCicdStep(true);
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /^Windows/ }));
+    expect(vi.mocked(getScannerBinaryInfo)).toHaveBeenCalledWith("latest", "windows-amd64");
+    expect(screen.getByText("Add a PowerShell task on a Windows agent")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Paste the script/ }));
+    const inline = screen.getByText(/azure-classic\.ps1/, { selector: "code" }).textContent ?? "";
+    expect(inline).toContain("$env:ZEROSTRIKE_FAIL_ON = 'high'");
+    expect(inline).not.toContain("curl");
+    // Remembered for the project, like the checklist.
+    expect(sessionStorage.getItem("azure-classic-os:p1")).toBe("windows");
   });
 });

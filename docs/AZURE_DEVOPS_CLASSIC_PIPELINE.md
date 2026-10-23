@@ -32,12 +32,47 @@ why the optional ones override the inline defaults without editing the task.
 
 ## Task placement and agent
 
-- Add one **Bash** task, type **Inline**, after checkout and build and **before** any deploy task,
-  so a failing scan can stop a release.
+- Add one task, type **Inline**, after checkout and build and **before** any deploy task, so a
+  failing scan can stop a release: a **PowerShell** task on a Windows agent, a **Bash** task on a
+  Linux agent. The new-scan wizard has an agent OS toggle that hands out the matching script.
 - Working directory: `$(Build.SourcesDirectory)`.
-- Agent: Microsoft-hosted `ubuntu-latest`.
-- **Supported platform: Linux amd64 only.** Windows agents and PowerShell are not supported in this
-  phase.
+- **Windows (amd64)**, the usual case for .NET builds: Microsoft-hosted `windows-2022` /
+  `windows-latest`, or a self-hosted agent on Windows Server 2016 or later. Needs only Windows
+  PowerShell 5.1 or PowerShell 7 ("Use PowerShell Core" on or off): the script uses built-in
+  cmdlets, no Git Bash, curl or jq.
+- **Linux (amd64)**: Microsoft-hosted `ubuntu-latest`, or a self-hosted agent with `curl`, `jq` and
+  `sha256sum`.
+- No arm64 agents: the scanner release publishes amd64 only for Windows.
+
+## Windows agents
+
+The Windows path is a twin of the Linux one: `backend/app/ci_scripts/azure-classic.ps1`, served at
+`/api/v1/downloads/ci/azure-classic.ps1`, with the same inputs, steps and gate. The inline
+PowerShell script sets the `ZEROSTRIKE_PORTAL_URL` / `ZEROSTRIKE_FAIL_ON` defaults, downloads the
+`.ps1` with `Invoke-WebRequest`, and runs it in a child of the same engine with
+`-ExecutionPolicy Bypass` (so an agent's execution policy cannot block the downloaded file), then
+exits with its code. Things specific to Windows, each found by running it:
+
+- **Exit codes.** Windows PowerShell 5.1 reports any non-zero `exit` of a script dot-sourced under
+  `-Command` as **1**, and that is how the PowerShell task runs an inline script. A failed run
+  therefore always shows exit code 1 on Windows; the reason (gate, token, checksum, upload) is the
+  red `##vso` error line. Pass/fail is identical to Linux.
+- **Scanner stderr.** The scan runs with `$ErrorActionPreference = 'Continue'`, because 5.1 can turn
+  a native command's stderr into a terminating error.
+- **ASCII only.** 5.1 reads a BOM-less script as ANSI, so `azure-classic.ps1` stays ASCII (a test
+  enforces it).
+- **Token handling.** The token only travels in a header of an in-process `Invoke-RestMethod` call:
+  never in argv, never in logs.
+- **TLS.** The script enables TLS 1.2 explicitly, which 5.1 on older Server images does not by
+  default.
+- A Group Policy that enforces `AllSigned` at machine level overrides `-ExecutionPolicy Bypass`; on
+  such agents the script would have to be signed. Not the case on Microsoft-hosted agents.
+
+`backend/tests/test_azure_classic_ps_script.py` runs the inline script exactly as the PowerShell@2
+task does (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command
+". 'inline.ps1'"`) under every engine present (Windows PowerShell 5.1 and pwsh 7), against a stub
+portal and a stub scanner `.exe` built from a few lines of Go, with the same cases as the Linux
+suite. On the `windows-2022` CI job it also runs a real CGO build of the scanner.
 
 ## Inline script vs hosted script
 

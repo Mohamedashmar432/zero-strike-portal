@@ -8,7 +8,12 @@ import { CopyBlock } from "@/components/common/copy-block";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { getScannerBinaryInfo } from "@/lib/api/downloads";
-import { azureClassicInlineScript, normalizeOrigin } from "@/lib/cicd/azure-classic";
+import {
+  type AgentOs,
+  azureClassicInlineScript,
+  azureClassicPowerShellInlineScript,
+  normalizeOrigin,
+} from "@/lib/cicd/azure-classic";
 import type { FailOn } from "@/lib/cicd-fail-on";
 import { cn } from "@/lib/utils";
 
@@ -55,13 +60,31 @@ function Field({ name, value, note }: { name: string; value: string; note?: stri
  * up on this screen.
  */
 export function AzureClassicSetup({ origin, failOn, projectId }: { origin: string; failOn: FailOn; projectId: string }) {
+  // Remembered like the checklist, so a trip to create a token comes back to the same agent OS.
+  const osKey = `azure-classic-os:${projectId}`;
+  const [os, setOsState] = useState<AgentOs>(() => {
+    try {
+      return sessionStorage.getItem(osKey) === "windows" ? "windows" : "linux";
+    } catch {
+      return "linux";
+    }
+  });
+  function setOs(next: AgentOs) {
+    setOsState(next);
+    try {
+      sessionStorage.setItem(osKey, next);
+    } catch {}
+  }
+  const win = os === "windows";
+  const platform = win ? "windows-amd64" : "linux-amd64";
   const info = useQuery({
-    queryKey: ["scanner-binary-info", "latest", "linux-amd64"],
-    queryFn: () => getScannerBinaryInfo("latest", "linux-amd64"),
+    queryKey: ["scanner-binary-info", "latest", platform],
+    queryFn: () => getScannerBinaryInfo("latest", platform),
     retry: false,
   });
   const notPublished = info.error instanceof ApiError && info.error.status === 404;
-  const inline = azureClassicInlineScript({ origin, failOn });
+  const inline = win ? azureClassicPowerShellInlineScript({ origin, failOn }) : azureClassicInlineScript({ origin, failOn });
+  const taskName = win ? "PowerShell" : "Bash";
   // Progress lives in sessionStorage per project: step 1 sends the engineer off to create a token
   // (same tab), and switching provider unmounts this component; neither should wipe the checklist.
   const storeKey = `azure-classic-steps:${projectId}`;
@@ -99,8 +122,23 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
       ),
     },
     {
-      title: "Add a Bash task on an Ubuntu agent",
-      body: (
+      title: win ? "Add a PowerShell task on a Windows agent" : "Add a Bash task on an Ubuntu agent",
+      body: win ? (
+        <>
+          <p>
+            Keep the agent your .NET build already uses: the <Mono>Azure Pipelines</Mono> pool with{" "}
+            <Mono>windows-2022</Mono> or <Mono>windows-latest</Mono>, or a self-hosted Windows agent (Server 2016 or
+            later). Click <Mono>+</Mono>, add a <Mono>PowerShell</Mono> task after your build and before any deploy,
+            so a failing gate stops the release. Then set:
+          </p>
+          <Field name="Type" value="Inline" />
+          <Field name="Working Directory" value="$(Build.SourcesDirectory)" />
+          <p>
+            Windows PowerShell 5.1 and PowerShell 7 (&quot;Use PowerShell Core&quot;) both work. No Git Bash, curl or
+            jq is needed.
+          </p>
+        </>
+      ) : (
         <>
           <p>
             On the agent job set the pool to <Mono>Azure Pipelines</Mono> with image <Mono>ubuntu-latest</Mono>.
@@ -114,14 +152,20 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
     },
     {
       title: "Paste the script",
-      body: <CopyBlock label="Inline script" text={inline} filename="thinkshield-inline.sh" />,
+      body: (
+        <CopyBlock
+          label={`Inline script (${taskName} task)`}
+          text={inline}
+          filename={win ? "thinkshield-inline.ps1" : "thinkshield-inline.sh"}
+        />
+      ),
     },
     {
       title: "Map the token into the task",
       body: (
         <>
           <p>
-            Secret variables are not visible to scripts unless mapped. In the Bash task open{" "}
+            Secret variables are not visible to scripts unless mapped. In the {taskName} task open{" "}
             <Mono>Environment Variables</Mono> and add:
           </p>
           <Field name="ZEROSTRIKE_TOKEN" value="$(ZEROSTRIKE_TOKEN)" />
@@ -147,6 +191,33 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
 
   return (
     <div className="space-y-4">
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium text-foreground">Which agent does this pipeline run on?</p>
+        <div role="radiogroup" aria-label="Agent OS" className="grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              { value: "windows", label: "Windows", hint: ".NET builds; windows-2022, windows-latest, self-hosted" },
+              { value: "linux", label: "Linux", hint: "ubuntu-latest or a self-hosted Linux agent" },
+            ] as const
+          ).map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={os === o.value}
+              onClick={() => setOs(o.value)}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-left transition-colors",
+                os === o.value ? "border-primary/60 bg-accent" : "border-border hover:border-primary/30"
+              )}
+            >
+              <span className="block text-sm font-medium text-foreground">{o.label}</span>
+              <span className="block text-xs text-muted-foreground">{o.hint}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span className="flex items-center gap-3">
@@ -181,8 +252,8 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
 
       {notPublished && (
         <p className="rounded-lg border border-severity-medium bg-severity-medium-tint p-3 text-xs text-foreground">
-          No Linux (amd64) scanner is published on this portal, so the pipeline will fail with HTTP 404 when it
-          downloads the scanner. A portal admin must publish it first.
+          No {win ? "Windows" : "Linux"} (amd64) scanner is published on this portal, so the pipeline will fail when
+          it downloads the scanner. A portal admin must publish it first.
         </p>
       )}
 
@@ -234,8 +305,19 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
           <Field name="ZEROSTRIKE_PORTAL_URL" value={normalizeOrigin(origin)} />
           <p className="pt-1">
             The JSON report is kept at <Mono>$(Agent.TempDirectory)/zerostrike/zerostrike-report.json</Mono>; add a
-            Publish build artifacts task for it if you want it on the run. Linux (amd64) agents only; a self-hosted
-            agent needs <Mono>curl</Mono>, <Mono>jq</Mono> and <Mono>sha256sum</Mono>. To scan pull requests, add a
+            Publish build artifacts task for it if you want it on the run.{" "}
+            {win ? (
+              <>
+                Windows (amd64) agents with Windows PowerShell 5.1 or later; nothing else to install. On Windows a
+                failed run always shows exit code 1; the reason is in the run&apos;s red error.
+              </>
+            ) : (
+              <>
+                Linux (amd64) agents; a self-hosted agent needs <Mono>curl</Mono>, <Mono>jq</Mono> and{" "}
+                <Mono>sha256sum</Mono>.
+              </>
+            )}{" "}
+            To scan pull requests, add a
             branch policy build validation that runs this pipeline. More in the{" "}
             <Link href="/guide#azure-devops-classic" className="underline underline-offset-2">
               guide

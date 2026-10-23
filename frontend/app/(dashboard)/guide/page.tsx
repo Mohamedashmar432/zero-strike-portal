@@ -519,7 +519,7 @@ export default function GuidePage() {
             id="azure-devops-classic"
             title="Azure DevOps Classic pipelines"
             icon={Terminal}
-            lede="Scan from a Classic (designer) pipeline with one inline Bash task on an Ubuntu agent. Build runs show up in the portal as CI scans with a link back to the build."
+            lede="Scan from a Classic (designer) pipeline with one inline task: PowerShell on a Windows agent (typical for .NET) or Bash on an Ubuntu agent. Build runs show up in the portal as CI scans with a link back to the build."
           >
             <Steps>
               <Step n={1} title="Add the token">
@@ -530,20 +530,23 @@ export default function GuidePage() {
                   <span className="font-mono text-foreground">ZEROSTRIKE_FAIL_ON</span> are optional overrides.
                 </p>
               </Step>
-              <Step n={2} title="Add a Bash task">
+              <Step n={2} title="Add a PowerShell or Bash task">
                 <p>
-                  Type Inline, working directory <span className="font-mono text-foreground">$(Build.SourcesDirectory)</span>,
-                  and map <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)</span> under
-                  Environment Variables. Copy the five-line inline script from the new-scan wizard (CI/CD, Azure DevOps
-                  Classic); it downloads the full scan script from the portal, so it stays under the task&apos;s
-                  5000-character limit.
+                  Pick the agent OS in the new-scan wizard (CI/CD, Azure DevOps Classic): a PowerShell task on Windows,
+                  a Bash task on Ubuntu. Type Inline, working directory{" "}
+                  <span className="font-mono text-foreground">$(Build.SourcesDirectory)</span>, and map{" "}
+                  <span className="font-mono text-foreground">ZEROSTRIKE_TOKEN = $(ZEROSTRIKE_TOKEN)</span> under
+                  Environment Variables. The inline script only downloads the full scan script from the portal, so it
+                  stays under the task&apos;s 5000-character limit.
                 </p>
               </Step>
             </Steps>
             <Note>
-              Linux (amd64) agents only in this phase: use the Azure Pipelines <span className="font-mono text-foreground">ubuntu-latest</span>{" "}
-              image, or a self-hosted agent with curl, jq and sha256sum. Windows and PowerShell agents are not supported.
-              A portal admin must publish the Linux scanner binary first. Full reference:{" "}
+              Windows (amd64): <span className="font-mono text-foreground">windows-2022</span>,{" "}
+              <span className="font-mono text-foreground">windows-latest</span> or a self-hosted agent on Server 2016 or
+              later, with Windows PowerShell 5.1 or PowerShell 7 and nothing else to install. Linux (amd64):{" "}
+              <span className="font-mono text-foreground">ubuntu-latest</span>, or a self-hosted agent with curl, jq and
+              sha256sum. A portal admin must publish the scanner for that OS first. Full reference:{" "}
               <span className="font-mono text-foreground">docs/AZURE_DEVOPS_CLASSIC_PIPELINE.md</span>.
             </Note>
           </Section>

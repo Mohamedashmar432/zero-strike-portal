@@ -8,17 +8,23 @@ from app.services import download_service
 router = APIRouter(prefix="/downloads/zerostrike", tags=["downloads"])
 ci_router = APIRouter(prefix="/downloads/ci", tags=["downloads"])
 
+_CI_SCRIPTS = Path(__file__).resolve().parent.parent / "ci_scripts"
 # Strip CR: a Windows checkout (core.autocrlf) would otherwise hand bash a "\r" on every line.
-_AZURE_CLASSIC_SCRIPT = (
-    (Path(__file__).resolve().parent.parent / "ci_scripts" / "azure-classic.sh").read_text().replace("\r\n", "\n")
-)
+_AZURE_CLASSIC_SH = (_CI_SCRIPTS / "azure-classic.sh").read_text().replace("\r\n", "\n")
+_AZURE_CLASSIC_PS1 = (_CI_SCRIPTS / "azure-classic.ps1").read_text()
 
 
 @ci_router.get("/azure-classic.sh")
 async def azure_classic_script() -> Response:
-    """The full Azure DevOps Classic scan script. Public, like the binaries: it holds no secrets, and
-    the Bash task's inline field (max 5000 chars) only has to download and run it."""
-    return Response(content=_AZURE_CLASSIC_SCRIPT, media_type="text/x-shellscript; charset=utf-8")
+    """The full Azure DevOps Classic scan script for Linux agents. Public, like the binaries: it holds
+    no secrets, and the Bash task's inline field (max 5000 chars) only has to download and run it."""
+    return Response(content=_AZURE_CLASSIC_SH, media_type="text/x-shellscript; charset=utf-8")
+
+
+@ci_router.get("/azure-classic.ps1")
+async def azure_classic_ps_script() -> Response:
+    """The same scan for Windows agents, run by a PowerShell task (Windows PowerShell 5.1 or pwsh)."""
+    return Response(content=_AZURE_CLASSIC_PS1, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/{version}/checksums.txt")
