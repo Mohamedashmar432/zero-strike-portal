@@ -230,4 +230,21 @@ describe("New scan: CI/CD setup", () => {
     // Remembered for the project, like the checklist.
     expect(sessionStorage.getItem("azure-classic-os:p1")).toBe("windows");
   });
+
+  test("opening and closing Classic steps never changes the agent OS", async () => {
+    vi.mocked(getScannerBinaryInfo).mockResolvedValue(binaryInfo);
+    sessionStorage.clear();
+    await openCicdStep(true);
+    fireEvent.click(screen.getByRole("button", { name: /^Azure DevOps Classic/ }));
+    const linux = await screen.findByRole("radio", { name: /^Linux/ });
+    for (const title of [/Store the project token/, /Add a Bash task/, /Paste the script/, /Map the token/, /Save & queue/]) {
+      fireEvent.click(screen.getByRole("button", { name: title }));
+      fireEvent.click(screen.getByRole("button", { name: title }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: /Store the project token/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Done, next step" }));
+    expect(linux.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: /^Windows/ }).getAttribute("aria-checked")).toBe("false");
+    expect(sessionStorage.getItem("azure-classic-os:p1")).toBeNull();
+  });
 });
