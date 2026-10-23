@@ -8,11 +8,9 @@ import { CopyBlock } from "@/components/common/copy-block";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/client";
 import { getScannerBinaryInfo } from "@/lib/api/downloads";
-import { azureClassicInlineScript, azureClassicScriptUrl, normalizeOrigin } from "@/lib/cicd/azure-classic";
+import { azureClassicInlineScript, normalizeOrigin } from "@/lib/cicd/azure-classic";
 import type { FailOn } from "@/lib/cicd-fail-on";
 import { cn } from "@/lib/utils";
-
-const INLINE_LIMIT = 5000;
 
 /** A value that copies itself on click; falls back silently if the clipboard is blocked. */
 function CopyChip({ text, className }: { text: string; className?: string }) {
@@ -116,18 +114,7 @@ export function AzureClassicSetup({ origin, failOn, projectId }: { origin: strin
     },
     {
       title: "Paste the script",
-      body: (
-        <>
-          <CopyBlock label="Inline script" text={inline} filename="thinkshield-inline.sh" />
-          <p>
-            {inline.length} of {INLINE_LIMIT} characters. It downloads the{" "}
-            <a href={azureClassicScriptUrl(origin)} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-              full scan script
-            </a>{" "}
-            from this portal and runs it, so script fixes reach every pipeline without re-pasting.
-          </p>
-        </>
-      ),
+      body: <CopyBlock label="Inline script" text={inline} filename="thinkshield-inline.sh" />,
     },
     {
       title: "Map the token into the task",
