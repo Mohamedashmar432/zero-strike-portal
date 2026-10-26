@@ -284,9 +284,8 @@ function CicdSetupStep({ projectId, onDone }: { projectId: string; onDone: () =>
                 : "This project has no active token yet. Generate one, then store it in your CI as a secret named ZEROSTRIKE_TOKEN."}
           </p>
         </div>
-        {/* Same tab, on purpose: the access token lives in memory and the refresh token in this tab's
-            sessionStorage, so a new tab opens signed out. The wizard step is in the URL (?type=cicd),
-            so Back returns here to this step. */}
+        {/* Same tab, on purpose: the wizard step is in the URL (?type=cicd), so Back returns here to
+            this step. */}
         <Button
           size="sm"
           variant={noToken ? "default" : "outline"}

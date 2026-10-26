@@ -282,11 +282,25 @@ def _revoke_all_refresh_tokens(user: User, now: datetime) -> None:
 
 
 async def issue_token_pair(
-    user: User, *, user_agent: str | None = None, ip: str | None = None
+    user: User,
+    *,
+    remember_me: bool = False,
+    expires_at: datetime | None = None,
+    user_agent: str | None = None,
+    ip: str | None = None,
 ) -> tuple[str, str, int]:
+    """A sign-in passes `remember_me`; a rotation passes the old record's `expires_at`, so the
+    session's lifetime is fixed at sign-in and refreshing can never extend it."""
     _prune_refresh_tokens(user)
+    if expires_at is None:
+        ttl = (
+            timedelta(days=settings.refresh_token_ttl_days)
+            if remember_me
+            else timedelta(hours=settings.session_refresh_ttl_hours)
+        )
+        expires_at = datetime.now(timezone.utc) + ttl
     access_token = security.create_access_token(str(user.id), user.role)
-    refresh_token, jti, expires_at = security.create_refresh_token(str(user.id))
+    refresh_token, jti, expires_at = security.create_refresh_token(str(user.id), expires_at)
     user.refresh_tokens.append(
         RefreshTokenRecord(
             jti=jti,
@@ -329,8 +343,13 @@ async def refresh_token_pair(
     if record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         raise AuthError("Refresh token expired")
 
-    record.revoked_at = datetime.now(timezone.utc)
-    return await issue_token_pair(user, user_agent=user_agent, ip=ip)
+    now = datetime.now(timezone.utc)
+    record.revoked_at = now
+    # Capped so a session issued under an older, longer TTL still ends within today's maximum.
+    expires_at = min(
+        record.expires_at.replace(tzinfo=timezone.utc), now + timedelta(days=settings.refresh_token_ttl_days)
+    )
+    return await issue_token_pair(user, expires_at=expires_at, user_agent=user_agent, ip=ip)
 
 
 async def logout(refresh_token: str) -> str | None:

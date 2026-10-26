@@ -48,11 +48,10 @@ def create_access_token(user_id: str, role: str) -> str:
     return _encode(claims)
 
 
-def create_refresh_token(user_id: str) -> tuple[str, str, datetime]:
+def create_refresh_token(user_id: str, expires_at: datetime) -> tuple[str, str, datetime]:
     """Returns (token, jti, expires_at) — caller persists jti/hash on the user document."""
     now = datetime.now(timezone.utc)
     jti = str(uuid.uuid4())
-    expires_at = now + timedelta(days=settings.refresh_token_ttl_days)
     claims = {"sub": user_id, "jti": jti, "iat": now, "exp": expires_at, "type": "refresh"}
     return _encode(claims), jti, expires_at
 

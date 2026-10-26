@@ -3,14 +3,14 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as authApi from "@/lib/api/auth";
 import { tryRefresh } from "@/lib/api/client";
-import { clearTokens, getTokens, setTokens } from "@/lib/api/token-store";
+import { SESSION_USER_KEY, clearTokens, getTokens, setTokens } from "@/lib/api/token-store";
 import { updateMyProfile } from "@/lib/api/users";
 
 type AuthContextValue = {
   user: authApi.User | null;
   isAuthenticating: boolean;
   isRestoringSession: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   /** Resolves to the new account; a `pending` one is NOT signed in. */
   register: (email: string, password: string, name: string, inviteToken?: string | null) => Promise<authApi.User>;
   logout: () => Promise<void>;
@@ -24,31 +24,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
 
-  // Access tokens are in-memory only; the refresh token survives in
-  // sessionStorage (see token-store.ts) so a reload/hard nav can silently
-  // re-issue an access token instead of forcing the user back to /login.
+  // Access tokens are in-memory only; the browser-wide refresh token (see token-store.ts) lets a
+  // reload or a new tab silently re-issue one instead of forcing the user back to /login.
   useEffect(() => {
     (async () => {
-      const { refreshToken } = getTokens();
-      if (refreshToken && (await tryRefresh())) {
+      if (getTokens().refreshToken && (await tryRefresh())) {
         try {
           setUser(await authApi.getMe());
         } catch {
           clearTokens();
         }
-      } else if (refreshToken) {
+      } else {
         clearTokens();
       }
       setIsRestoringSession(false);
     })();
   }, []);
 
-  async function login(email: string, password: string) {
+  // One session per browser: when another tab signs in as someone else or signs out, this tab
+  // follows. A full navigation (not a router push) drops every cached query, so the previous user's
+  // data can never render under the new one.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== SESSION_USER_KEY && e.key !== null) return;
+      const signedInAs = localStorage.getItem(SESSION_USER_KEY);
+      if (signedInAs === (user?.id ?? null)) return;
+      window.location.assign(signedInAs ? "/dashboard" : "/login");
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [user?.id]);
+
+  async function login(email: string, password: string, remember = false) {
     setIsAuthenticating(true);
     try {
-      const tokens = await authApi.login(email, password);
-      setTokens({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
-      setUser(await authApi.getMe());
+      const tokens = await authApi.login(email, password, remember);
+      // Signing in replaces whatever session this browser held; revoke it rather than orphan it.
+      const { refreshToken: previous } = getTokens();
+      if (previous) await authApi.logout(previous).catch(() => undefined);
+      setTokens({ accessToken: tokens.access_token, refreshToken: tokens.refresh_token, remember });
+      const me = await authApi.getMe();
+      localStorage.setItem(SESSION_USER_KEY, me.id);
+      setUser(me);
     } finally {
       setIsAuthenticating(false);
     }

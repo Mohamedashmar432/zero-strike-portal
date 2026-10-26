@@ -61,27 +61,38 @@ async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
 
 let refreshInFlight: Promise<boolean> | null = null;
 
-export async function tryRefresh(): Promise<boolean> {
+async function rotate(): Promise<boolean> {
+  // Read inside the lock: another tab may have rotated the shared token while we waited.
   const { refreshToken } = getTokens();
   if (!refreshToken) return false;
-
-  if (!refreshInFlight) {
-    refreshInFlight = fetch(`${API_BASE_URL}/auth/refresh`, {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
-    })
-      .then(async (res) => {
-        if (!res.ok) return false;
-        const data = await res.json();
-        setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token });
-        return true;
-      })
-      .catch(() => false)
-      .finally(() => {
-        refreshInFlight = null;
-      });
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token });
+    return true;
+  } catch {
+    return false;
   }
+}
+
+export async function tryRefresh(): Promise<boolean> {
+  if (!getTokens().refreshToken) return false;
+
+  // Every tab shares one refresh token, and the backend treats a second use of a rotated token as
+  // theft (revoking every session). A cross-tab lock makes the rotations strictly one at a time;
+  // it is held until the callback's promise settles, i.e. until rotate() has stored the new token.
+  const locked = () =>
+    new Promise<boolean>((resolve) => {
+      void navigator.locks.request("zerostrike-refresh", () => rotate().then(resolve));
+    });
+  refreshInFlight ??= (navigator.locks ? locked() : rotate()).finally(() => {
+    refreshInFlight = null;
+  });
   return refreshInFlight;
 }
 

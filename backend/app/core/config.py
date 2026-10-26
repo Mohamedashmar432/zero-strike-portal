@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 15
-    refresh_token_ttl_days: int = 30
+    # A browser session's absolute lifetime, fixed at sign-in and carried through every rotation, so
+    # an active session still ends. "Remember me" gets the days; an unticked sign-in gets the hours.
+    refresh_token_ttl_days: int = 7
+    session_refresh_ttl_hours: int = 12
 
     cors_origins: list[str] = ["http://localhost:3000"]
 

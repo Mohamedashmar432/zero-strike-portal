@@ -137,7 +137,7 @@ describe("New scan: CI/CD setup", () => {
     // The button component renders the anchor with role="button", so find it by its text.
     const link = (await screen.findByText(/Generate a project token/)).closest("a")!;
     expect(link.getAttribute("href")).toBe("/projects/p1?tab=keys");
-    // A new tab starts signed out (the session is in-memory + this tab's sessionStorage).
+    // Same tab, so Back returns to this wizard step.
     expect(link.getAttribute("target")).toBeNull();
   });
 

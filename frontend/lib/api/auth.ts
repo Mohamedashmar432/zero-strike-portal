@@ -17,10 +17,10 @@ export type TokenPair = {
   expires_in: number;
 };
 
-export function login(email: string, password: string) {
+export function login(email: string, password: string, rememberMe = false) {
   return apiFetch<TokenPair>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, remember_me: rememberMe }),
   });
 }
 

@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Clock, OctagonAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,13 @@ import { useAuth } from "@/providers/auth-provider";
 
 function LoginForm() {
   const next = safeNextPath(useSearchParams().get("next"));
-  const { login, isAuthenticating } = useAuth();
+  const { login, isAuthenticating, user, isRestoringSession } = useAuth();
   const router = useRouter();
+  // One session per browser: a tab that opens /login while signed in goes back to the app rather
+  // than offering a second, parallel sign-in. Signing in as someone else means signing out first.
+  useEffect(() => {
+    if (!isRestoringSession && !isAuthenticating && user) router.replace(next ?? "/dashboard");
+  }, [user, isRestoringSession, isAuthenticating, next, router]);
   // A toast is dismissable and easy to miss — a failed sign-in needs feedback
   // that stays on screen next to the form until you act on it.
   const [formError, setFormError] = useState<string | null>(null);
@@ -34,7 +39,7 @@ function LoginForm() {
     setFormError(null);
     setAwaitingApproval(false);
     try {
-      await login(values.email, values.password);
+      await login(values.email, values.password, values.rememberMe ?? false);
       // `next` brings a user back to what sent them here (the OAuth consent page); only a plain
       // same-origin path is honoured, anything else falls back to the dashboard.
       router.push(next ?? "/dashboard");
@@ -120,6 +125,19 @@ function LoginForm() {
               <p className="font-mono text-[11px] text-destructive">{errors.password.message}</p>
             )}
           </div>
+          <label
+            htmlFor="remember-me"
+            className="flex cursor-pointer items-center gap-2 font-mono text-[11px] text-muted-foreground"
+          >
+            <input
+              id="remember-me"
+              type="checkbox"
+              aria-label="Remember me for 7 days"
+              className="size-3.5 accent-signal"
+              {...register("rememberMe")}
+            />
+            Remember me for 7 days
+          </label>
           <Button type="submit" size="lg" className="w-full" disabled={isAuthenticating}>
             {isAuthenticating ? "Signing in…" : "Sign in"}
           </Button>

@@ -77,7 +77,10 @@ async def login(payload: LoginRequest, request: Request):
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many attempts, try again later")
         raise
     access_token, refresh_token, expires_in = await auth_service.issue_token_pair(
-        user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
+        user,
+        remember_me=payload.remember_me,
+        user_agent=request.headers.get("user-agent"),
+        ip=client_ip(request),
     )
     user.last_login_at = datetime.now(timezone.utc)
     await user.save()
