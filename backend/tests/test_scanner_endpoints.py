@@ -367,3 +367,32 @@ def test_project_scan_list_includes_ci_fields(client):
     assert items[0]["ci_provider"] == "azure_pipelines"
     assert items[0]["ci_build_number"] == "20261022.3"
     assert items[0]["ci_build_url"] == _ADO_BODY["ci_build_url"]
+
+
+def test_swapped_project_keys_are_refused_instead_of_cross_filing_reports(client):
+    """Two pipelines with their API keys swapped must fail loudly, not file each report under the
+    other project. Each repo is claimed by its own project's first scan; a key from the other
+    project is then refused with a message naming the mismatch."""
+    owner = register_and_login(client, email="swap1@zerostrike.dev")
+    a, b = _project(client, _headers(owner), "A"), _project(client, _headers(owner), "B")
+    key_a, key_b = _raw_key(client, _headers(owner), a["id"]), _raw_key(client, _headers(owner), b["id"])
+    repo_a, repo_b = "https://github.com/org/repo-a", "https://github.com/org/repo-b"
+
+    def scan(key, repo):
+        return client.post("/api/v1/scans", json={"repo_url": repo}, headers=_scanner(key))
+
+    assert scan(key_a, repo_a).status_code == 201
+    assert scan(key_b, repo_b).status_code == 201
+
+    r = scan(key_b, repo_a)  # swapped: repo A's pipeline holding project B's key
+    assert r.status_code == 403
+    assert "Project mismatch" in r.json()["detail"] and "'B'" in r.json()["detail"]
+    # Same repo, different spelling, is still recognised.
+    assert scan(key_a, "https://GitHub.com/org/repo-b.git").status_code == 403
+
+    # Own repo keeps working; new repos and repo-less (older scanner) uploads are unaffected.
+    assert scan(key_a, "https://github.com/org/repo-a.git").status_code == 201
+    assert scan(key_a, "https://github.com/org/new-repo").status_code == 201
+    assert client.post("/api/v1/scans", json={}, headers=_scanner(key_b)).status_code == 201
+    # Nothing landed in the wrong project.
+    assert client.get(f"/api/v1/projects/{b['id']}", headers=_headers(owner)).json()["scan_count"] == 2
