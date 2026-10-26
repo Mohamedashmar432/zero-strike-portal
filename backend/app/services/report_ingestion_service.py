@@ -300,36 +300,30 @@ def _completion_summary(findings: list[Finding]) -> str:
 async def _apply_suppression(scan: Scan, findings: list[Finding]) -> int:
     """Mark findings that must not count, in place; returns how many were marked.
 
-    Two sources, checked in this order: a project member's `false_positive` verdict on the same
-    fingerprint *in this project and repo scope* (never another project's), then a rule retired in the
-    active rule pack. Suppressed findings are still stored - a silently missing finding would be an
-    audit hole. Also stamps the scan with the pack version it ran under."""
-    from app.services import project_repo_service, scan_engine_service
+    Two sources, checked in this order: an admin-accepted review (false positive, or accepted risk
+    for a dependency) on the same fingerprint *at the same file* in this project and repo scope --
+    finding_review_service.accepted_exemptions, the same list the scanner gets for the CI gate, so the
+    portal and the pipeline can never disagree -- then a rule retired in the active rule pack.
+    Suppressed findings are still stored -- a silently missing finding would be an audit hole.
+    Also stamps the scan with the pack version it ran under."""
+    from app.services import finding_review_service, project_repo_service, scan_engine_service
     from app.services import project_stats_service as stats_svc
-    from app.models.vulnerability import Vulnerability
 
     pack = await scan_engine_service.active_pack()
     scan.rule_pack_version = pack.version if pack else None
     retired = set(pack.retired_rule_ids) if pack else set()
 
-    fp_fingerprints: set[str] = set()
+    exempt: dict[tuple[str, str], str] = {}
     if any(f.fingerprint for f in findings):
         resolve = stats_svc.repo_key_resolver(await project_repo_service.list_repos(scan.project_id))
-        rows = await Vulnerability.get_pymongo_collection().find(
-            {
-                "project_id": scan.project_id,
-                "repo_scope_key": resolve(scan),
-                "status": "resolved",
-                "resolution_reason": "false_positive",
-            },
-            {"fingerprint": 1},
-        ).to_list(length=None)
-        fp_fingerprints = {r["fingerprint"] for r in rows}
+        for e in await finding_review_service.accepted_exemptions(scan.project_id, resolve(scan)):
+            exempt[(e["fingerprint"], e["file"])] = e["kind"]
 
     n = 0
     for f in findings:
-        if f.fingerprint and f.fingerprint in fp_fingerprints:
-            f.suppressed, f.suppressed_reason = True, "false_positive"
+        kind = exempt.get((f.fingerprint, finding_review_service.normalize_path(f.location.file))) if f.fingerprint else None
+        if kind:
+            f.suppressed, f.suppressed_reason = True, kind
         elif f.rule_id and f.rule_id in retired:
             f.suppressed, f.suppressed_reason = True, "rule_retired"
         else:
@@ -358,7 +352,7 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
 
     findings = [
         _map_finding(scan_id, project_id, f, scan.project_repo_id, report.root_path)
-        for f in report.findings
+        for f in [*report.findings, *(e.finding for e in report.accepted_exemptions)]
     ]
     n_suppressed = await _apply_suppression(scan, findings)
     counted = [f for f in findings if not f.suppressed]

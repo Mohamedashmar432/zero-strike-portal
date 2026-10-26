@@ -118,7 +118,7 @@ def test_list_filters_status_severity_assignee_and_regression_state(client):
     vid = _vuln_id(project["id"], "fp-crit")
     url = f"{VULN_URL.format(project_id=project['id'])}/{vid}/status"
     r = client.patch(
-        url, json={"status": "resolved", "resolution_reason": "false_positive", "resolution_comment": "Test-only code"},
+        url, json={"status": "resolved", "resolution_reason": "fixed", "resolution_comment": "Patched in #42"},
             headers=headers
     )
     assert r.status_code == 200

@@ -12,6 +12,24 @@ export type RegressionState = "new" | "unchanged" | "reopened" | "fixed";
 // Derived server-side (never stored): open | reopened | fixed | dismissed.
 export type FixStatus = "open" | "reopened" | "fixed" | "dismissed";
 
+// backend FindingReview (docs/FINDING_REVIEW.md): a request for a finding to stop blocking CI,
+// decided by a portal admin. Only an "accepted" review exempts the finding, and only at file_path.
+export type ReviewKind = "false_positive" | "accepted_risk";
+export type ReviewStatus = "pending" | "accepted" | "rejected" | "revoked";
+export type FindingReview = {
+  kind: ReviewKind;
+  status: ReviewStatus;
+  file_path: string;
+  requested_by_user_id: string;
+  requested_by_email: string | null;
+  requested_at: string;
+  request_comment: string;
+  reviewed_by_user_id: string | null;
+  reviewed_by_email: string | null;
+  reviewed_at: string | null;
+  review_comment: string | null;
+};
+
 // project_stats_service._UNLINKED -- the sentinel repo_scope_key for scans matching no
 // connected repo. Vulnerability.repo_scope_key uses the same sentinel (see the model's
 // docstring), so this is how the work queue's repo filter and "Unlinked" label recognize it.
@@ -29,6 +47,7 @@ export type Vulnerability = {
   resolution_comment: string | null;
   resolved_by_user_id: string | null;
   resolved_by_email: string | null;
+  review: FindingReview | null;
   assignee_user_id: string | null;
   assignee_email: string | null;
 
@@ -163,12 +182,17 @@ export type VulnerabilityListFilters = {
 export function statusChangeBlockReason(
   status: VulnerabilityStatus,
   reason: ResolutionReason | null,
-  comment: string
+  comment: string,
+  kind: FindingKind | null = null
 ): string | null {
   if (status === "accepted_risk") {
     // Accepting risk has no scanner evidence behind it at all, so it always needs a reason.
     if (comment.trim() === "") return "A comment is required to accept risk.";
     return null;
+  }
+  // A published advisory against the installed version is almost never wrong.
+  if (status === "resolved" && reason === "false_positive" && kind === "sca") {
+    return "Dependency findings can't be marked false positive. Request accepted risk instead.";
   }
   if (status !== "resolved") return null;
   if (!reason) return "Pick a resolution reason.";
@@ -176,12 +200,25 @@ export function statusChangeBlockReason(
   if (reason === "fixed" && comment.trim() === "") {
     return "A comment is required when marking a vulnerability fixed by hand.";
   }
-  // A false-positive verdict silences the finding on every later scan, and the Scan Engine page
-  // shows the comment as evidence, so it has to say why.
+  // A false-positive request goes to a portal admin, who decides from this comment alone.
   if (reason === "false_positive" && comment.trim() === "") {
     return "A comment is required when marking a vulnerability a false positive.";
   }
   return null;
+}
+
+/**
+ * Whether a status change is a request for admin review rather than an immediate change: a false
+ * positive on a code finding, or accepted risk on a dependency finding. Either one, once an admin
+ * accepts it, stops the finding blocking CI -- which is why neither takes effect on its own.
+ */
+export function needsAdminReview(
+  status: VulnerabilityStatus,
+  reason: ResolutionReason | null,
+  kind: FindingKind | null
+): boolean {
+  if (status === "resolved" && reason === "false_positive") return kind !== "sca";
+  return status === "accepted_risk" && kind === "sca";
 }
 
 export function listVulnerabilities(projectId: string, filters: VulnerabilityListFilters = {}) {

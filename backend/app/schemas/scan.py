@@ -9,6 +9,7 @@ from app.core.git_ref import validate_branch_name
 from app.core.repo_url import sanitize_repo_url
 from app.models.scan import CiProvider, ScanStage, ScanStatus
 from app.schemas.dashboard import SeverityCounts
+from app.schemas.finding_review import ExemptionOut
 
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -179,6 +180,10 @@ class ScannerCreateScanResponse(BaseModel):
     status: str
     project_id: str
     project_name: str
+    # Admin-accepted exemptions for this project and repo (docs/FINDING_REVIEW.md). The scanner
+    # moves a finding matching both fingerprint and file out of the counted findings, so the CI gate
+    # skips it. Older scanners ignore the field; the portal suppresses on ingest either way.
+    accepted_exemptions: list[ExemptionOut] = []
 
 
 class ScannerStatusUpdateRequest(BaseModel):

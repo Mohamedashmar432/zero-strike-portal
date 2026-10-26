@@ -93,6 +93,20 @@ EVENTS: tuple[NotificationEvent, ...] = (
         default_email=True,
     ),
     NotificationEvent(
+        key="finding.review_requested",
+        label="Finding review requested",
+        description="A member asked for a finding to stop blocking CI (false positive or accepted risk).",
+        audience="admin",
+        default_email=True,
+    ),
+    NotificationEvent(
+        key="finding.review_decided",
+        label="Finding review decided",
+        description="An admin accepted, rejected or revoked your request to exempt a finding.",
+        audience="project",
+        default_email=True,
+    ),
+    NotificationEvent(
         key="scanner.unhealthy",
         label="Scanner unhealthy",
         description="The scanner binary is missing or failing to run.",

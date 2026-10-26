@@ -22,6 +22,7 @@ from app.models.user import User
 from app.models.vulnerability import Vulnerability
 from app.schemas.common import Page
 from app.schemas.vulnerability import (
+    FindingReviewOut,
     FixedViaPullRequest,
     RegressionBucket,
     ScanRegressionResponse,
@@ -36,6 +37,7 @@ from app.schemas.vulnerability import (
 )
 from app.services import (
     audit_service,
+    finding_review_service,
     pr_status_service,
     project_repo_service,
     project_service,
@@ -89,6 +91,7 @@ def _to_out(v: Vulnerability, emails: dict[str, str]) -> VulnerabilityOut:
         resolution_comment=v.resolution_comment,
         resolved_by_user_id=v.resolved_by_user_id,
         resolved_by_email=emails.get(v.resolved_by_user_id or ""),
+        review=_review_out(v, emails),
         assignee_user_id=v.assignee_user_id,
         assignee_email=emails.get(v.assignee_user_id or ""),
         current_severity=v.current_severity,
@@ -121,6 +124,17 @@ def _to_out(v: Vulnerability, emails: dict[str, str]) -> VulnerabilityOut:
     )
 
 
+def _review_out(v: Vulnerability, emails: dict[str, str]) -> FindingReviewOut | None:
+    r = v.review
+    if r is None:
+        return None
+    return FindingReviewOut(
+        **r.model_dump(),
+        requested_by_email=emails.get(r.requested_by_user_id),
+        reviewed_by_email=emails.get(r.reviewed_by_user_id or ""),
+    )
+
+
 async def _get_vuln_or_404(project_id: str, vulnerability_id: str) -> Vulnerability:
     v = await Vulnerability.get(vulnerability_id)
     if not v or v.project_id != project_id:
@@ -140,6 +154,10 @@ def _emails_for(rows: list[Vulnerability]) -> set[str]:
             ids.add(v.assignee_user_id)
         if v.resolved_by_user_id:
             ids.add(v.resolved_by_user_id)
+        if v.review:
+            ids.add(v.review.requested_by_user_id)
+            if v.review.reviewed_by_user_id:
+                ids.add(v.review.reviewed_by_user_id)
     return ids
 
 
@@ -367,6 +385,17 @@ async def update_vulnerability_status(
     role = await project_service.require_member(project_id, user)
     vuln = await _get_vuln_or_404(project_id, vulnerability_id)
 
+    # A verdict that would stop the finding blocking CI is a *request* for a portal admin to review
+    # (docs/FINDING_REVIEW.md): false positive on code findings, accepted risk on dependency findings.
+    # The finding keeps its status, and keeps blocking, until an admin accepts.
+    wants_fp = payload.status == "resolved" and payload.resolution_reason == "false_positive"
+    if wants_fp or (payload.status == "accepted_risk" and vuln.current_kind == "sca"):
+        vuln = await finding_review_service.request_review(
+            vuln, "false_positive" if wants_fp else "accepted_risk", payload.resolution_comment or "", user
+        )
+        emails = await _email_map(_emails_for([vuln]))
+        return _to_out(vuln, emails)
+
     now = datetime.now(timezone.utc)
     before = {
         "status": vuln.status,
@@ -406,13 +435,6 @@ async def update_vulnerability_status(
                 status.HTTP_400_BAD_REQUEST,
                 "resolution_comment is required when manually marking a vulnerability fixed",
             )
-        # A false-positive verdict silences this fingerprint on every later scan of the repo, and
-        # the Scan Engine page shows the comment as evidence -- so it has to say why.
-        if payload.resolution_reason == "false_positive" and not (payload.resolution_comment or "").strip():
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "resolution_comment is required when marking a vulnerability a false positive",
-            )
         vuln.status = "resolved"
         vuln.resolution_reason = payload.resolution_reason
         vuln.resolution_comment = payload.resolution_comment
@@ -448,9 +470,6 @@ async def update_vulnerability_status(
         target_id=str(vuln.id),
         metadata=changed,
     )
-    if vuln.resolution_reason == "false_positive" and "resolution_reason" in changed:
-        await scan_engine_service.check_rule_noisy(vuln.current_rule_id)
-
     emails = await _email_map(_emails_for([vuln]))
     return _to_out(vuln, emails)
 

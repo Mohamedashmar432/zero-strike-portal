@@ -11,6 +11,7 @@ import {
   Cog,
   Plug,
   ScrollText,
+  ShieldCheck,
   Settings,
   Sparkles,
   User,
@@ -26,6 +27,7 @@ export const mainLinks = [
 export const adminLinks = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/auto-fix-requests", label: "Project Requests", icon: Inbox },
+  { href: "/admin/finding-reviews", label: "Finding Reviews", icon: ShieldCheck },
   { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
   { href: "/admin/operations", label: "Operations", icon: Gauge },
   { href: "/admin/scanner-status", label: "Scanner Status", icon: Activity },

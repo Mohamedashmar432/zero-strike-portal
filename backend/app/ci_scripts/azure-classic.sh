@@ -93,6 +93,10 @@ if [ -z "$SCAN_ID" ]; then
   err "The portal did not return a scan id."
   exit 2
 fi
+# Findings a portal admin accepted (false positive / accepted dependency risk): the scanner still
+# reports them but leaves them out of the counts the gate below reads. An older scanner ignores this.
+jq '.accepted_exemptions // []' register.json > "$WORK/exemptions.json"
+export ZEROSTRIKE_ACCEPTED_EXEMPTIONS_FILE="$WORK/exemptions.json"
 
 # 3. Scan the checked-out sources locally (nothing is sent until the upload below).
 rc=0

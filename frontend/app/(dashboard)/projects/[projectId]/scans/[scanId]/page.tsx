@@ -238,7 +238,11 @@ export function FindingItem({
         {finding.severity && <SeverityBadge severity={finding.severity} />}
         {finding.suppressed && (
           <Badge variant="outline" className="text-[10px]">
-            {finding.suppressed_reason === "rule_retired" ? "Suppressed: rule retired" : "Suppressed: false positive"}
+            {finding.suppressed_reason === "rule_retired"
+              ? "Suppressed: rule retired"
+              : finding.suppressed_reason === "accepted_risk"
+                ? "Suppressed: accepted risk"
+                : "Suppressed: false positive"}
           </Badge>
         )}
         {adjustedSeverity && (
@@ -887,7 +891,7 @@ export default function ScanDetailPage() {
           {scan.suppressed_count > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2 text-xs text-muted-foreground">
               <span>
-                {scan.suppressed_count} suppressed as false positive or retired rule. They are kept for the
+                {scan.suppressed_count} suppressed: admin-accepted false positive or accepted risk, or a retired rule. They are kept for the
                 audit trail and are not counted in the totals above.
               </span>
               <Button

@@ -112,6 +112,15 @@ try {
 }
 $scanId = [string]$registered.scan_id
 if (-not $scanId) { Exit-Task 'The portal did not return a scan id.' }
+# Findings a portal admin accepted (false positive / accepted dependency risk): the scanner still
+# reports them but leaves them out of the counts the gate below reads. An older scanner ignores this.
+# -InputObject keeps a one-item list an array, and the BOM-less encoding matters: 5.1's UTF-8 writes
+# a BOM, which the scanner's JSON reader rejects.
+$exemptions = @($registered.accepted_exemptions | Where-Object { $_ })
+$exemptionsFile = Join-Path $work 'exemptions.json'
+[IO.File]::WriteAllText($exemptionsFile, (ConvertTo-Json -InputObject $exemptions -Depth 4 -Compress),
+  (New-Object Text.UTF8Encoding $false))
+$env:ZEROSTRIKE_ACCEPTED_EXEMPTIONS_FILE = $exemptionsFile
 
 # 3. Scan the checked-out sources locally (nothing is sent until the upload below). 'Continue' so a
 #    line on the scanner's stderr is not turned into a terminating error by Windows PowerShell 5.1.

@@ -27,6 +27,7 @@ export const queryKeys = {
         : (["admin", "auto-fix-quota-requests", status] as const),
     users: (page?: number) =>
       page === undefined ? (["admin", "users"] as const) : (["admin", "users", page] as const),
+    findingReviews: (status: string) => ["admin", "finding-reviews", status] as const,
   },
   dashboard: {
     stats: () => ["dashboard", "stats"] as const,

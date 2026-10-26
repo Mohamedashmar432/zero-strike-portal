@@ -145,6 +145,11 @@ class GoDiagnosticIn(BaseModel):
     location: GoLocationIn | None = Field(None, alias="Location")
 
 
+class GoExemptedIn(BaseModel):
+    model_config = _go
+    finding: GoFindingIn = Field(alias="Finding")
+
+
 class GoReportIn(BaseModel):
     model_config = _go
     scanner_scan_id: str | None = Field(None, alias="ScanID")
@@ -161,6 +166,11 @@ class GoReportIn(BaseModel):
     stats: GoStatsIn = Field(default_factory=GoStatsIn, alias="Stats")
     diagnostics: Annotated[list[GoDiagnosticIn], BeforeValidator(_nz_list)] = Field(
         default_factory=list, alias="Diagnostics"
+    )
+    # Findings the scanner kept out of `Findings` because an admin-accepted exemption matched them
+    # (docs/FINDING_REVIEW.md). Ingested as suppressed so the scan's record stays complete.
+    accepted_exemptions: Annotated[list[GoExemptedIn], BeforeValidator(_nz_list)] = Field(
+        default_factory=list, alias="AcceptedExemptions"
     )
 
 

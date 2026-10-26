@@ -181,6 +181,17 @@ three-step wizard that used to ask them is gone. A *configured* narrative prefer
 deterministic when no AI provider is active — the verdicts are identical either way — while an
 explicit `depth: "with_ai_narrative"` still 409s.
 
+**Finding review: admin-accepted CI exemptions** (`services/finding_review_service.py`,
+`routers/finding_reviews.py`; see `docs/FINDING_REVIEW.md`): a member's false positive (code
+findings) or accepted risk (dependency findings, which can never be false positives) is a *request*
+on `Vulnerability.review`. It changes nothing until a portal admin accepts it, and an admin can revoke.
+`accepted_exemptions()` is the single source for both portal suppression on ingest and the scanner's
+create-scan response, so the portal and the CI gate cannot disagree. Two rules must not be softened:
+an exemption matches **fingerprint AND repo-relative file** (the fingerprint has no path, so
+fingerprint-only would silence the same snippet in other files), and the scanner nests exempted
+findings under `AcceptedExemptions[].Finding` because customers' unchanged YAML gates grep
+`^      "Severity"` at exactly six spaces. The scanner's `TestReportLayoutContract` locks that.
+
 **Audit log** (`services/audit_service.py`, `routers/audit_logs.py`): `record()` is the only
 writer and rows are immutable, so all read-side shaping happens on the way out.
 `classify(action, project_id)` buckets a row as `privilege` (sign-ins, roles, members, API keys,

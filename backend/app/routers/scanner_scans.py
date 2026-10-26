@@ -19,11 +19,13 @@ from app.schemas.report import GoReportIn
 from app.schemas.scan import ScannerCreateScanRequest, ScannerCreateScanResponse, ScannerStatusUpdateRequest
 from app.services import (
     audit_service,
+    finding_review_service,
     project_repo_service,
     project_service,
     report_ingestion_service,
     scan_service,
 )
+from app.services import project_stats_service as stats_svc
 
 router = APIRouter(tags=["scanner"])
 
@@ -119,8 +121,16 @@ async def scanner_create_scan(
             "ci_provider": payload.ci_provider or "",
         },
     )
+    # Same repo-scope resolution report ingestion uses, so the CI gate and the portal's counts are
+    # computed from the identical exemption list.
+    resolve = stats_svc.repo_key_resolver(await project_repo_service.list_repos(ctx.project_id))
+    exemptions = await finding_review_service.accepted_exemptions(ctx.project_id, resolve(scan))
     return ScannerCreateScanResponse(
-        scan_id=str(scan.id), status="pending", project_id=ctx.project_id, project_name=project.name
+        scan_id=str(scan.id),
+        status="pending",
+        project_id=ctx.project_id,
+        project_name=project.name,
+        accepted_exemptions=exemptions,
     )
 
 

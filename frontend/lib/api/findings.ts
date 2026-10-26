@@ -59,7 +59,7 @@ export type Finding = {
   } | null;
   // Stored but not counted: a false-positive verdict or a retired rule (see the Scan Engine).
   suppressed: boolean;
-  suppressed_reason: "false_positive" | "rule_retired" | null;
+  suppressed_reason: "false_positive" | "accepted_risk" | "rule_retired" | null;
   created_at: string;
 };
 

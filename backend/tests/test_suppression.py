@@ -10,7 +10,7 @@ from app.models.project import Project
 from app.models.report import Report
 from app.models.scan import Scan
 from app.models.scan_engine import RulePackVersion
-from app.models.vulnerability import Vulnerability
+from app.models.vulnerability import FindingReview, Vulnerability
 from app.schemas.report import GoReportIn
 from app.services import report_ingestion_service as ingest_svc
 from tests.test_auth_flow import register_and_login
@@ -39,10 +39,22 @@ async def _ingest(project_id: str, report: GoReportIn | None = None) -> Scan:
 
 
 async def _tag_false_positive(project_id: str, fingerprint: str) -> None:
+    """An admin-accepted false-positive review -- the only verdict that suppresses (FINDING_REVIEW.md)."""
     v = await Vulnerability.find_one(
         Vulnerability.project_id == project_id, Vulnerability.fingerprint == fingerprint
     )
+    now = datetime.now(timezone.utc)
     v.status, v.resolution_reason, v.resolution_comment = "resolved", "false_positive", "test-only helper"
+    v.review = FindingReview(
+        kind="false_positive",
+        status="accepted",
+        file_path=v.current_location.file,
+        requested_by_user_id="u1",
+        requested_at=now,
+        request_comment="test-only helper",
+        reviewed_by_user_id="admin1",
+        reviewed_at=now,
+    )
     await v.save()
 
 

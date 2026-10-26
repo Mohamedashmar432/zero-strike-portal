@@ -24,6 +24,7 @@ from app.routers import (
     admin_ai_analytics,
     admin_data,
     auto_fix_quota,
+    finding_reviews,
     admin_downloads,
     admin_mcp_tokens,
     oauth_consent,
@@ -57,6 +58,7 @@ from app.services import (
     ai_job_queue_service,
     ai_remediation_queue_service,
     cloud_scan_service,
+    finding_review_service,
     pricing_service,
     notification_service,
     compliance_queue_service,
@@ -76,6 +78,9 @@ async def lifespan(app: FastAPI):
     # Scans the scanner CLI uploads were once typed "local"; they all come from pipelines, so
     # they are CI/CD now. Idempotent, and a no-op once the old rows are gone.
     await Scan.get_pymongo_collection().update_many({"scan_type": "local"}, {"$set": {"scan_type": "cicd"}})
+    # False positives marked before admin review existed were never reviewed: back to blocking as
+    # pending requests (docs/FINDING_REVIEW.md). Idempotent -- a migrated row carries a review.
+    await finding_review_service.migrate_unreviewed_false_positives()
     if not cloud_scan_service.scanner_available():
         # Loud and immediate on boot, rather than a surprise buried in the first cloud scan's
         # error_message — every cloud scan will fail until SCANNER_BINARY_PATH is fixed and the
@@ -179,6 +184,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_scan_engine.router, prefix="/api/v1")
     app.include_router(admin_data.router, prefix="/api/v1")
     app.include_router(auto_fix_quota.router, prefix="/api/v1")
+    app.include_router(finding_reviews.router, prefix="/api/v1")
     app.include_router(report_templates.router, prefix="/api/v1")
     app.include_router(ai_analysis.router, prefix="/api/v1")
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")

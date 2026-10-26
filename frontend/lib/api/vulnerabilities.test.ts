@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fixedViaPrLabel, statusChangeBlockReason } from "./vulnerabilities";
+import { fixedViaPrLabel, needsAdminReview, statusChangeBlockReason } from "./vulnerabilities";
 
 test("fixedViaPrLabel names the PR only when there is one", () => {
   const pr = { pr_number: 12, pr_url: null, pr_provider: "github", merged_at: null, merge_commit: null };
@@ -48,5 +48,23 @@ describe("statusChangeBlockReason", () => {
     expect(statusChangeBlockReason("resolved", "duplicate", "")).toBeNull();
     expect(statusChangeBlockReason("resolved", "wont_fix", "")).toBeNull();
     expect(statusChangeBlockReason("resolved", "not_reproducible", "")).toBeNull();
+  });
+});
+
+describe("admin-reviewed exemptions", () => {
+  test("refuses a false positive on a dependency finding, pointing at accepted risk", () => {
+    expect(statusChangeBlockReason("resolved", "false_positive", "not reachable", "sca")).toMatch(
+      /accepted risk/
+    );
+    expect(statusChangeBlockReason("resolved", "false_positive", "not reachable", "sast")).toBeNull();
+  });
+
+  test("marks exactly the changes that wait for a portal admin", () => {
+    expect(needsAdminReview("resolved", "false_positive", "sast")).toBe(true);
+    expect(needsAdminReview("accepted_risk", null, "sca")).toBe(true);
+    // A code finding's accepted risk and every other transition apply immediately.
+    expect(needsAdminReview("accepted_risk", null, "sast")).toBe(false);
+    expect(needsAdminReview("resolved", "fixed", "sast")).toBe(false);
+    expect(needsAdminReview("resolved", "false_positive", "sca")).toBe(false);
   });
 });

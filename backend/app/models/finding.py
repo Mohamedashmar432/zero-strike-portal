@@ -98,7 +98,7 @@ class Finding(Document):
     # Stored but not counted: a project member's false-positive verdict, or a retired rule. See
     # NOT_SUPPRESSED and report_ingestion_service._apply_suppression.
     suppressed: bool = False
-    suppressed_reason: Literal["false_positive", "rule_retired"] | None = None
+    suppressed_reason: Literal["false_positive", "accepted_risk", "rule_retired"] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
