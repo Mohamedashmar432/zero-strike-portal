@@ -48,6 +48,10 @@ p  { line-height: 1.5; margin-bottom: 8px; color: #333333; }
 table.data { width: 100%; margin-bottom: 14px; font-size: 9pt; }
 table.data th { background: #0f3460; color: #ffffff; padding: 6px 8px; text-align: left; font-weight: bold; }
 table.data td { padding: 5px 8px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
+table.dep { width: 100%; margin-top: 5px; font-size: 9pt; background: #f7f8fc; }
+table.dep td { padding: 3px 8px; vertical-align: top; }
+table.dep td.k { width: 18%; color: #666666; }
+.fix { color: #1e7d4f; }
 
 .badge { font-size: 8pt; font-weight: bold; }
 .badge-CRITICAL { background: #fde8ea; color: #e63946; }
@@ -199,14 +203,12 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
 {% endif %}
 <p class="finding-msg">{{ f.message }}</p>
 {% if f.dependency %}{% set d = f.dependency %}
-<div class="finding-meta wrap">
-  Package: <b>{{ d.package or "—" }}</b>{% if d.ecosystem %} ({{ d.ecosystem }}){% endif %}
-  &nbsp;&middot;&nbsp; Installed: <b>{{ d.installed_version or "—" }}</b>
-  &nbsp;&middot;&nbsp; Fixed in: <b>{{ d.fixed_version or "no fixed version known" }}</b>
-  {% if d.vulnerable_range %} &nbsp;&middot;&nbsp; Affected: <b>{{ d.vulnerable_range }}</b>{% endif %}
-  {% if d.direct is not none %} &nbsp;&middot;&nbsp; <b>{{ "Direct" if d.direct else "Transitive" }}</b> dependency{% endif %}
-  {% if d.advisory_ids %}<br>Advisories: <b>{{ d.advisory_ids | join(", ") }}</b>{% endif %}
-</div>
+<table class="dep">
+  <tr><td class="k">Package</td><td><b>{{ d.package or "—" }}</b>{% if d.ecosystem %} ({{ d.ecosystem }}){% endif %}{% if d.direct is not none %} &middot; {{ "direct" if d.direct else "transitive" }} dependency{% endif %}</td></tr>
+  <tr><td class="k">Installed</td><td><b>{{ d.installed_version or "—" }}</b>{% if d.vulnerable_range %} &nbsp;(affected: {{ d.vulnerable_range }}){% endif %}</td></tr>
+  <tr><td class="k">Fixed in</td><td>{% if d.fixed_version %}<b class="fix">{{ d.fixed_version }}</b>{% else %}no fixed version known{% endif %}</td></tr>
+  {% if d.advisory_ids %}<tr><td class="k">Advisories</td><td class="wrap">{{ d.advisory_ids | join(", ") }}</td></tr>{% endif %}
+</table>
 {% endif %}
 {% if f.evidence and f.evidence[0].snippet %}
 <pre class="code-block">{{ f.evidence[0].snippet | snippet }}</pre>
@@ -241,12 +243,14 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
 {% set section_num.n = section_num.n + 1 %}
 {% if dep_findings %}
 <table class="data">
-  <tr><th width="40%">Vulnerability</th><th width="16%">Severity</th><th width="44%">Manifest File</th></tr>
-  {% for f in dep_findings %}
+  <tr><th width="34%">Package</th><th width="14%">Installed</th><th width="14%">Fixed in</th><th width="12%">Severity</th><th width="26%">Advisory</th></tr>
+  {% for f in dep_findings %}{% set d = f.dependency %}
   <tr>
-    <td>{{ f.rule_name or f.rule_id or "—" }}</td>
+    <td><b>{{ d.package if d and d.package else (f.rule_name or f.rule_id or "—") }}</b>{% if d and d.ecosystem %} ({{ d.ecosystem }}){% endif %}</td>
+    <td style="font-family:Courier,monospace;font-size:8.5pt;">{{ d.installed_version if d and d.installed_version else "—" }}</td>
+    <td style="font-family:Courier,monospace;font-size:8.5pt;">{% if d and d.fixed_version %}<b class="fix">{{ d.fixed_version }}</b>{% else %}no fix known{% endif %}</td>
     <td><span class="badge badge-{{ f.severity | upper }}">&nbsp;{{ f.severity | upper }}&nbsp;</span></td>
-    <td class="wrap" style="font-family:Courier,monospace;font-size:8pt;">{{ f.dependency.manifest if f.dependency else f.location.file }}</td>
+    <td style="font-size:8pt;">{{ d.advisory_ids | join(", ") if d and d.advisory_ids else "—" }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -278,7 +282,7 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
   {% for f in rem_findings %}
   <tr>
     <td>{{ loop.index }}</td>
-    <td>{{ (f.rule_name or f.rule_id or "Untitled finding") | truncate(55) }}</td>
+    <td>{{ (f.rule_name or f.rule_id or "Untitled finding") | truncate(55) }}{% if f.dependency and f.dependency.package %}: <b>{{ f.dependency.package }} {{ f.dependency.installed_version or "" }}</b>{% endif %}</td>
     <td><b>{{ f.priority_score if f.priority_score is not none else "—" }}/10</b></td>
     <td style="font-size:8pt;">{{ (f.owasp | join(", ")) | truncate(20) if f.owasp else "—" }}</td>
     <td style="font-size:8pt;">{{ (f.remediation or "—") | truncate(100) }}</td>

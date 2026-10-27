@@ -227,10 +227,11 @@ def test_executive_template_names_the_vulnerable_package_and_its_fix_version():
     )
 
     html = pdf_report_service.render_scan_report_html(scan, report, [finding], "executive")
-    assert "Package: <b>pillow</b> (PyPI)" in html
-    assert "Installed: <b>9.0.0</b>" in html
-    assert "Fixed in: <b>10.0.1</b>" in html
-    assert "GHSA-0000-0000-0000" in html
+    # Both the finding card and the Dependency Risks table name the package and both versions.
+    assert html.count("<b>pillow</b> (PyPI)") == 2
+    assert html.count(">9.0.0<") == 2
+    assert html.count('<b class="fix">10.0.1</b>') == 2
+    assert html.count("GHSA-0000-0000-0000") == 2
 
 
 def test_build_report_filename_uses_project_repo_and_scan_date():
