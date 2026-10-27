@@ -171,16 +171,19 @@ async def list_projects(
 ):
     if user.role == "admin":
         total = await Project.count()
-        projects = await Project.find_all().skip((page - 1) * page_size).limit(page_size).to_list()
+        # Newest first: unsorted, a new project fell onto a page the list UI never requests.
+        projects = (
+            await Project.find_all().sort(-Project.id).skip((page - 1) * page_size).limit(page_size).to_list()
+        )
         items = [_to_project_response(p, "admin") for p in projects]
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     memberships = await ProjectMember.find(ProjectMember.user_id == str(user.id)).to_list()
     role_by_project = {m.project_id: m.role for m in memberships}
     total = len(role_by_project)
-    project_ids = list(role_by_project.keys())[(page - 1) * page_size : (page - 1) * page_size + page_size]
+    project_ids = sorted(role_by_project, reverse=True)[(page - 1) * page_size : (page - 1) * page_size + page_size]
     object_ids = [PydanticObjectId(pid) for pid in project_ids]
-    projects = await Project.find(In(Project.id, object_ids)).to_list() if object_ids else []
+    projects = await Project.find(In(Project.id, object_ids)).sort(-Project.id).to_list() if object_ids else []
     items = [_to_project_response(p, role_by_project[str(p.id)]) for p in projects]
     return Page(items=items, total=total, page=page, page_size=page_size)
 

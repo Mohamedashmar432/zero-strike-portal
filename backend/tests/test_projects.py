@@ -41,6 +41,19 @@ def test_list_projects_scoped_to_membership(client):
     assert body["items"] == []
 
 
+def test_list_projects_newest_first_so_a_new_project_is_on_page_one(client):
+    # Unsorted, project #21 landed on page 2, which the Projects page never requests.
+    member = _headers(register_and_login(client, email="many@zerostrike.dev"))
+    ids = [_create_project(client, member, name=f"P{i}")["id"] for i in range(3)]
+
+    page = client.get("/api/v1/projects?page=1&page_size=2", headers=member).json()
+    assert [p["id"] for p in page["items"]] == [ids[2], ids[1]]
+
+    admin = _admin_headers(client)
+    page = client.get("/api/v1/projects?page=1&page_size=1", headers=admin).json()
+    assert page["items"][0]["id"] == ids[2]
+
+
 def test_admin_sees_all_projects(client):
     owner = register_and_login(client, email="owner2@zerostrike.dev")
     created = _create_project(client, _headers(owner))

@@ -83,7 +83,8 @@ export function hasCompletedScan(a?: ProjectScanActivity): boolean {
   return !!a?.repos.some((g) => g.scans.some((s) => s.status === "completed"));
 }
 
-export function listProjects(page = 1, pageSize = 20) {
+// ponytail: list pages render one page, so default to the backend max; add a pager past 100 projects.
+export function listProjects(page = 1, pageSize = 100) {
   return apiFetch<Page<Project>>(`/projects?page=${page}&page_size=${pageSize}`);
 }
 

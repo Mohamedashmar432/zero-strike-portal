@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the real scanner (CGO on; a CGO-off build finds nothing)
-        run: git clone --depth 1 --branch v0.38.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
+        run: git clone --depth 1 --branch v0.40.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
       - uses: actions/setup-go@v5
         with:
           go-version-file: scanner/go.mod
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the real scanner (CGO on; the image ships MinGW-w64 gcc)
-        run: git clone --depth 1 --branch v0.38.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
+        run: git clone --depth 1 --branch v0.40.0 https://github.com/Mohamedashmar432/zero-strike-SAST-engine.git scanner
       - uses: actions/setup-go@v5
         with:
           go-version-file: scanner/go.mod
