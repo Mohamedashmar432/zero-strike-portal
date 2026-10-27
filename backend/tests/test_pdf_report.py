@@ -189,6 +189,50 @@ def test_executive_template_remediation_plan_handles_findings_with_no_priority_s
     assert "NEW-1" in html
 
 
+def test_executive_template_names_the_vulnerable_package_and_its_fix_version():
+    # The advisory title alone ("Pillow: Heap buffer overflow ...") never said which version is
+    # installed or what to upgrade to.
+    from datetime import datetime, timezone
+
+    from app.models.finding import DependencyEmbedded, Finding, LocationEmbedded
+    from app.models.report import Report, ScanStatsEmbedded
+    from app.models.scan import Scan
+    from app.services import pdf_report_service
+
+    now = datetime.now(timezone.utc)
+    scan = Scan(project_id="p1", scan_type="cloud", created_at=now, updated_at=now)
+    report = Report(
+        scan_id="s1",
+        project_id="p1",
+        stats=ScanStatsEmbedded(by_severity={"critical": 1}, by_kind={"sca": 1}),
+        json_uploaded_at=now,
+    )
+    finding = Finding(
+        scan_id="s1",
+        project_id="p1",
+        rule_id="SCA-VULN",
+        rule_name="Vulnerable Dependency",
+        severity="critical",
+        kind="sca",
+        message="Pillow: Heap buffer overflow in ImagingJpegDecode",
+        location=LocationEmbedded(file="requirements.txt"),
+        dependency=DependencyEmbedded(
+            ecosystem="PyPI",
+            package="pillow",
+            installed_version="9.0.0",
+            fixed_version="10.0.1",
+            advisory_ids=["GHSA-0000-0000-0000"],
+            direct=True,
+        ),
+    )
+
+    html = pdf_report_service.render_scan_report_html(scan, report, [finding], "executive")
+    assert "Package: <b>pillow</b> (PyPI)" in html
+    assert "Installed: <b>9.0.0</b>" in html
+    assert "Fixed in: <b>10.0.1</b>" in html
+    assert "GHSA-0000-0000-0000" in html
+
+
 def test_build_report_filename_uses_project_repo_and_scan_date():
     from datetime import datetime, timezone
 

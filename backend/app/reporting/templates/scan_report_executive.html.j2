@@ -198,6 +198,16 @@ pre.code-block { background: #0d1b2a; color: #e2e8f0; font-family: Courier, mono
 <div class="finding-loc wrap">{{ f.location.file }}{% if f.location.start_line %}:{{ f.location.start_line }}{% endif %}</div>
 {% endif %}
 <p class="finding-msg">{{ f.message }}</p>
+{% if f.dependency %}{% set d = f.dependency %}
+<div class="finding-meta wrap">
+  Package: <b>{{ d.package or "—" }}</b>{% if d.ecosystem %} ({{ d.ecosystem }}){% endif %}
+  &nbsp;&middot;&nbsp; Installed: <b>{{ d.installed_version or "—" }}</b>
+  &nbsp;&middot;&nbsp; Fixed in: <b>{{ d.fixed_version or "no fixed version known" }}</b>
+  {% if d.vulnerable_range %} &nbsp;&middot;&nbsp; Affected: <b>{{ d.vulnerable_range }}</b>{% endif %}
+  {% if d.direct is not none %} &nbsp;&middot;&nbsp; <b>{{ "Direct" if d.direct else "Transitive" }}</b> dependency{% endif %}
+  {% if d.advisory_ids %}<br>Advisories: <b>{{ d.advisory_ids | join(", ") }}</b>{% endif %}
+</div>
+{% endif %}
 {% if f.evidence and f.evidence[0].snippet %}
 <pre class="code-block">{{ f.evidence[0].snippet | snippet }}</pre>
 {% endif %}

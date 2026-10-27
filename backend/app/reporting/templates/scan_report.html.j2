@@ -123,7 +123,9 @@
 <div class="finding-section-label">Dependency detail</div>
 <div class="finding-meta wrap">
   {{ f.dependency.ecosystem or "-" }} package {{ f.dependency.package or "-" }} {{ f.dependency.installed_version or "" }}
-  {% if f.dependency.fixed_version %} &rarr; fix in {{ f.dependency.fixed_version }}{% endif %}
+  &rarr; {% if f.dependency.fixed_version %}fix in {{ f.dependency.fixed_version }}{% else %}no fixed version known{% endif %}
+  {% if f.dependency.vulnerable_range %} &middot; affected {{ f.dependency.vulnerable_range }}{% endif %}
+  {% if f.dependency.direct is not none %} &middot; {{ "direct" if f.dependency.direct else "transitive" }}{% endif %}
   {% if f.dependency.advisory_ids %} &middot; {{ f.dependency.advisory_ids|join(", ") }}{% endif %}
 </div>
 {% endif %}

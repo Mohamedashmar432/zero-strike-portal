@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Download, Loader2, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api/client";
 import { AiStatusBadge } from "@/components/scans/ai-status-badge";
@@ -301,6 +301,7 @@ export function FindingItem({
               )}
               <p className="mt-1 text-sm">{finding.rationale || finding.message}</p>
             </div>
+            {finding.dependency && <DependencyDetails dep={finding.dependency} />}
             {finding.remediation && (
               <div>
                 <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -417,6 +418,39 @@ export function FindingItem({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** What a dependency finding is about: the advisory text alone never names the package or the fix version. */
+function DependencyDetails({ dep }: { dep: NonNullable<Finding["dependency"]> }) {
+  const rows: [string, React.ReactNode][] = [
+    ["Package", dep.ecosystem ? `${dep.package ?? "—"} (${dep.ecosystem})` : (dep.package ?? "—")],
+    ["Installed", dep.installed_version ?? "—"],
+    [
+      "Fixed in",
+      dep.fixed_version ? (
+        <span className="text-primary">{dep.fixed_version}</span>
+      ) : (
+        <span className="text-muted-foreground">no fixed version known</span>
+      ),
+    ],
+  ];
+  if (dep.vulnerable_range) rows.push(["Affected", dep.vulnerable_range]);
+  if (dep.direct != null) rows.push(["Type", dep.direct ? "Direct" : "Transitive"]);
+  if (dep.manifest) rows.push(["Manifest", dep.manifest]);
+  if (dep.advisory_ids.length) rows.push(["Advisories", dep.advisory_ids.join(", ")]);
+  return (
+    <div>
+      <h6 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Dependency</h6>
+      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        {rows.map(([label, value]) => (
+          <Fragment key={label}>
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="font-mono break-all">{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
     </div>
   );
 }
