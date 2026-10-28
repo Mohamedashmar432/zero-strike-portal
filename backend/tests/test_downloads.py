@@ -4,6 +4,9 @@ import hashlib
 import pytest
 from fastapi import HTTPException
 
+from app.core.config import settings
+from app.models.notification import Notification
+from app.models.scanner_binary import ScannerBinary
 from app.models.user import User
 from app.services import download_service
 from tests.test_auth_flow import register_and_login
@@ -91,8 +94,18 @@ def test_download_invalid_os_arch_is_400(client):
     assert r.status_code == 400
 
 
-def test_publish_prunes_versions_beyond_retention(client):
+def test_publish_keeps_only_the_newest_version_by_default(client):
     headers = _admin_headers(client, email="dlAdmin5@zerostrike.dev")
+    _publish(client, headers, "v1.0.0", "linux", "amd64", b"v1-bytes")
+    _publish(client, headers, "v2.0.0", "linux", "amd64", b"v2-bytes")
+
+    assert client.get("/api/v1/downloads/zerostrike/v1.0.0/linux-amd64").status_code == 404
+    assert client.get("/api/v1/downloads/zerostrike/v2.0.0/linux-amd64").status_code == 200
+
+
+def test_retention_count_is_configurable(client, monkeypatch):
+    monkeypatch.setattr(settings, "scanner_binary_retention_count", 2)
+    headers = _admin_headers(client, email="dlAdminRet@zerostrike.dev")
     _publish(client, headers, "v1.0.0", "linux", "amd64", b"v1-bytes")
     _publish(client, headers, "v2.0.0", "linux", "amd64", b"v2-bytes")
     _publish(client, headers, "v3.0.0", "linux", "amd64", b"v3-bytes")
@@ -100,6 +113,61 @@ def test_publish_prunes_versions_beyond_retention(client):
     assert client.get("/api/v1/downloads/zerostrike/v1.0.0/linux-amd64").status_code == 404
     assert client.get("/api/v1/downloads/zerostrike/v2.0.0/linux-amd64").status_code == 200
     assert client.get("/api/v1/downloads/zerostrike/v3.0.0/linux-amd64").status_code == 200
+
+
+def _drop_blob(version, os_, arch):
+    """Delete only the GridFS file, leaving the metadata row dangling (the production failure)."""
+
+    async def go():
+        doc = await ScannerBinary.find_one(
+            ScannerBinary.version == version, ScannerBinary.os == os_, ScannerBinary.arch == arch
+        )
+        await download_service._bucket().delete(doc.gridfs_file_id)
+
+    asyncio.run(go())
+
+
+def test_missing_blob_is_a_404_and_alerts_admins_once(client):
+    download_service._alerted_missing.clear()
+    headers = _admin_headers(client, email="dlAdminMissing@zerostrike.dev")
+    _publish(client, headers, "v0.50.0", "linux", "amd64", b"bytes")
+    _drop_blob("v0.50.0", "linux", "amd64")
+
+    for _ in range(3):  # a CI runner retrying must not mean three alerts
+        r = client.get("/api/v1/downloads/zerostrike/v0.50.0/linux-amd64")
+        assert r.status_code == 404
+        assert "re-run the scanner release pipeline" in r.json()["detail"]
+
+    async def alerts():
+        return await Notification.find(Notification.event == "scanner.binary_missing").to_list()
+
+    assert len(asyncio.run(alerts())) == 1
+
+
+def test_republishing_repairs_a_row_whose_blob_is_gone(client):
+    download_service._alerted_missing.clear()
+    headers = _admin_headers(client, email="dlAdminRepair@zerostrike.dev")
+    _publish(client, headers, "v0.51.0", "linux", "amd64", b"bytes")
+    _drop_blob("v0.51.0", "linux", "amd64")
+    assert client.get("/api/v1/downloads/zerostrike/v0.51.0/linux-amd64").status_code == 404
+
+    # Same version, same bytes: without the repair this was an idempotent no-op that left it broken.
+    assert _publish(client, headers, "v0.51.0", "linux", "amd64", b"bytes").status_code == 200
+    dl = client.get("/api/v1/downloads/zerostrike/v0.51.0/linux-amd64")
+    assert dl.status_code == 200
+    assert dl.content == b"bytes"
+
+
+def test_prune_drops_a_row_whose_blob_is_already_gone(client):
+    headers = _admin_headers(client, email="dlAdminPrune@zerostrike.dev")
+    _publish(client, headers, "v0.52.0", "linux", "amd64", b"old")
+    _drop_blob("v0.52.0", "linux", "amd64")
+    assert _publish(client, headers, "v0.53.0", "linux", "amd64", b"new").status_code == 200
+
+    async def versions():
+        return [d.version for d in await ScannerBinary.find_all().to_list()]
+
+    assert asyncio.run(versions()) == ["v0.53.0"]
 
 
 def test_publish_streams_payload_larger_than_one_chunk(client):

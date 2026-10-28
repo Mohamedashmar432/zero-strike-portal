@@ -12,10 +12,13 @@ from typing import Protocol
 
 import structlog
 from fastapi import HTTPException, status
+from gridfs.errors import NoFile
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 
+from app.core.config import settings
 from app.db.mongo import get_database
 from app.models.scanner_binary import ScannerBinary
+from app.services import notification_service
 
 logger = structlog.get_logger(__name__)
 
@@ -25,8 +28,12 @@ _VALID_ARCH = {"amd64", "arm64"}
 # Every publish() permanently adds ~20MB to GridFS; nothing pruned old versions before,
 # and on an Atlas M0 cluster (512MB hard cap) that silently ran the whole app's writes
 # into a wall. The GitHub Release stays the permanent source of truth, so pruning the
-# portal's downloadable mirror down to the most recent releases is safe.
-_RETENTION_COUNT = 2
+# portal's downloadable mirror down to the most recent releases is safe. How many to keep
+# is settings.scanner_binary_retention_count.
+#
+# GridFS ids already alerted on. A CI runner retries a dead download every few minutes, and
+# one alert per request would bury the admin's inbox; once per process per file is enough.
+_alerted_missing: set[str] = set()
 # publish() streams in 1MB slices instead of holding the whole ~20MB binary as one bytes
 # object. Buffering it grew the container's RSS across a release run (5 uploads back to
 # back, ~100MB) until the platform killed the process mid-release — v0.32.0 published
@@ -90,20 +97,62 @@ async def resolve_version_binaries(version: str) -> list[ScannerBinary]:
     return docs
 
 
+async def _blob_exists(file_id) -> bool:
+    return await get_database()[f"{_BUCKET_NAME}.files"].find_one({"_id": file_id}, {"_id": 1}) is not None
+
+
 async def open_download_stream(doc: ScannerBinary):
-    return await _bucket().open_download_stream(doc.gridfs_file_id)
+    """Open the stored file, turning a row whose GridFS file is gone into a 404 plus an admin alert.
+
+    The metadata row and the blob are two writes that nothing keeps in step, so a row can outlive
+    its file (a failed publish, a half-finished prune, a restored database). That used to escape as
+    an unhandled 500 on every CI download.
+    """
+    try:
+        return await _bucket().open_download_stream(doc.gridfs_file_id)
+    except NoFile:
+        await _report_missing_blob(doc)
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"zerostrike {doc.os}-{doc.arch}@{doc.version} is listed but its file is missing from "
+            "storage — a portal admin must re-run the scanner release pipeline to republish it",
+        ) from None
+
+
+async def _report_missing_blob(doc: ScannerBinary) -> None:
+    file_id = str(doc.gridfs_file_id)
+    if file_id in _alerted_missing:
+        return
+    _alerted_missing.add(file_id)
+    logger.error(
+        "scanner_binary_blob_missing", version=doc.version, os=doc.os, arch=doc.arch, gridfs_file_id=file_id
+    )
+    await notification_service.notify(
+        "scanner.binary_missing",
+        title=f"Scanner download missing: {doc.os}-{doc.arch} {doc.version}",
+        body=(
+            f"The portal lists zerostrike {doc.version} for {doc.os}-{doc.arch}, but its file is gone "
+            "from storage, so CI pipelines that download it get a 404. Re-run the scanner release "
+            "pipeline to republish it; publishing replaces the dead record."
+        ),
+        link="/admin/scanner-status",
+        severity="error",
+    )
 
 
 async def _prune_old_versions(os_: str, arch: str) -> None:
-    """Delete all but the `_RETENTION_COUNT` most-recently-uploaded binaries for this (os, arch)."""
+    """Delete all but the newest `scanner_binary_retention_count` binaries for this (os, arch)."""
     stale = (
         await ScannerBinary.find(ScannerBinary.os == os_, ScannerBinary.arch == arch)
         .sort("-uploaded_at")
-        .skip(_RETENTION_COUNT)
+        .skip(max(1, settings.scanner_binary_retention_count))
         .to_list()
     )
     for doc in stale:
-        await _bucket().delete(doc.gridfs_file_id)
+        try:
+            await _bucket().delete(doc.gridfs_file_id)
+        except NoFile:
+            pass  # already gone; still drop the row, or it would dangle and block every later prune
         await doc.delete()
         logger.info("scanner_binary_pruned", version=doc.version, os=os_, arch=arch)
 
@@ -138,7 +187,7 @@ async def publish(
         existing = await ScannerBinary.find_one(
             ScannerBinary.version == version, ScannerBinary.os == os_, ScannerBinary.arch == arch
         )
-        if existing:
+        if existing and await _blob_exists(existing.gridfs_file_id):
             await _bucket().delete(grid_in._id)
             stored = False
             if existing.sha256 == digest.hexdigest():
@@ -149,18 +198,32 @@ async def publish(
                 "publish a new version",
             )
 
-        doc = ScannerBinary(
-            version=version,
-            os=os_,
-            arch=arch,
-            filename=filename,
-            gridfs_file_id=grid_in._id,
-            sha256=digest.hexdigest(),
-            size_bytes=size_bytes,
-            uploaded_at=datetime.now(timezone.utc),
-            uploaded_by=uploaded_by,
-        )
-        await doc.insert()
+        if existing:
+            # The row survived but its file did not, so nothing can be downloaded and the
+            # "same bytes is a no-op" shortcut above would leave it broken forever. Nothing
+            # trusted is being swapped (there is no stored binary), so repoint the row at the
+            # fresh upload instead of refusing.
+            logger.warning("scanner_binary_blob_repaired", version=version, os=os_, arch=arch)
+            existing.gridfs_file_id = grid_in._id
+            existing.sha256 = digest.hexdigest()
+            existing.size_bytes = size_bytes
+            existing.uploaded_at = datetime.now(timezone.utc)
+            existing.uploaded_by = uploaded_by
+            await existing.save()
+            doc = existing
+        else:
+            doc = ScannerBinary(
+                version=version,
+                os=os_,
+                arch=arch,
+                filename=filename,
+                gridfs_file_id=grid_in._id,
+                sha256=digest.hexdigest(),
+                size_bytes=size_bytes,
+                uploaded_at=datetime.now(timezone.utc),
+                uploaded_by=uploaded_by,
+            )
+            await doc.insert()
     except HTTPException:
         raise
     except Exception as exc:

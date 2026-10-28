@@ -114,6 +114,14 @@ EVENTS: tuple[NotificationEvent, ...] = (
         default_email=True,
     ),
     NotificationEvent(
+        key="scanner.binary_missing",
+        label="Scanner download missing",
+        description="A published scanner binary's file is gone from storage, so CI downloads fail. "
+        "Re-run the scanner release pipeline to republish it.",
+        audience="admin",
+        default_email=True,
+    ),
+    NotificationEvent(
         key="user.signup_requested",
         label="New signup request",
         description="Someone registered and is waiting for an admin to approve their access.",

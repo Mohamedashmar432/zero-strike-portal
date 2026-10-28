@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # fix -- which is exactly how a v0.24.0 engine ran in production unnoticed. The binary itself
     # cannot answer this: the build sets no version ldflag, so `zerostrike --version` says "dev".
     scanner_build_ref: str = "unknown"
+    # How many published versions of the scanner binary the portal keeps per (os, arch). The GitHub
+    # Release is the permanent source, so the portal's mirror only needs the newest; each version is
+    # ~20MB x 5 platforms in GridFS, which is what ran a 512MB Atlas M0 cluster into its cap.
+    # Floored at 1 in code: 0 would prune the binary that was just published.
+    scanner_binary_retention_count: int = 1
     scan_timeout_seconds: int = 900
     max_concurrent_cloud_scans: int = 2
     # Caps scanner goroutine parallelism (default is NumCPU). Two concurrent cloud scans each
