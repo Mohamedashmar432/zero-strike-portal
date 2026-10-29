@@ -27,7 +27,9 @@ import {
 } from "@/lib/api/project-repos";
 import { repoName } from "@/lib/repo-identity";
 import { getScanRegression, getVulnerabilitySummary } from "@/lib/api/vulnerabilities";
+import { quotaFullMessage, quotaTone } from "@/lib/api/project-insights";
 import { getProject, getProjectScanActivity, hasCompletedScan } from "@/lib/api/projects";
+import { CloudScanQuotaPill } from "@/components/projects/cloud-scan-quota-pill";
 import { getProjectAiUsage } from "@/lib/api/ai";
 import { queryKeys } from "@/lib/api/query-keys";
 import { listScans, type Scan, type ScanStatus, type ScanType } from "@/lib/api/scans";
@@ -426,6 +428,16 @@ function invalidateSyncViews(queryClient: QueryClient, projectId: string) {
 
 const SCANS_PAGE_SIZES = [10, 15, 20];
 
+/** Quota from the shared project-detail cache; `message` is set once the month's cloud scans are used up. */
+function useCloudQuotaBlock(projectId: string) {
+  const { data: project } = useQuery({
+    queryKey: queryKeys.projects.detail(projectId),
+    queryFn: () => getProject(projectId),
+  });
+  const quota = project?.cloud_scan_quota;
+  return { message: quota && quotaTone(quota) === "full" ? quotaFullMessage(quota) : null };
+}
+
 function ScansTab({ projectId }: { projectId: string }) {
   // Status/type filters are sent to the server so they apply across every page, not just the
   // 20 rows loaded. Search stays client-side (it matches the repo label, resolved here).
@@ -760,6 +772,7 @@ function RepositoriesTab({
   canChangeBranch: boolean;
 }) {
   const queryClient = useQueryClient();
+  const quotaBlock = useCloudQuotaBlock(projectId);
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const [branchTarget, setBranchTarget] = useState<ProjectRepo | null>(null);
   const { data, isLoading } = useQuery({
@@ -839,6 +852,7 @@ function RepositoriesTab({
       syncProjectRepo(projectId, repoId, force ?? false),
     onSuccess: (res, { repoId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) }); // quota pill
       if (res.outcome === "up_to_date") {
         toast.success(`Already up to date at ${shortSha(res.remote_head_sha)}`, {
           action: { label: "Rescan anyway", onClick: () => runSync({ repoId, force: true }) },
@@ -853,6 +867,7 @@ function RepositoriesTab({
     },
     onError: (err) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.repos(projectId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(projectId) }); // a 409 means the pill is stale
       toast.error(err instanceof ApiError ? err.message : "Failed to sync repository");
     },
   });
@@ -862,6 +877,10 @@ function RepositoriesTab({
   const syncInFlight = useRef(false);
   const runSync = (vars: { repoId: string; force?: boolean }) => {
     if (syncInFlight.current) return;
+    if (quotaBlock.message) {
+      toast.error(quotaBlock.message);
+      return;
+    }
     syncInFlight.current = true;
     sync.mutate(vars, { onSettled: () => { syncInFlight.current = false; } });
   };
@@ -918,7 +937,8 @@ function RepositoriesTab({
                         type="button"
                         className="text-primary underline-offset-4 hover:underline disabled:opacity-50"
                         onClick={() => runSync({ repoId: r.id })}
-                        disabled={isArchived}
+                        disabled={isArchived || !!quotaBlock.message}
+                        title={quotaBlock.message ?? undefined}
                       >
                         Sync now
                       </button>
@@ -980,12 +1000,14 @@ function RepositoriesTab({
                     <IconAction
                       variant="outline"
                       onClick={() => runSync({ repoId: r.id })}
-                      disabled={syncing || isArchived}
+                      disabled={syncing || isArchived || !!quotaBlock.message}
                       label={
                         syncing
                           ? "Syncing…"
                           : isArchived
                           ? "This project is archived — restore it to sync"
+                          : quotaBlock.message
+                          ? quotaBlock.message
                           : r.sync_state === "error" && r.last_sync_error
                           ? `Retry sync — ${r.last_sync_error}`
                           : "Sync — check the remote branch and scan anything new"
@@ -1310,6 +1332,7 @@ export default function ProjectDetailPage() {
                 {project.description || "thinkShield DevSecOps & Security Operations Hub."}
               </p>
             </div>
+            <CloudScanQuotaPill projectId={projectId} quota={project.cloud_scan_quota} />
           </div>
 
           {/* Module View Content */}

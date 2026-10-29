@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.core import security
 from app.models.api_key import ApiKeyScope
 from app.models.user import User
-from app.services import api_key_service
+from app.services import activity_service, api_key_service
 
 _bearer = HTTPBearer()
 _api_key_bearer = HTTPBearer()
@@ -27,6 +27,7 @@ async def get_current_user(
     # Login already refuses these; this covers a token minted before the account was gated.
     if user.approval_status != "approved":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account has not been approved")
+    await activity_service.touch(str(user.id))
     return user
 
 

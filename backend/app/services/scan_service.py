@@ -6,7 +6,7 @@ from app.core import security
 from app.models.project import Project
 from app.models.scan import Scan
 from app.models.user import User
-from app.services import audit_service
+from app.services import audit_service, cloud_scan_quota_service
 
 
 async def get_scan_or_404(scan_id: str) -> Scan:
@@ -31,6 +31,7 @@ async def enqueue_repo_scan(
     """Insert a `queued` cloud scan, bump the project's counter and audit it. The caller nudges
     scan_queue_service.drain_queue (the poll loop is the backstop) -- shared by the manual
     create-scan route and Repo Sync so both enqueue identically."""
+    await cloud_scan_quota_service.ensure_available(project)
     now = datetime.now(timezone.utc)
     scan = Scan(
         project_id=str(project.id),

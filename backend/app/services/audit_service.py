@@ -35,6 +35,8 @@ def classify(action: str, project_id: str | None) -> str:
     lowered = action.lower()
     if any(marker in lowered for marker in _PRIVILEGE_MARKERS):
         return "privilege"
+    if action == "Cloud Scan Limit Changed":
+        return "admin"  # an admin acting on a project, not project activity
     return "project" if project_id else "admin"
 
 

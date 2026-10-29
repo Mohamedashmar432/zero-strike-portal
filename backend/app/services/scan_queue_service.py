@@ -19,7 +19,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.job_queue import claim_next, drain_lock, reap_stuck
 from app.models.scan import Scan
-from app.services import cloud_scan_service, workdir_hygiene
+from app.services import cloud_scan_service, pipeline_alert_service, workdir_hygiene
 
 logger = structlog.get_logger(__name__)
 
@@ -115,6 +115,8 @@ async def reap_stuck_scans() -> None:
         dead_letter_message=(
             "Reclaimed: the worker running this scan stopped reporting; retries exhausted."
         ),
+        # The portal's failure, not the customer's: the scan does not cost them a monthly slot.
+        extra_set={"quota_exempt": True},
     )
 
 
@@ -145,5 +147,6 @@ async def poll_loop() -> None:
             await reap_stuck_scans()
             await sweep_stale_workdirs()
             await drain_queue()
+            await pipeline_alert_service.tick()
         except Exception:
             logger.exception("scan queue poll tick failed")

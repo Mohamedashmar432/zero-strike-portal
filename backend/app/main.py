@@ -27,6 +27,9 @@ from app.routers import (
     finding_reviews,
     admin_downloads,
     admin_mcp_tokens,
+    admin_digest,
+    admin_project_insights,
+    admin_webhook_channels,
     oauth_consent,
     admin_scan_engine,
     admin_scanner_status,
@@ -58,12 +61,14 @@ from app.services import (
     ai_job_queue_service,
     ai_remediation_queue_service,
     cloud_scan_service,
+    digest_service,
     finding_review_service,
     pricing_service,
     notification_service,
     compliance_queue_service,
     project_stats_service,
     scan_queue_service,
+    webhook_channel_service,
 )
 from app.services.oauth import OAuthProviderError
 
@@ -81,6 +86,11 @@ async def lifespan(app: FastAPI):
     # False positives marked before admin review existed were never reviewed: back to blocking as
     # pending requests (docs/FINDING_REVIEW.md). Idempotent -- a migrated row carries a review.
     await finding_review_service.migrate_unreviewed_false_positives()
+    # The single workspace alert webhook becomes the "Admin alerts" webhook channel. Idempotent.
+    try:
+        await webhook_channel_service.migrate_legacy_webhook()
+    except Exception:
+        logger.warning("Workspace webhook -> channel migration failed on startup", exc_info=True)
     if not cloud_scan_service.scanner_available():
         # Loud and immediate on boot, rather than a surprise buried in the first cloud scan's
         # error_message — every cloud scan will fail until SCANNER_BINARY_PATH is fixed and the
@@ -115,6 +125,7 @@ async def lifespan(app: FastAPI):
     remediation_poll_task = asyncio.create_task(ai_remediation_queue_service.poll_loop())
     compliance_poll_task = asyncio.create_task(compliance_queue_service.poll_loop())
     pricing_task = asyncio.create_task(pricing_service.refresh_loop())
+    digest_task = asyncio.create_task(digest_service.scheduler_loop())
     async with contextlib.AsyncExitStack() as stack:
         for name in ("mcp_server", "mcp_user_server"):
             mcp = getattr(app.state, name, None)
@@ -122,6 +133,7 @@ async def lifespan(app: FastAPI):
                 await stack.enter_async_context(mcp.session_manager.run())
         yield
     pricing_task.cancel()
+    digest_task.cancel()
     poll_task.cancel()
     ai_poll_task.cancel()
     remediation_poll_task.cancel()
@@ -179,6 +191,9 @@ def create_app() -> FastAPI:
     app.include_router(downloads.ci_router, prefix="/api/v1")
     app.include_router(admin_downloads.router, prefix="/api/v1")
     app.include_router(admin_mcp_tokens.router, prefix="/api/v1")
+    app.include_router(admin_project_insights.router, prefix="/api/v1")
+    app.include_router(admin_webhook_channels.router, prefix="/api/v1")
+    app.include_router(admin_digest.router, prefix="/api/v1")
     app.include_router(oauth_consent.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(admin_scan_engine.router, prefix="/api/v1")

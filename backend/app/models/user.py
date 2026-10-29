@@ -41,6 +41,8 @@ class User(Document):
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None = None
+    # Last authenticated request, day-granular (activity_service.touch is throttled to once a day).
+    last_seen_at: datetime | None = None
 
     class Settings:
         name = "users"

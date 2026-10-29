@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.services import data_management_service
+from app.services import activity_service, data_management_service
 
 
 async def get_membership(project_id: str, user_id: str) -> ProjectMember | None:
@@ -20,10 +20,24 @@ async def role_in_project(project_id: str, user: User) -> str | None:
     return membership.role if membership else None
 
 
+async def _count_activity(project_id: str, user: User, role: str) -> None:
+    """Record that `user` acted in `project_id` *as a member*. A portal admin resolves to "admin"
+    without a membership lookup, so they are counted only when a real membership exists -- viewing
+    someone else's project is not being one of its users. The lookup runs once per day, because
+    `already_seen` short-circuits it."""
+    uid = str(user.id)
+    if activity_service.already_seen(uid, project_id):
+        return
+    if role == "admin" and await get_membership(project_id, uid) is None:
+        return
+    await activity_service.touch(uid, project_id)
+
+
 async def require_member(project_id: str, user: User) -> str:
     role = await role_in_project(project_id, user)
     if role is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this project")
+    await _count_activity(project_id, user, role)
     return role
 
 
@@ -31,6 +45,7 @@ async def require_owner_or_admin(project_id: str, user: User) -> str:
     role = await role_in_project(project_id, user)
     if role not in ("owner", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Owner or admin privileges required")
+    await _count_activity(project_id, user, role)
     return role
 
 

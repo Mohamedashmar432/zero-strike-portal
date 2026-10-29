@@ -191,7 +191,9 @@ def test_reap_stuck_scans_marks_stale_running_failed(client, monkeypatch):
         await scan_queue_service.reap_stuck_scans()
 
         assert (await Scan.get(stale.id)).status == "failed"
+        assert (await Scan.get(stale.id)).quota_exempt is True  # the portal's failure, not the customer's
         assert (await Scan.get(fresh.id)).status == "running"
+        assert (await Scan.get(fresh.id)).quota_exempt is False
 
     asyncio.run(run())
 

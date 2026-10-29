@@ -233,6 +233,12 @@ def test_executive_template_names_the_vulnerable_package_and_its_fix_version():
     assert html.count('<b class="fix">10.0.1</b>') == 2
     assert html.count("GHSA-0000-0000-0000") == 2
 
+    # The standard layout drew "9.0.0 → fix in" with an arrow Helvetica can't render (blank box +
+    # an xhtml2pdf warning per finding in prod logs).
+    standard = pdf_report_service.render_scan_report_html(scan, report, [finding], "standard")
+    assert "fix in 10.0.1" in standard
+    assert "→" not in standard and "&rarr;" not in standard
+
 
 def test_build_report_filename_uses_project_repo_and_scan_date():
     from datetime import datetime, timezone

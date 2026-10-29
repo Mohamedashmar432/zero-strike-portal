@@ -32,6 +32,9 @@ from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
 from app.models.system_log import SystemLog
 from app.models.user import User
+from app.models.user_activity_day import UserActivityDay
+from app.models.webhook_channel import WebhookChannel
+from app.models.digest_settings import DigestSettings
 from app.models.scan_engine import CustomRule, NoisyRuleAlert, RuleOverride, RulePackVersion
 from app.models.vulnerability import Vulnerability
 from app.models.workspace_settings import WorkspaceSettings
@@ -95,6 +98,9 @@ async def connect_to_mongo() -> None:
             CustomRule,
             RulePackVersion,
             NoisyRuleAlert,
+            UserActivityDay,
+            WebhookChannel,
+            DigestSettings,
         ],
     )
 

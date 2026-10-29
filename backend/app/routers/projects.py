@@ -25,6 +25,7 @@ from app.schemas.ai_provider_config import (
 from app.schemas.audit_log import AuditLogResponse
 from app.schemas.common import Page
 from app.schemas.project import (
+    CloudScanQuota,
     OwaspSummaryResponse,
     ProjectAiUsageResponse,
     ProjectCreateRequest,
@@ -51,6 +52,7 @@ from app.services import (
     ai_provider_config_service,
     audit_service,
     auth_service,
+    cloud_scan_quota_service,
     llm_client,
     pr_status_service,
     project_repo_service,
@@ -64,7 +66,10 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 def _to_project_response(
-    project: Project, my_role: str, stats: ProjectStatsItem | None = None
+    project: Project,
+    my_role: str,
+    stats: ProjectStatsItem | None = None,
+    quota: CloudScanQuota | None = None,
 ) -> ProjectResponse:
     return ProjectResponse(
         id=str(project.id),
@@ -84,6 +89,7 @@ def _to_project_response(
         scan_status_counts=stats.scan_status_counts if stats else None,
         risk_repo_count=stats.risk_repo_count if stats else None,
         total_repo_count=stats.total_repo_count if stats else None,
+        cloud_scan_quota=quota,
     )
 
 
@@ -175,7 +181,8 @@ async def list_projects(
         projects = (
             await Project.find_all().sort(-Project.id).skip((page - 1) * page_size).limit(page_size).to_list()
         )
-        items = [_to_project_response(p, "admin") for p in projects]
+        quotas = await cloud_scan_quota_service.usage_many(projects)
+        items = [_to_project_response(p, "admin", quota=quotas[str(p.id)]) for p in projects]
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     memberships = await ProjectMember.find(ProjectMember.user_id == str(user.id)).to_list()
@@ -184,7 +191,8 @@ async def list_projects(
     project_ids = sorted(role_by_project, reverse=True)[(page - 1) * page_size : (page - 1) * page_size + page_size]
     object_ids = [PydanticObjectId(pid) for pid in project_ids]
     projects = await Project.find(In(Project.id, object_ids)).sort(-Project.id).to_list() if object_ids else []
-    items = [_to_project_response(p, role_by_project[str(p.id)]) for p in projects]
+    quotas = await cloud_scan_quota_service.usage_many(projects)
+    items = [_to_project_response(p, role_by_project[str(p.id)], quota=quotas[str(p.id)]) for p in projects]
     return Page(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -203,7 +211,8 @@ async def get_project(project_id: str, user: User = Depends(get_current_user)):
     project = await project_service.get_project_or_404(project_id)
     role = await project_service.require_member(project_id, user)
     stats = await project_stats_service.get_projects_stats(user, [project_id])
-    return _to_project_response(project, role, stats.get(project_id))
+    quota = await cloud_scan_quota_service.usage(project)
+    return _to_project_response(project, role, stats.get(project_id), quota)
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)

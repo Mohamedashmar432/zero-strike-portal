@@ -67,14 +67,18 @@ async def reap_stuck(
     stuck_after: timedelta,
     crash_message: str,
     dead_letter_message: str,
+    extra_set: dict | None = None,
 ) -> None:
     """Reclaim documents stuck in `running_status` past `stuck_after`: requeue if
-    `retry_count + 1 < max_attempts`, otherwise mark `failed_status` (dead-letter)."""
+    `retry_count + 1 < max_attempts`, otherwise mark `failed_status` (dead-letter).
+    `extra_set` is applied as attributes to every reclaimed document."""
     cutoff = datetime.now(timezone.utc) - stuck_after
     stuck = await model.find(model.status == running_status, model.updated_at < cutoff).to_list()
     for doc in stuck:
         now = datetime.now(timezone.utc)
         doc.updated_at = now
+        for field, value in (extra_set or {}).items():
+            setattr(doc, field, value)
         if doc.retry_count + 1 < doc.max_attempts:
             doc.retry_count += 1
             doc.status = queued_status

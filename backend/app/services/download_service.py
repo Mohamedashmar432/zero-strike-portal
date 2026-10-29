@@ -6,7 +6,9 @@ are uploaded once per (version, os, arch) via the admin-only publish endpoint, t
 served publicly — bootstrapping a CI runner shouldn't require portal credentials.
 """
 
+import contextlib
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -15,6 +17,7 @@ from fastapi import HTTPException, status
 from gridfs.errors import NoFile
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 
+from app.core import dedupe
 from app.core.config import settings
 from app.db.mongo import get_database
 from app.models.scanner_binary import ScannerBinary
@@ -117,6 +120,51 @@ async def open_download_stream(doc: ScannerBinary):
             f"zerostrike {doc.os}-{doc.arch}@{doc.version} is listed but its file is missing from "
             "storage — a portal admin must re-run the scanner release pipeline to republish it",
         ) from None
+
+
+def _failure_reason(exc: HTTPException, checksums: bool) -> str:
+    detail = str(exc.detail)
+    if "missing from storage" in detail:
+        return "file_missing"
+    if checksums:
+        return "checksum_missing"
+    if "uploaded yet" in detail:
+        return "none_published"
+    if "binaries for version" in detail:
+        return "unknown_version"
+    return "no_binary"
+
+
+@contextlib.asynccontextmanager
+async def report_failures(version: str, os_arch: str | None = None):
+    """Alert admins when a public download endpoint turns a CI pipeline away: unknown version, no build
+    for that OS/arch, a listed-but-missing file, or no checksum file. Re-raises the original error.
+
+    Once per (version, os-arch, reason) per hour, and at most 10 alerts an hour overall: this endpoint
+    is unauthenticated, so anyone can invent versions -- the cap keeps that from becoming a spam
+    cannon. A 400 (malformed os-arch) is scanner noise, not an outage, and is never alerted."""
+    try:
+        yield
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            reason = _failure_reason(exc, checksums=os_arch is None)
+            safe_version = re.sub(r"[^A-Za-z0-9._+-]", "?", version)[:64]
+            target = os_arch or "checksums.txt"
+            if dedupe.alerts.first(
+                f"scanner.download_failed:{safe_version}:{target}:{reason}",
+                3600,
+                group="scanner.download_failed",
+                group_cap=10,
+            ):
+                await notification_service.notify(
+                    "scanner.download_failed",
+                    title=f"Scanner download failed: {target} {safe_version}",
+                    body=f"A CI download of zerostrike {safe_version} ({target}) was refused: {exc.detail}",
+                    link="/admin/scanner-status",
+                    severity="error",
+                    facts=[("Version", safe_version), ("Target", target), ("Reason", reason)],
+                )
+        raise
 
 
 async def _report_missing_blob(doc: ScannerBinary) -> None:

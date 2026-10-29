@@ -41,6 +41,10 @@ class CloudScanError(Exception):
     """A recoverable cloud-scan failure; message is surfaced (sanitized) on the scan."""
 
 
+class ScannerUnavailableError(CloudScanError):
+    """The scanner binary is missing: a portal misconfiguration, so the scan is quota-exempt."""
+
+
 class _TransientCloneError(CloudScanError):
     """A git-clone failure that looks like a network blip rather than a real
     auth/URL/branch problem -- worth a couple of quick retries."""
@@ -227,7 +231,7 @@ def _run_sync(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[in
                 "until this is fixed; restart the backend after correcting it.",
                 cmd[0],
             )
-            raise CloudScanError(
+            raise ScannerUnavailableError(
                 f"thinkShield scanner is not available on this server (binary not found at "
                 f"'{cmd[0]}'). This is a portal configuration issue, not a problem with your repo — "
                 "contact an administrator."
@@ -451,17 +455,10 @@ async def _fail(scan: Scan, message: str) -> None:
     await scan.save()
 
     # A failure frees a concurrency slot — nudge the queue rather than waiting for the next poll tick.
-    from app.services import notification_service, scan_queue_service
+    from app.services import pipeline_alert_service, scan_queue_service
 
     await scan_queue_service.drain_queue()
-    await notification_service.notify(
-        "scan.failed",
-        project_id=scan.project_id,
-        title="Scan failed",
-        body=message,
-        link=f"/projects/{scan.project_id}/scans/{scan.id}",
-        severity="error",
-    )
+    await pipeline_alert_service.notify_scan_failed(scan, message)
 
 
 async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token_auth_scheme: str = "bearer") -> None:
@@ -502,6 +499,8 @@ async def run_cloud_scan(scan_id: str, repo_token: str | None = None, repo_token
             scan.branch or "<default>",
             exc_info=not isinstance(e, CloudScanError),
         )
+        if isinstance(e, ScannerUnavailableError):
+            scan.quota_exempt = True  # persisted by _fail's save
         await _fail(scan, message)
     finally:
         workdir_hygiene.rmtree_logged(workdir)

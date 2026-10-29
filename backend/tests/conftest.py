@@ -65,6 +65,27 @@ def _no_real_llm_calls(monkeypatch):
     monkeypatch.setattr(litellm, "get_model_cost_map", lambda url: {})
 
 
+@pytest.fixture(autouse=True)
+def _isolate_alerting_and_activity(monkeypatch):
+    """Process-global state (alert dedupe, activity seen-set) must not leak between tests, and no test
+    may reach the network: OSV.dev and any webhook are stubbed unless a test patches them itself."""
+    from app.core import dedupe
+    from app.services import activity_service, alert_service, digest_service
+
+    dedupe.alerts.clear()
+    activity_service.reset()
+
+    async def _osv_up():
+        return True
+
+    async def _no_network(url, content):
+        raise RuntimeError("tests never post to a real webhook")
+
+    monkeypatch.setattr(digest_service, "_probe_osv", _osv_up)
+    monkeypatch.setattr(alert_service, "post_card", _no_network)
+    yield
+
+
 @pytest.fixture()
 def client():
     # rate_limit.limiter is a module-level singleton shared across the whole test process —

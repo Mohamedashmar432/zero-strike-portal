@@ -83,7 +83,7 @@ def _drain() -> list[dict]:
             return rows
 
 
-async def flush() -> None:
+async def flush(*, alert: bool = False) -> None:
     rows = _drain()
     if not rows:
         return
@@ -93,12 +93,18 @@ async def flush() -> None:
         # Deliberately silent: logging this failure would enqueue another row for the same
         # broken sink. The lines are already on stdout.
         pass
+    if alert and any(r["level"] in ("error", "critical") for r in rows):
+        # Local import: the alert path pulls in the whole notification stack. Runs after the insert,
+        # from the flush task rather than from emit(), so logging itself stays non-blocking.
+        from app.services import error_alert_service
+
+        await error_alert_service.alert_rows(rows)
 
 
 async def flush_loop() -> None:
     try:
         while True:
             await asyncio.sleep(_FLUSH_SECONDS)
-            await flush()
+            await flush(alert=True)
     finally:
         await flush()  # shutdown: keep whatever was logged in the last interval

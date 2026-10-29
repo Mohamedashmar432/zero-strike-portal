@@ -77,6 +77,12 @@ class Scan(Document):
     custom_rules_ran: bool = False
     retry_count: int = 0
     max_attempts: int = 1
+    # True for a cloud scan the portal itself failed (scanner binary missing, reaped after a worker
+    # crash): it does not count against the project's monthly cloud-scan limit.
+    quota_exempt: bool = False
+    # Set once when the `pipeline.upload_stalled` alert fired for this scan (atomic claim, so it is
+    # sent once across restarts and replicas).
+    stalled_alerted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

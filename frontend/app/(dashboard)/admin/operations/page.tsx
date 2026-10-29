@@ -1,12 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Gauge, Layers, ListOrdered } from "lucide-react";
+import { AlertTriangle, Binary, CheckCircle2, Gauge, HardDrive, Layers, ListOrdered, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState } from "@/components/common/empty-state";
+import { StatCard } from "@/components/common/stat-card";
 import { PageHeader } from "@/components/layout/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -18,6 +20,7 @@ import {
   type QueueKind,
 } from "@/lib/api/operations";
 import { queryKeys } from "@/lib/api/query-keys";
+import { cloneWorkspaceWarning, formatMegabytes, getScannerStatus } from "@/lib/api/scanner-status";
 import { cn, parseApiDate } from "@/lib/utils";
 
 const POLL_MS = 3000;
@@ -73,9 +76,19 @@ function Meter({ label, percent, detail }: { label: string; percent: number | nu
   );
 }
 
-function Section({ icon: Icon, title, children }: { icon: typeof Gauge; title: string; children: React.ReactNode }) {
+function Section({
+  icon: Icon,
+  title,
+  id,
+  children,
+}: {
+  icon: typeof Gauge;
+  title: string;
+  id?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-3">
+    <div id={id} className="scroll-mt-4 space-y-3">
       <div className="flex items-center gap-2 border-b border-border/60 pb-2">
         <Icon className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
@@ -83,6 +96,10 @@ function Section({ icon: Icon, title, children }: { icon: typeof Gauge; title: s
       {children}
     </div>
   );
+}
+
+function formatDate(value: string | null) {
+  return value ? new Date(value).toLocaleString() : "—";
 }
 
 function elapsed(fromIso: string | null, nowMs: number): string {
@@ -106,6 +123,15 @@ export default function OperationsPage() {
   }, []);
   // Everything is measured on the server's clock, not this browser's.
   const serverNow = data ? now + (parseApiDate(data.server_time).getTime() - dataUpdatedAt) : now;
+
+  // Scanner engine, published binaries and clone disk — folded in from the old Scanner Status page.
+  // Its queue and failures are already shown above, so only the three unique blocks are used.
+  const scanner = useQuery({
+    queryKey: queryKeys.admin.scannerStatus(),
+    queryFn: getScannerStatus,
+    refetchInterval: (query) => (query.state.status === "error" ? false : 15000),
+  });
+  const scannerData = scanner.data;
 
   const sys = data?.system;
   const running = data?.jobs.filter((j) => j.status === "running") ?? [];
@@ -316,6 +342,98 @@ export default function OperationsPage() {
                   </TableCell>
                   <TableCell className="max-w-md text-destructive whitespace-pre-wrap break-words">
                     {f.error_message || "No error message was recorded."}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTableCard>
+      </Section>
+
+      <Section id="scanner" icon={Binary} title="Scanner">
+        {scannerData && !scannerData.engine_available && (
+          <Alert variant="destructive">
+            <XCircle className="size-4" />
+            <AlertTitle>Cloud scan engine unavailable on this server</AlertTitle>
+            <AlertDescription>
+              The scanner binary isn&apos;t resolvable at SCANNER_BINARY_PATH — every cloud scan will fail until this
+              is fixed and the backend is restarted. This is separate from the binary checklist below, which covers
+              what&apos;s published for external CI/local download.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Clone workspace: leftovers or a full disk show up here before they cause an outage */}
+        <div className="flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <HardDrive className="size-3.5" /> Clone workspace
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard
+            label="Clone Directories"
+            value={scannerData?.clones.workdir_count ?? "—"}
+            isLoading={scanner.isLoading}
+            caption="zs-clone-* and zs-remediate-* on this replica"
+          />
+          <StatCard
+            label="Clone Disk Used"
+            value={scannerData ? formatMegabytes(scannerData.clones.total_mb) : "—"}
+            isLoading={scanner.isLoading}
+            caption={scannerData ? `Per-repo cap ${formatMegabytes(scannerData.clones.max_repo_mb)}` : undefined}
+          />
+          <StatCard
+            label="Free Disk"
+            value={scannerData ? formatMegabytes(scannerData.clones.free_mb) : "—"}
+            isLoading={scanner.isLoading}
+            caption={scannerData ? `Clones refused below ${formatMegabytes(scannerData.clones.min_free_mb)}` : undefined}
+          />
+        </div>
+        {scannerData && cloneWorkspaceWarning(scannerData.clones, scannerData.queue.running) && (
+          <p className="text-xs text-severity-medium">
+            {cloneWorkspaceWarning(scannerData.clones, scannerData.queue.running)}
+          </p>
+        )}
+
+        <div className="flex items-center gap-2 pt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <Binary className="size-3.5" /> Published binaries
+        </div>
+        <DataTableCard
+          isLoading={scanner.isLoading}
+          isError={scanner.isError}
+          errorMessage="Failed to load scanner status."
+          isEmpty={false}
+          emptyState={<EmptyState title="No data" />}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">OS / Architecture</TableHead>
+                <TableHead className="py-2.5">Distribution Status</TableHead>
+                <TableHead className="py-2.5">Version</TableHead>
+                <TableHead className="py-2.5">Uploaded</TableHead>
+                <TableHead className="py-2.5">Uploaded By</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scannerData?.binaries.map((b) => (
+                <TableRow key={`${b.os}-${b.arch}`} className="text-xs">
+                  <TableCell className="font-mono font-semibold text-foreground">
+                    {b.os}-{b.arch}
+                  </TableCell>
+                  <TableCell>
+                    {b.published ? (
+                      <Badge variant="secondary" className="gap-1 font-mono text-[10px] text-status-success">
+                        <CheckCircle2 className="size-3" /> Published
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="gap-1 font-mono text-[10px]">
+                        <XCircle className="size-3" /> Missing
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{b.version ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{formatDate(b.uploaded_at)}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {b.uploaded_by_email ?? (b.uploaded_by ? "Deleted user" : "—")}
                   </TableCell>
                 </TableRow>
               ))}

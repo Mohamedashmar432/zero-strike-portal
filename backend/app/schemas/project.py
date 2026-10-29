@@ -98,6 +98,15 @@ class ProjectAiUsageResponse(BaseModel):
     total_cost_usd: float
 
 
+class CloudScanQuota(BaseModel):
+    used: int
+    limit: int
+    remaining: int
+    period_start: datetime
+    resets_at: datetime
+    is_default: bool
+
+
 class ProjectResponse(BaseModel):
     id: str
     name: str
@@ -119,3 +128,5 @@ class ProjectResponse(BaseModel):
     scan_status_counts: ScanStatusCounts | None = None
     risk_repo_count: int | None = None
     total_repo_count: int | None = None
+    # Populated on GET /projects/{id} and the list (one grouped query); None on create/update.
+    cloud_scan_quota: CloudScanQuota | None = None

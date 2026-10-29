@@ -25,6 +25,9 @@ class Project(Document):
     # generates; the pipeline file itself stays the source of truth once copied.
     cicd_fail_on: Literal["none", "critical", "high"] = "high"
 
+    # Admin-set monthly cloud-scan limit; None = settings.cloud_scan_monthly_limit_default.
+    cloud_scan_monthly_limit: int | None = None
+
     # --- policy overrides ----------------------------------------------------
     # Every field below is None-means-inherit, twinned with a WorkspaceSettings field and
     # resolved by workspace_settings_service.effective_*. A project owner may set these;

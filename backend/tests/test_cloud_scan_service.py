@@ -228,6 +228,7 @@ def test_scanner_binary_missing_gives_actionable_message(client, monkeypatch, tm
         assert reloaded.status == "failed"
         assert "not available on this server" in reloaded.error_message
         assert "contact an administrator" in reloaded.error_message
+        assert reloaded.quota_exempt is True
 
     asyncio.run(run())
 

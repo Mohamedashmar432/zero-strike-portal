@@ -20,6 +20,14 @@ export const queryKeys = {
     scannerStatus: () => ["admin", "scanner-status"] as const,
     scanEngine: () => ["admin", "scan-engine"] as const,
     operations: () => ["admin", "operations"] as const,
+    projectInsights: (since: string, until: string) => ["admin", "project-insights", since, until] as const,
+    scanRequests: (filters: Record<string, unknown>) => ["admin", "project-insights", "requests", filters] as const,
+    projectActivity: (projectId: string, since: string, until: string) =>
+      ["admin", "project-insights", "activity", projectId, since, until] as const,
+    webhookChannels: () => ["admin", "webhook-channels"] as const,
+    webhookEvents: () => ["admin", "webhook-channels", "events"] as const,
+    digestSettings: () => ["admin", "digest-settings"] as const,
+    digestPreview: () => ["admin", "digest-settings", "preview"] as const,
     mcpTokens: () => ["admin", "mcp-tokens"] as const,
     autoFixQuotaRequests: (status?: string) =>
       status === undefined

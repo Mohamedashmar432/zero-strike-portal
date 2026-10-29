@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listApiKeys } from "@/lib/api/api-keys";
 import { ApiError } from "@/lib/api/client";
 import { listProjectRepos, type ProjectRepo } from "@/lib/api/project-repos";
+import { quotaFullMessage, quotaTone } from "@/lib/api/project-insights";
 import { getProject } from "@/lib/api/projects";
 import { queryKeys } from "@/lib/api/query-keys";
 import { findingsGateLines } from "@/lib/cicd/findings-gate";
@@ -69,7 +70,7 @@ function BackToTypes({ onBack }: { onBack: () => void }) {
   );
 }
 
-function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
+function TypeSelectStep({ onSelect, cloudBlock }: { onSelect: (type: ScanType) => void; cloudBlock: string | null }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {SCAN_TYPES.map((t) => (
@@ -79,10 +80,14 @@ function TypeSelectStep({ onSelect }: { onSelect: (type: ScanType) => void }) {
           variant="outline"
           className="h-auto flex-col items-start gap-2 whitespace-normal p-4 text-left transition-colors hover:border-primary/50 hover:bg-accent"
           onClick={() => onSelect(t.value)}
+          // Only cloud scans are limited; CI/CD stays selectable.
+          disabled={t.value === "cloud" && !!cloudBlock}
         >
           <t.icon className="size-5 text-brand" />
           <span className="font-medium text-foreground">{t.label}</span>
-          <span className="text-xs text-muted-foreground">{t.description}</span>
+          <span className="text-xs text-muted-foreground">
+            {t.value === "cloud" && cloudBlock ? cloudBlock : t.description}
+          </span>
         </Button>
       ))}
     </div>
@@ -394,7 +399,7 @@ function ConnectedRepoList({
   );
 }
 
-function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+function CloudCreateStep({ projectId, onClose, cloudBlock }: { projectId: string; onClose: () => void; cloudBlock: string | null }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: projectRepos } = useQuery({
@@ -434,7 +439,11 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
       onClose();
       router.push(`/projects/${projectId}/scans/${scan.id}`);
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Failed to start cloud scan"),
+    onError: (err) => {
+      // A 409 "Cloud scan limit reached" means the quota pill is stale; the message itself is readable.
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      toast.error(err instanceof ApiError ? err.message : "Failed to start cloud scan");
+    },
   });
 
   function selectConnectedRepo(repo: ProjectRepo) {
@@ -602,8 +611,13 @@ function CloudCreateStep({ projectId, onClose }: { projectId: string; onClose: (
           )}
         </div>
       )}
+      {cloudBlock && (
+        <p role="alert" className="text-sm text-severity-critical">
+          {cloudBlock}
+        </p>
+      )}
       <div className="flex justify-end border-t border-border pt-4">
-        <Button type="submit" disabled={mutation.isPending || needsRepoSelection}>
+        <Button type="submit" disabled={mutation.isPending || needsRepoSelection || !!cloudBlock}>
           {mutation.isPending ? "Starting…" : "Start cloud scan"}
         </Button>
       </div>
@@ -628,6 +642,9 @@ function NewScanWizard() {
     queryKey: ["projects", projectId],
     queryFn: () => getProject(projectId),
   });
+
+  const quota = project?.cloud_scan_quota;
+  const cloudBlock = quota && quotaTone(quota) === "full" ? quotaFullMessage(quota) : null;
 
   const backHref = `/projects/${projectId}?tab=scans`;
   const close = () => router.push(backHref);
@@ -658,11 +675,11 @@ function NewScanWizard() {
         <CardContent>
           {scanType && <BackToTypes onBack={() => setScanType(null)} />}
           {scanType === "cloud" ? (
-            <CloudCreateStep projectId={projectId} onClose={close} />
+            <CloudCreateStep projectId={projectId} onClose={close} cloudBlock={cloudBlock} />
           ) : scanType === "cicd" ? (
             <CicdSetupStep projectId={projectId} onDone={close} />
           ) : (
-            <TypeSelectStep onSelect={setScanType} />
+            <TypeSelectStep onSelect={setScanType} cloudBlock={cloudBlock} />
           )}
           {!scanType && (
             <div className="mt-4 flex justify-end border-t border-border pt-4">

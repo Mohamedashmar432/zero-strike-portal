@@ -62,25 +62,70 @@ def host_of(encrypted: str | None) -> str | None:
         return None
 
 
-async def post_webhook(
-    url: str, title: str, text: str, link: str | None = None, facts: list[tuple[str, str]] | None = None
-) -> None:
-    """Adaptive-card message — accepted by Teams Workflows webhooks. `facts` render as a label/value table."""
-    await asyncio.to_thread(vet_webhook_url, url)
+def message_card(
+    title: str,
+    text: str,
+    link: str | None = None,
+    facts: list[tuple[str, str]] | None = None,
+    *,
+    tone: str = "accent",
+    eyebrow: str | None = None,
+) -> dict:
+    """The one alert-card layout: a coloured header band (tone = Adaptive Card container style:
+    attention / warning / good / accent), the message, its facts, and an open button. Only 1.4
+    elements, because legacy Office 365 connector webhooks drop newer ones (e.g. Table) silently."""
+    header = [
+        {
+            "type": "TextBlock",
+            "text": f"THINKSHIELD · {eyebrow.upper()}" if eyebrow else "THINKSHIELD",
+            "size": "Small",
+            "weight": "Bolder",
+            "isSubtle": True,
+            "wrap": True,
+        },
+        {"type": "TextBlock", "text": title, "size": "Large", "weight": "Bolder", "wrap": True, "spacing": "None"},
+    ]
+    body: list[dict] = [{"type": "Container", "style": tone, "bleed": True, "items": header}]
+    if text and text != title:
+        body.append({"type": "TextBlock", "text": text, "wrap": True, "spacing": "Medium"})
+    if facts:
+        body.append(
+            {
+                "type": "Container",
+                "separator": True,
+                "spacing": "Medium",
+                "items": [{"type": "FactSet", "facts": [{"title": k, "value": v or "-"} for k, v in facts]}],
+            }
+        )
     content: dict = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
         "version": "1.4",
-        "body": [
-            {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True},
-            {"type": "TextBlock", "text": text, "wrap": True},
-        ],
+        "msteams": {"width": "Full"},
+        "body": body,
     }
-    if facts:
-        content["body"].append({"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in facts]})
     if link:
-        link = _absolute(link)
-        content["actions"] = [{"type": "Action.OpenUrl", "title": "Open report in thinkShield", "url": link}]
+        content["actions"] = [{"type": "Action.OpenUrl", "title": "Open in thinkShield", "url": _absolute(link)}]
+    return content
+
+
+async def post_webhook(
+    url: str,
+    title: str,
+    text: str,
+    link: str | None = None,
+    facts: list[tuple[str, str]] | None = None,
+    *,
+    tone: str = "accent",
+    eyebrow: str | None = None,
+) -> int:
+    """Adaptive-card message — accepted by Teams Workflows and legacy connector webhooks."""
+    return await post_card(url, message_card(title, text, link, facts, tone=tone, eyebrow=eyebrow))
+
+
+async def post_card(url: str, content: dict) -> int:
+    """Post a ready-made Adaptive Card (the digest builds its own, with a Table). Vets the URL first."""
+    await asyncio.to_thread(vet_webhook_url, url)
     payload = {
         "type": "message",
         "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": content}],
@@ -88,6 +133,7 @@ async def post_webhook(
     async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         resp = await client.post(url, json=payload)
     resp.raise_for_status()
+    return resp.status_code
 
 
 def _absolute(link: str) -> str:
@@ -254,8 +300,15 @@ async def on_scan_failed(project_id: str, title: str, text: str, link: str | Non
 
 
 async def send_global(title: str, text: str, link: str | None = None) -> None:
-    """Forward an admin-audience event to the portal-wide webhook. Never raises."""
+    """Forward an admin-audience event to the portal-wide webhook. Never raises.
+
+    Stands down once the workspace webhook has been migrated to a channel
+    (webhook_channel_service): notify() then routes it, and posting here too would double-send."""
     try:
+        from app.services import webhook_channel_service
+
+        if await webhook_channel_service.has_migrated_channel():
+            return
         ws = await workspace_settings_service.get_workspace_settings()
         if ws.alert_webhook_enabled and ws.alert_webhook_enc:
             _spawn(_safe_webhook(ws.alert_webhook_enc, title, text, link, None, {"trigger": "admin_event"}))

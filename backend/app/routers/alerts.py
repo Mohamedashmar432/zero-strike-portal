@@ -16,7 +16,13 @@ from app.schemas.alerts import (
     ProjectAlertsUpdateRequest,
 )
 from app.schemas.common import MessageResponse
-from app.services import alert_service, audit_service, project_service, workspace_settings_service
+from app.services import (
+    alert_service,
+    audit_service,
+    project_service,
+    webhook_channel_service,
+    workspace_settings_service,
+)
 
 router = APIRouter(tags=["alerts"])
 
@@ -146,6 +152,7 @@ async def update_global_alerts(payload: GlobalAlertsUpdateRequest, user: User = 
     if changed.get("alert_webhook_enabled", ws.alert_webhook_enabled) and not enc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Add a webhook URL before enabling it")
     ws = await workspace_settings_service.update_workspace_settings(updated_by=str(user.id), **changed)
+    await webhook_channel_service.sync_legacy(ws)
     await audit_service.record(
         "Global Alerts Updated",
         actor_user_id=str(user.id),

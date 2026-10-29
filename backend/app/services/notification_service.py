@@ -84,6 +84,7 @@ async def notify(
     severity: NotificationSeverity = "info",
     only_user_ids: list[str] | None = None,
     email_message: tuple[str, str, str | None] | None = None,
+    facts: list[tuple[str, str]] | None = None,
 ) -> int:
     """Deliver one event to everyone eligible who wants it. Returns the in-app row count.
 
@@ -108,6 +109,14 @@ async def notify(
             await alert_service.send_global(title, body, link)
         elif event_key == "scan.failed" and project_id:
             await alert_service.on_scan_failed(project_id, title, body, link)
+
+        # Named webhook channels: independent of accounts and preferences, like the above.
+        # Local import for the same cycle reason; route() never raises and delivers in the background.
+        from app.services import webhook_channel_service
+
+        await webhook_channel_service.route(
+            event_key, project_id=project_id, title=title, body=body, link=link, facts=facts
+        )
 
         users = await _recipients(event_key, project_id)
         if only_user_ids is not None:

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     scanner_binary_retention_count: int = 1
     scan_timeout_seconds: int = 900
     max_concurrent_cloud_scans: int = 2
+    # Cloud scans a project may start per calendar month (UTC) unless an admin overrides it on the
+    # project (docs/PROJECT_INSIGHTS_AND_CLOUD_SCAN_QUOTA.md). CI/CD scans are never counted.
+    cloud_scan_monthly_limit_default: int = 30
     # Caps scanner goroutine parallelism (default is NumCPU). Two concurrent cloud scans each
     # spawning NumCPU workers can push peak memory past a constrained container's limit and get
     # SIGKILL'd by the OOM killer ("scanner exited -9") on large/vendor-heavy repos. Lower this

@@ -18,8 +18,21 @@ export type ProjectStatsItem = {
   total_repo_count: number;
 };
 
+/** Monthly cloud-scan allowance (UTC calendar month). CI/CD scans are never counted. */
+export type CloudScanQuota = {
+  used: number;
+  limit: number;
+  remaining: number;
+  period_start: string;
+  resets_at: string;
+  /** True when `limit` is the workspace default rather than this project's own override. */
+  is_default: boolean;
+};
+
 export type Project = {
   id: string;
+  /** Present on detail; may be absent on list rows. */
+  cloud_scan_quota?: CloudScanQuota | null;
   name: string;
   description: string | null;
   owner_id: string;

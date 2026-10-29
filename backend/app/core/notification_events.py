@@ -140,6 +140,35 @@ EVENTS: tuple[NotificationEvent, ...] = (
         description="The portal could not send an email. Check SMTP settings and the server log.",
         audience="admin",
     ),
+    NotificationEvent(
+        key="scanner.download_failed",
+        label="Scanner download failed",
+        description="A CI pipeline asked for a scanner binary the portal could not serve (unknown version, "
+        "no build for that OS/arch, or the file is missing).",
+        audience="admin",
+        default_in_app=False,
+    ),
+    NotificationEvent(
+        key="pipeline.upload_stalled",
+        label="Pipeline upload stalled",
+        description="A CI/CD scan was created but never finished - the pipeline most likely died mid-run.",
+        audience="project",
+        default_in_app=False,
+    ),
+    NotificationEvent(
+        key="pipeline.silent",
+        label="Pipeline went silent",
+        description="A project whose pipeline normally scans several days a week has sent no scan for 24 hours.",
+        audience="project",
+        default_in_app=False,
+    ),
+    NotificationEvent(
+        key="portal.error",
+        label="Portal error",
+        description="The backend logged an error. Repeats of the same error are sent once an hour.",
+        audience="admin",
+        default_in_app=False,
+    ),
 )
 
 BY_KEY = {e.key: e for e in EVENTS}

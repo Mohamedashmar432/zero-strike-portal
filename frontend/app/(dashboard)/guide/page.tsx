@@ -907,9 +907,14 @@ export default function GuidePage() {
                   body: "Immutable. Bucketed into privilege / project / admin, with counts over the whole window.",
                 },
                 {
-                  href: "/admin/scanner-status",
-                  label: "Scanner Status",
-                  body: "Which scanner build the running image actually ships, whether scans are draining, and clone disk usage.",
+                  href: "/admin/control-panel",
+                  label: "Control Panel",
+                  body: "Users and activity, every project's scans, failures, new CVEs and monthly cloud-scan quota over a date range, per-project activity, and the Teams webhook channels and scheduled digest.",
+                },
+                {
+                  href: "/admin/operations#scanner",
+                  label: "Operations",
+                  body: "Live queues and load, plus the scanner section: whether the engine is available, which binaries are published, and clone disk usage.",
                 },
                 {
                   href: "/admin/ai-analytics",
@@ -952,7 +957,7 @@ export default function GuidePage() {
               {[
                 {
                   q: "A cloud scan fails with “executable not found”.",
-                  a: "The deployment has no scanner binary configured. That is an operator fix, not a project one — ask an admin to check Scanner Status.",
+                  a: "The deployment has no scanner binary configured. That is an operator fix, not a project one — ask an admin to check the Scanner section on the Operations page.",
                 },
                 {
                   q: "A cloud scan is refused for a repository that clearly exists.",

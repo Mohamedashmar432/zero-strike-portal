@@ -20,6 +20,7 @@ from app.schemas.scan import ScannerCreateScanRequest, ScannerCreateScanResponse
 from app.services import (
     audit_service,
     finding_review_service,
+    pipeline_alert_service,
     project_repo_service,
     project_service,
     report_ingestion_service,
@@ -175,6 +176,7 @@ async def update_status(
 ):
     scan = await _owned_scan(scan_id, ctx)
     now = datetime.now(timezone.utc)
+    newly_failed = payload.status == "failed" and scan.status != "failed"
     scan.status = payload.status
     scan.error_message = payload.error_message
     if payload.status in ("completed", "failed"):
@@ -189,4 +191,6 @@ async def update_status(
         target_id=scan_id,
         metadata={"status": payload.status},
     )
+    if newly_failed:
+        await pipeline_alert_service.notify_scan_failed(scan)
     return {"scan_id": scan_id, "status": scan.status}

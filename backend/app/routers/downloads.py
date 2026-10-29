@@ -29,7 +29,8 @@ async def azure_classic_ps_script() -> Response:
 
 @router.get("/{version}/checksums.txt")
 async def download_checksums(version: str) -> Response:
-    docs = await download_service.resolve_version_binaries(version)
+    async with download_service.report_failures(version):
+        docs = await download_service.resolve_version_binaries(version)
     lines = [f"{doc.sha256}  {doc.filename}" for doc in docs]
     return Response(content="\n".join(lines) + "\n", media_type="text/plain")
 
@@ -38,7 +39,8 @@ async def download_checksums(version: str) -> Response:
 async def binary_info(version: str, os_arch: str) -> ScannerBinaryInfo:
     """Metadata only (no bytes): lets a pipeline confirm a binary is published and read its sha256."""
     os_, arch = download_service.parse_os_arch(os_arch)
-    doc = await download_service.resolve_binary(version, os_, arch)
+    async with download_service.report_failures(version, os_arch):
+        doc = await download_service.resolve_binary(version, os_, arch)
     return ScannerBinaryInfo(
         version=doc.version,
         os=doc.os,
@@ -53,10 +55,11 @@ async def binary_info(version: str, os_arch: str) -> ScannerBinaryInfo:
 @router.get("/{version}/{os_arch}")
 async def download_binary(version: str, os_arch: str) -> Response:
     os_, arch = download_service.parse_os_arch(os_arch)
-    doc = await download_service.resolve_binary(version, os_, arch)
-    # Binaries are small enough (a Go CLI, tens of MB) to buffer whole — simpler than a
-    # chunked streaming response; revisit if that assumption ever stops holding.
-    stream = await download_service.open_download_stream(doc)
+    async with download_service.report_failures(version, os_arch):
+        doc = await download_service.resolve_binary(version, os_, arch)
+        # Binaries are small enough (a Go CLI, tens of MB) to buffer whole — simpler than a
+        # chunked streaming response; revisit if that assumption ever stops holding.
+        stream = await download_service.open_download_stream(doc)
     data = await stream.read()
     return Response(
         content=data,
