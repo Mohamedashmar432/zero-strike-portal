@@ -156,7 +156,8 @@ export type ScanRegressionResponse = {
 };
 
 export type VulnerabilityListFilters = {
-  status?: VulnerabilityStatus;
+  /** "false_positive" is a filter, not a stored status: resolved with the false-positive reason. */
+  status?: VulnerabilityStatus | "false_positive";
   severity?: Severity;
   kind?: FindingKind;
   /** project_repo_id, or UNLINKED_REPO_KEY for the unlinked bucket. */

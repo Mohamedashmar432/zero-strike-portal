@@ -54,7 +54,7 @@ export default function VulnerabilitiesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const status = (searchParams.get("status") as VulnerabilityStatus | null) ?? undefined;
+  const status = (searchParams.get("status") as VulnerabilityStatus | "false_positive" | null) ?? undefined;
   const severity = (searchParams.get("severity") as Severity | null) ?? undefined;
   const regressionState = (searchParams.get("regression") as RegressionState | null) ?? undefined;
   const fixStatus = (searchParams.get("fix_status") as FixStatus | null) ?? undefined;
@@ -167,6 +167,7 @@ export default function VulnerabilitiesPage() {
             options: [
               { value: ALL, label: "All statuses" },
               ...STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] })),
+              { value: "false_positive", label: "False positive" },
             ],
           },
           {

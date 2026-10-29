@@ -302,3 +302,13 @@ def test_workspace_flag_is_admin_only_and_defaults_off(client):
     assert client.put("/api/v1/workspace-settings", json={"finding_review_required": None}, headers=admin).status_code == 422
     r = client.put("/api/v1/workspace-settings", json={"finding_review_required": True}, headers=admin)
     assert r.status_code == 200 and r.json()["finding_review_required"] is True
+
+
+def test_false_positive_status_filter_lists_only_accepted_false_positives(client):
+    member, _admin, pid = _setup(client, "o", required=False)
+    url = VULN_URL.format(project_id=pid)
+    assert client.get(url, params={"status": "false_positive"}, headers=member).json()["total"] == 0
+    _request(client, member, pid, "fp-sqli", status="resolved", resolution_reason="false_positive", resolution_comment="c")
+    rows = client.get(url, params={"status": "false_positive"}, headers=member).json()
+    assert rows["total"] == 1 and rows["items"][0]["id"] == _vuln_id(pid, "fp-sqli")
+    assert client.get(url, params={"status": "open"}, headers=member).json()["total"] == 1  # the dependency one

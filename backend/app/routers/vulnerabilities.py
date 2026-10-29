@@ -189,7 +189,11 @@ async def list_vulnerabilities(
     retired = await scan_engine_service.retired_rule_ids()
     if retired:
         criteria.append({"current_rule_id": {"$nin": sorted(retired)}})
-    if status_filter:
+    if status_filter == "false_positive":
+        # Not a stored status: an accepted false positive is resolved with that reason.
+        criteria.append(Vulnerability.status == "resolved")
+        criteria.append(Vulnerability.resolution_reason == "false_positive")
+    elif status_filter:
         criteria.append(Vulnerability.status == status_filter)
     if fix_status:
         criteria.append(vulnerability_service.fix_status_criteria(fix_status))
