@@ -285,7 +285,11 @@ export default function VulnerabilitiesPage() {
                   {repoLabel(v)}
                 </TableCell>
                 <TableCell>
-                  <VulnerabilityStatusBadge status={v.status} />
+                  <VulnerabilityStatusBadge
+                    status={v.status}
+                    resolutionReason={v.resolution_reason}
+                    review={v.review}
+                  />
                 </TableCell>
                 <TableCell className="text-xs">{v.assignee_email ?? "Unassigned"}</TableCell>
                 <TableCell className="text-xs">

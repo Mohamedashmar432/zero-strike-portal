@@ -39,6 +39,7 @@ const SCOPE_MAP: { setting: string; scope: string; where: string; href?: string 
   { setting: "Audit evidence retention", scope: "Workspace → project override", where: "This page / Project → Compliance config" },
   { setting: "Default report template", scope: "Workspace → project override", where: "Settings → Report Templates", href: "/settings/report-templates" },
   { setting: "AI provider (portal-wide or per-project BYOK)", scope: "Workspace, or per-project when BYOK is on", where: "Settings → AI Provider", href: "/settings/ai-provider" },
+  { setting: "Admin review for false positives and accepted risk", scope: "Portal admin only (exemption policy)", where: "This page" },
   { setting: "Auto-fix on/off, confidence threshold", scope: "Workspace → project may tighten", where: "Settings → Auto-fix", href: "/settings/auto-fix" },
   { setting: "Auto-fix allowance, blocking severities, quota grants", scope: "Portal admin only", where: "Settings → Auto-fix", href: "/settings/auto-fix" },
   { setting: "Notification subscriptions", scope: "Per user", where: "Settings → Notifications", href: "/settings/notifications" },
@@ -76,6 +77,7 @@ function WorkspaceDefaultsCard() {
         compliance_audit_ai_narrative: body.compliance_audit_ai_narrative,
         compliance_auto_audit_on_scan: body.compliance_auto_audit_on_scan,
         compliance_evidence_retention_days: body.compliance_evidence_retention_days,
+        finding_review_required: body.finding_review_required,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.settings.workspace(), updated);
@@ -128,6 +130,38 @@ function WorkspaceDefaultsCard() {
               </span>
             </label>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ClipboardList className="size-4" /> Finding review
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4"
+              checked={form.finding_review_required}
+              onChange={(e) => setForm({ ...form, finding_review_required: e.target.checked })}
+            />
+            <span>
+              <span className="block text-sm font-medium">
+                Require admin review for false positives and accepted risk
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                When off, a member&apos;s false positive or accepted risk takes effect immediately and
+                stops blocking CI on the next scan. When on, a portal admin must accept it first.
+                Requests already pending and exemptions already accepted are not changed by flipping
+                this.
+              </span>
+            </span>
+          </label>
+          <Button onClick={() => save.mutate(form)} disabled={save.isPending}>
+            {save.isPending ? "Saving…" : "Save defaults"}
+          </Button>
         </CardContent>
       </Card>
 

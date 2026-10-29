@@ -208,9 +208,10 @@ export function statusChangeBlockReason(
 }
 
 /**
- * Whether a status change is a request for admin review rather than an immediate change: a false
+ * Whether a status change goes through the review path rather than a plain status change: a false
  * positive on a code finding, or accepted risk on a dependency finding. Either one, once an admin
- * accepts it, stops the finding blocking CI -- which is why neither takes effect on its own.
+ * accepts it, stops the finding blocking CI. Whether an admin must accept first is a workspace setting
+ * (the server decides; read `review.status` on the response).
  */
 export function needsAdminReview(
   status: VulnerabilityStatus,

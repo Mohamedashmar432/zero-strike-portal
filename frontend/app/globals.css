@@ -283,6 +283,14 @@
   html {
     @apply font-sans;
   }
+  /* Inner scroll areas (sidebar, menus, wide tables, dialogs) scroll with no visible bar; the page's
+     own scrollbar on <html> is left alone. */
+  :not(html) {
+    scrollbar-width: none;
+  }
+  :not(html)::-webkit-scrollbar {
+    display: none;
+  }
   /* JetBrains Mono ships a "slashed zero" style set. On a security tool, 0 vs O
      in a hash or a CVE id is not a nitpick. */
   code,

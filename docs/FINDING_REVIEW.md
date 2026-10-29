@@ -10,7 +10,24 @@ again; and any project member could make that call alone.
 Now a member *requests* an exemption, a portal admin decides, and an accepted exemption stops the
 finding counting in the portal **and** in the CI gate, with no change to anyone's YAML.
 
-## The workflow
+## Admin review is a workspace setting (default off)
+
+`WorkspaceSettings.finding_review_required` (Settings > General > Finding review, `PUT
+/api/v1/workspace-settings`, admin only, no project twin) decides whether a request needs an admin.
+
+- **Off (default).** A member's request is accepted the moment it is made
+  (`finding_review_service.request_review`): review status `accepted`, reviewed by the requester,
+  comment "Auto-accepted: admin review is off", the finding resolved as false positive (or
+  accepted risk) and exempt from the next scan. Audit row `Finding Review Auto-Accepted`. The
+  requester is notified (`finding.review_decided`); no admin is. The row appears on Finding Reviews
+  as accepted and an admin can still revoke it.
+- **On.** Everything below: the request stays pending, the finding keeps blocking, an admin decides.
+
+Flipping the setting never rewrites history: pending requests stay pending (admins still decide
+them) and accepted exemptions stay accepted. Acceptance side effects live in one helper
+(`_apply_acceptance`) shared by auto-accept and an admin's `decide`.
+
+## The workflow (when review is required)
 
 | Finding kind | What a member may request | Effect while pending |
 |---|---|---|

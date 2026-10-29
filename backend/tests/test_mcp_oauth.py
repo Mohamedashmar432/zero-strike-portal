@@ -228,7 +228,7 @@ def test_unauthenticated_call_points_at_the_resource_metadata(client):
     assert "/.well-known/oauth-protected-resource/mcp/user" in r.headers["www-authenticate"]
 
 
-def test_post_to_mcp_user_is_not_redirected_and_lists_the_nine_tools(client, owner):
+def test_post_to_mcp_user_is_not_redirected_and_lists_the_nine_read_tools_and_the_one_write_tool(client, owner):
     _, token = owner
     r = _rpc(client, token, "tools/list")
     assert r.status_code == 200 and r.history == []
@@ -242,7 +242,11 @@ def test_post_to_mcp_user_is_not_redirected_and_lists_the_nine_tools(client, own
         "list_compliance_audits",
         "get_compliance_audit",
         "list_fix_proposals",
+        "mark_false_positive",
     }
+    tools = {t["name"]: t for t in r.json()["result"]["tools"]}
+    assert tools["mark_false_positive"]["annotations"]["readOnlyHint"] is False
+    assert tools["list_findings"]["annotations"]["readOnlyHint"] is True
 
 
 # --- registration ---------------------------------------------------------------------------
@@ -674,3 +678,78 @@ def test_tool_calls_are_audited_with_the_project_only_for_members(client, owner)
     assert probe.project_id is None and probe.metadata["outcome"] == "refused"  # not written into their trail
     assert any(r.metadata["tool"] == "list_my_projects" for r in rows)
     assert all(r.actor_user_id for r in rows)
+
+
+# --- the write tool: mark_false_positive -----------------------------------------------------------
+
+
+def _set_review_required(value):
+    from app.services import workspace_settings_service
+
+    _run(workspace_settings_service.update_workspace_settings(finding_review_required=value))
+
+
+def _vuln_id(project_id):
+    return str(_run(Vulnerability.find_one(Vulnerability.project_id == project_id)).id)
+
+
+def test_list_findings_exposes_the_vulnerability_id_the_write_tool_needs(client, owner):
+    headers, token = owner
+    project = _project(client, headers)
+    _seed(project["id"])
+    row = _call(client, token, "list_findings", project_id=project["id"])["items"][0]
+    assert row["vulnerability_id"] == _vuln_id(project["id"])
+
+
+def test_mark_false_positive_takes_effect_at_once_when_review_is_off(client, owner):
+    headers, token = owner
+    project = _project(client, headers)
+    _seed(project["id"])
+    vid = _vuln_id(project["id"])
+    out = _call(client, token, "mark_false_positive", vulnerability_id=vid, comment="constant, not user input")
+    assert out["review_status"] == "accepted" and out["status"] == "resolved"
+    assert out["resolution_reason"] == "false_positive"
+    v = _run(Vulnerability.get(vid))
+    assert v.review.status == "accepted" and v.review.kind == "false_positive"
+    assert _audit_rows("Finding Review Auto-Accepted")
+    tool_rows = [a for a in _audit_rows("MCP tool called") if a.target_id == "mark_false_positive"]
+    assert tool_rows and tool_rows[0].project_id == project["id"] and tool_rows[0].metadata["outcome"] == "ok"
+    # A second call is refused by the service (already exempted), surfaced as a tool error.
+    again = _call(client, token, "mark_false_positive", vulnerability_id=vid, comment="again")
+    assert "already exempted" in again["__error__"]
+
+
+def test_mark_false_positive_awaits_an_admin_when_review_is_required(client, owner):
+    headers, token = owner
+    project = _project(client, headers)
+    _seed(project["id"])
+    _set_review_required(True)
+    out = _call(client, token, "mark_false_positive", vulnerability_id=_vuln_id(project["id"]), comment="why")
+    assert out["review_status"] == "pending" and out["status"] == "open"
+    assert _audit_rows("Finding Review Requested")
+
+
+def test_mark_false_positive_needs_a_comment_and_membership(client, owner):
+    headers, token = owner
+    mine = _project(client, headers)
+    _seed(mine["id"])
+    assert "comment" in _call(client, token, "mark_false_positive", vulnerability_id=_vuln_id(mine["id"]), comment=" ")["__error__"]
+
+    stranger = _user(client, "stranger@zerostrike.dev")
+    theirs = _project(client, stranger, "Theirs")
+    _seed(theirs["id"])
+    refused = _call(client, token, "mark_false_positive", vulnerability_id=_vuln_id(theirs["id"]), comment="x")
+    absent = _call(client, token, "mark_false_positive", vulnerability_id=MISSING, comment="x")
+    assert refused == absent and "not found" in refused["__error__"].lower()
+    assert _run(Vulnerability.find_one(Vulnerability.project_id == theirs["id"])).review is None
+
+
+def test_mark_false_positive_refuses_dependency_findings(client, owner):
+    headers, token = owner
+    project = _project(client, headers)
+    _seed(project["id"], kind="sca")
+    out = _call(client, token, "mark_false_positive", vulnerability_id=_vuln_id(project["id"]), comment="x")
+    assert "accepted risk" in out["__error__"]
+    assert _run(Vulnerability.find_one(Vulnerability.project_id == project["id"])).review is None
+    rows = [a for a in _audit_rows("MCP tool called") if a.target_id == "mark_false_positive"]
+    assert rows[0].metadata["outcome"] == "refused"

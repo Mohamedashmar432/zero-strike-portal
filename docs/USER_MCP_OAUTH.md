@@ -51,7 +51,8 @@ the provider over Mongo; the SDK handles request validation, PKCE checks and the
   (prefix `tsoa_`). The refresh token lives 30 days, is **rotated on every use**, and reusing an
   old refresh token revokes the whole grant. Both are bound to user, client, scopes and resource
   (RFC 8707; a token for another resource is refused). Token docs carry a TTL index.
-- **Scope** is a single `mcp:read`. All phase-2 tools are read-only.
+- **Scope** is a single `mcp:read`. All phase-2 tools are read-only except `mark_false_positive` (below), which
+  rides the same scope: there is no separate write scope yet, so connecting an app grants it.
 - **Every request** re-checks that the user is active and approved. Project membership is checked
   **per tool call**, never baked into the token, so removing a member takes effect on the next call.
 - **Connected apps.** The Connected apps section of Settings > Integrations > AI agents (`/settings/integrations/mcp`; the old `/settings/connected-apps` redirects there) lists the user's grants (client
@@ -61,7 +62,7 @@ the provider over Mongo; the SDK handles request validation, PKCE checks and the
   needs a marker — add `"mcp app"` to `_PRIVILEGE_MARKERS`), and `MCP tool called` with the
   project id.
 
-## User tools (read-only, membership-scoped)
+## User tools (membership-scoped; read-only except `mark_false_positive`)
 
 Each tool takes ids and returns at most what the portal's own API returns to that user, using the
 same response shaping and redaction (secret-type findings must not reveal more than the
@@ -78,6 +79,16 @@ vulnerabilities page does). Lists default to 50 items, hard cap 200.
 | `list_compliance_audits` | Audits for a project with score and coverage |
 | `get_compliance_audit` | One audit's control verdicts (failing first) |
 | `list_fix_proposals` | Auto-fix proposals and PR status for a scan |
+
+| `mark_false_positive(vulnerability_id, comment)` | **Write.** Requests a false-positive exemption on a code finding (id from `list_findings`, field `vulnerability_id`); a comment is required |
+
+`mark_false_positive` goes through `finding_review_service.request_review`, the same path as the
+portal's status route, so the workspace "Require admin review" setting applies: with it off (the
+default) the exemption is accepted at once and the next scan stops counting the finding; with it on
+the result is `review_status: "pending"` until an admin accepts. Any project member may call it, as
+on the REST route. Dependency (SCA) findings are refused (request accepted risk in the portal). It
+is registered with `readOnlyHint=False` and audited like every tool (`MCP tool called`, plus the
+`Finding Review Auto-Accepted` / `Requested` row).
 
 A non-member asking for a project, scan or finding gets the same "not found" as a missing id, so
 ids cannot be probed.

@@ -1,4 +1,5 @@
-"""User MCP server at /mcp/user (docs/USER_MCP_OAUTH.md): read-only, membership-scoped tools behind
+"""User MCP server at /mcp/user (docs/USER_MCP_OAUTH.md): membership-scoped tools (read-only, plus the one
+write tool `mark_false_positive`) behind
 an OAuth access token. A principal type distinct from the admin `tsmcp_` token and from the JWT
 user — each endpoint refuses the others' credentials.
 
@@ -17,6 +18,7 @@ from beanie.operators import In
 from mcp.server.auth.routes import create_auth_routes, create_protected_resource_routes
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import MCPServer
+from fastapi import HTTPException
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
@@ -44,6 +46,7 @@ from app.schemas.dashboard import SeverityCounts
 from app.services import (
     ai_analysis_service,
     audit_service,
+    finding_review_service,
     mcp_oauth_service,
     project_repo_service,
     project_service,
@@ -465,7 +468,8 @@ async def list_findings(
 
 @_tool
 async def get_finding(finding_id: str) -> dict[str, Any]:
-    """One finding: location, description, remediation guidance, triage status and any AI insight."""
+    """One finding: location, description, remediation guidance, triage status and any AI insight.
+    `triage.vulnerability_id` is the id mark_false_positive takes."""
     f = await _finding(finding_id)
     out = scans_router._to_finding_response(f).model_dump(mode="json", exclude_none=True)
     out["message"] = _text(f.message)
@@ -562,6 +566,40 @@ async def list_fix_proposals(scan_id: str, limit: int = 50) -> dict[str, Any]:
     return {"items": items, "total": await query.count()}
 
 
+async def _vulnerability(vulnerability_id: str) -> Vulnerability:
+    v = (
+        await Vulnerability.get(vulnerability_id)
+        if vulnerability_id and PydanticObjectId.is_valid(vulnerability_id)
+        else None
+    )
+    if v is None or await project_service.role_in_project(v.project_id, _user()) is None:
+        raise ToolError("Vulnerability not found")
+    _audited_project.set(v.project_id)
+    return v
+
+
+@_tool
+async def mark_false_positive(vulnerability_id: str, comment: str) -> dict[str, Any]:
+    """Mark a code finding (SAST, secret or config) as a FALSE POSITIVE, with a required justification in `comment` explaining why the finding is not a real issue. Get `vulnerability_id` from list_findings (project listings, field `vulnerability_id`). The exemption covers this finding in this file only. Dependency (SCA) findings cannot be false positives and are refused here; request accepted risk in the portal instead. Whether it takes effect immediately (the finding stops counting in the portal and in CI on the next scan) or waits for a portal admin to accept it depends on the workspace setting; the returned `review_status` says which: "accepted" or "pending"."""
+    v = await _vulnerability(vulnerability_id)
+    if finding_review_service.kind_allowed(v) != "false_positive":
+        raise ToolError(
+            "Dependency findings cannot be marked as false positive. Request accepted risk in the portal instead."
+        )
+    # Same path as the portal's status route, so the workspace review setting applies identically.
+    # Any project member may request, exactly as on that route.
+    try:
+        v = await finding_review_service.request_review(v, "false_positive", comment, _user())
+    except HTTPException as e:
+        raise ToolError(str(e.detail)) from e
+    return {
+        "vulnerability_id": str(v.id),
+        "review_status": v.review.status,
+        "status": v.status,
+        "resolution_reason": v.resolution_reason,
+    }
+
+
 TOOLS = [
     list_my_projects, get_project_overview, list_scans, get_scan, list_findings, get_finding,
     list_compliance_audits, get_compliance_audit, list_fix_proposals,
@@ -573,6 +611,11 @@ def build() -> tuple[UserMcpAuthMiddleware, MCPServer]:
     server = MCPServer("thinkshield-portal-user")
     for fn in TOOLS:
         server.add_tool(fn, annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+    # The one write tool, kept out of TOOLS so the read-only list stays exactly that.
+    server.add_tool(
+        mark_false_positive,
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
+    )
     inner = server.streamable_http_app(
         streamable_http_path="/mcp/user",
         stateless_http=True,

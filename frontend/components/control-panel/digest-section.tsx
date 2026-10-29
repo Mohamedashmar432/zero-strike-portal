@@ -19,6 +19,7 @@ import {
   type DigestSettings,
 } from "@/lib/api/digest";
 import { queryKeys } from "@/lib/api/query-keys";
+import { listWebhookChannels } from "@/lib/api/webhook-channels";
 import { when } from "./date-range";
 import { DigestPreviewTable } from "./digest-preview";
 import { ProjectPicker } from "./project-picker";
@@ -90,13 +91,20 @@ function DigestForm({
     staleTime: 0,
   });
 
+  const channels = useQuery({ queryKey: queryKeys.admin.webhookChannels(), queryFn: listWebhookChannels });
+  const noDigestChannel = channels.data !== undefined && !channels.data.some((c) => c.enabled && c.include_digest);
+
   const sendTest = useMutation({
     mutationFn: sendDigestTest,
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.webhookChannels() });
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.digestSettings() });
       setConfirmSend(false);
-      if (r.errors.length === 0) toast.success(`Digest sent to ${r.sent} channel${r.sent === 1 ? "" : "s"}`);
+      // Zero channels is not a success: the API answers 200 with sent=0 when no enabled channel
+      // has "Include scheduled digest" on, and a green toast there reads as a Teams delivery.
+      if (r.errors.length === 0 && r.sent === 0)
+        toast.error("Nothing was sent. No enabled webhook channel has “Include scheduled digest” switched on.");
+      else if (r.errors.length === 0) toast.success(`Digest sent to ${r.sent} channel${r.sent === 1 ? "" : "s"}`);
       else
         toast.error(
           `Sent to ${r.sent}, failed for ${r.errors.map((e) => `${e.name}: ${e.error}`).join("; ")}`
@@ -115,6 +123,12 @@ function DigestForm({
           <Label htmlFor="digest-enabled">Send the scheduled digest</Label>
           <Switch id="digest-enabled" checked={enabled} onCheckedChange={setEnabled} aria-label="Digest enabled" />
         </div>
+        {noDigestChannel && (
+          <p role="alert" className="text-xs text-severity-critical">
+            No enabled webhook channel includes the digest, so nothing will be posted to Teams. Edit a channel
+            below and switch on “Include scheduled digest”.
+          </p>
+        )}
 
         <div className="flex flex-wrap items-end gap-4">
           <div className="space-y-1.5">

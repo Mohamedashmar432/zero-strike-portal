@@ -24,6 +24,7 @@ def _validate_frameworks(v: list[str] | None) -> list[str] | None:
 class WorkspaceSettingsResponse(BaseModel):
     default_report_template: str
     project_byok_enabled: bool
+    finding_review_required: bool
     scan_enable_secrets: bool
     scan_enable_sca: bool
     scan_enable_framework_checks: bool
@@ -75,6 +76,8 @@ class WorkspaceSettingsUpdateRequest(BaseModel):
     # it completed, which is never what someone means.
     compliance_evidence_retention_days: int | None = Field(default=None, ge=1, le=3650)
     signup_requires_approval: bool | None = None
+    # Exemption policy, so admin-only with no project twin.
+    finding_review_required: bool | None = None
     # Checked against real active admins in the router (needs the database).
     signup_notify_admin_ids: list[str] | None = None
 

@@ -28,6 +28,13 @@ class WorkspaceSettings(Document):
     # ai_provider_config_service.resolve_failover_configs().
     project_byok_enabled: bool = False
 
+    # Finding review policy (docs/FINDING_REVIEW.md). False (the default): a member's false positive /
+    # accepted-risk request is accepted the moment it is made, so it stops blocking CI on the next scan.
+    # True: it stays pending until a portal admin accepts it. Exemption policy, so admin-only with no
+    # project twin. Read by finding_review_service.request_review only; flipping it never touches
+    # requests already pending or exemptions already accepted.
+    finding_review_required: bool = False
+
     # --- scan defaults -------------------------------------------------------
     # These three were hardcoded into the scanner argv in cloud_scan_service. The defaults
     # below are those hardcoded values, so an existing workspace behaves identically until

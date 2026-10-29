@@ -99,7 +99,7 @@ export default function FindingReviewsPage() {
         <PageHeader
           eyebrow="Administration / Requests"
           title="Finding Reviews"
-          description="Members ask for a finding to stop blocking CI: a false positive for code findings, an accepted risk for dependency findings. Nothing changes until you accept. An accepted finding is still detected and reported, at that file only, but the pipeline gate no longer counts it."
+          description="Members ask for a finding to stop blocking CI: a false positive for code findings, an accepted risk for dependency findings. While admin review is required (Settings > General), nothing changes until you accept; when it is off, requests are accepted automatically and appear here as accepted, where you can still revoke them. An accepted finding is still detected and reported, at that file only, but the pipeline gate no longer counts it."
         />
       </div>
 

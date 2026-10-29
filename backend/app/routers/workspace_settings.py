@@ -42,6 +42,7 @@ def _to_response(ws: WorkspaceSettings) -> WorkspaceSettingsResponse:
     return WorkspaceSettingsResponse(
         default_report_template=ws.default_report_template,
         project_byok_enabled=ws.project_byok_enabled,
+        finding_review_required=ws.finding_review_required,
         scan_enable_secrets=ws.scan_enable_secrets,
         scan_enable_sca=ws.scan_enable_sca,
         scan_enable_framework_checks=ws.scan_enable_framework_checks,
@@ -69,6 +70,10 @@ async def update_workspace_settings(
     if "signup_requires_approval" in changed and changed["signup_requires_approval"] is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "signup_requires_approval must be true or false"
+        )
+    if "finding_review_required" in changed and changed["finding_review_required"] is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "finding_review_required must be true or false"
         )
     if "signup_notify_admin_ids" in changed:
         if changed["signup_notify_admin_ids"] is None:

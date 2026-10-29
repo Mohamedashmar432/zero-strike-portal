@@ -18,7 +18,7 @@ from fastapi import HTTPException, status
 
 from app.models.user import User
 from app.models.vulnerability import FindingReview, ReviewKind, Vulnerability
-from app.services import audit_service, notification_service
+from app.services import audit_service, notification_service, workspace_settings_service
 
 _REVIEW_LINK = "/admin/finding-reviews"
 
@@ -36,6 +36,24 @@ def kind_allowed(vuln: Vulnerability) -> ReviewKind:
     published advisory against the installed version), so they can be accepted as a risk but never
     called a false positive."""
     return "accepted_risk" if vuln.current_kind == "sca" else "false_positive"
+
+
+def _apply_acceptance(vuln: Vulnerability, review: FindingReview, now: datetime) -> None:
+    """What an accepted review does to the vulnerability, shared by an admin's `decide` and the
+    auto-accept in `request_review` so the two can never drift. Sets the same status/reason a direct
+    triage used to, so every existing reader (fix_status, the Scan Engine's false-positive stats,
+    reconcile's "dispositional reason" rule) keeps working."""
+    if review.kind == "false_positive":
+        vuln.status = "resolved"
+        vuln.resolution_reason = "false_positive"
+        vuln.resolved_at = now
+        vuln.resolved_by_user_id = review.requested_by_user_id
+    else:
+        vuln.status = "accepted_risk"
+        vuln.resolution_reason = None
+        vuln.resolved_at = None
+        vuln.resolved_by_user_id = None
+    vuln.resolution_comment = review.request_comment
 
 
 async def request_review(vuln: Vulnerability, kind: ReviewKind, comment: str, user: User) -> Vulnerability:
@@ -60,17 +78,52 @@ async def request_review(vuln: Vulnerability, kind: ReviewKind, comment: str, us
         raise HTTPException(status.HTTP_409_CONFLICT, "This finding has no file location to exempt")
 
     now = datetime.now(timezone.utc)
-    vuln.review = FindingReview(
+    review = vuln.review = FindingReview(
         kind=kind,
         file_path=file_path,
         requested_by_user_id=str(user.id),
         requested_at=now,
         request_comment=comment,
     )
+    label = "false positive" if kind == "false_positive" else "accepted risk"
+
+    if not (await workspace_settings_service.get_workspace_settings()).finding_review_required:
+        # Admin review is off: the request is its own acceptance. Nothing is pending, so no admin is asked.
+        review.status = "accepted"
+        review.reviewed_by_user_id = str(user.id)
+        review.reviewed_at = now
+        review.review_comment = "Auto-accepted: admin review is off"
+        _apply_acceptance(vuln, review, now)
+        vuln.updated_at = now
+        await vuln.save()
+        await audit_service.record(
+            "Finding Review Auto-Accepted",
+            actor_type="user",
+            actor_user_id=str(user.id),
+            project_id=vuln.project_id,
+            target_type="vulnerability",
+            target_id=str(vuln.id),
+            metadata={"kind": kind, "file": file_path, "rule_id": vuln.current_rule_id or "", "comment": comment},
+        )
+        await notification_service.notify(
+            "finding.review_decided",
+            project_id=vuln.project_id,
+            title=f"Your {label} request was accepted",
+            body=f"{vuln.current_rule_name or vuln.current_rule_id} in {file_path}: accepted -- it no longer "
+            "blocks CI (admin review is off).",
+            link=f"/projects/{vuln.project_id}/vulnerabilities/{vuln.id}",
+            severity="info",
+            only_user_ids=[str(user.id)],
+        )
+        if kind == "false_positive":
+            from app.services import scan_engine_service
+
+            await scan_engine_service.check_rule_noisy(vuln.current_rule_id)
+        return vuln
+
     vuln.updated_at = now
     await vuln.save()
 
-    label = "false positive" if kind == "false_positive" else "accepted risk"
     await audit_service.record(
         "Finding Review Requested",
         actor_type="user",
@@ -105,19 +158,7 @@ async def decide(vuln: Vulnerability, accept: bool, comment: str | None, admin: 
     review.reviewed_at = now
     review.review_comment = comment or None
     if accept:
-        # The same status/reason a direct triage used to set, so every existing reader (fix_status,
-        # the Scan Engine's false-positive stats, reconcile's "dispositional reason" rule) keeps working.
-        if review.kind == "false_positive":
-            vuln.status = "resolved"
-            vuln.resolution_reason = "false_positive"
-            vuln.resolved_at = now
-            vuln.resolved_by_user_id = review.requested_by_user_id
-        else:
-            vuln.status = "accepted_risk"
-            vuln.resolution_reason = None
-            vuln.resolved_at = None
-            vuln.resolved_by_user_id = None
-        vuln.resolution_comment = review.request_comment
+        _apply_acceptance(vuln, review, now)
     vuln.updated_at = now
     await vuln.save()
 

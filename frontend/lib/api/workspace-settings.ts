@@ -7,6 +7,8 @@ export type ComplianceAuditScope = "latest" | "history";
 export interface WorkspaceSettings {
   default_report_template: string;
   project_byok_enabled: boolean;
+  /** Admin-only, no project twin: a member's false positive / accepted risk waits for an admin when true. */
+  finding_review_required: boolean;
   scan_enable_secrets: boolean;
   scan_enable_sca: boolean;
   scan_enable_framework_checks: boolean;
@@ -34,6 +36,7 @@ export type WorkspaceSettingsUpdate = Partial<
     | "compliance_auto_audit_on_scan"
     | "compliance_evidence_retention_days"
     | "signup_requires_approval"
+    | "finding_review_required"
     | "signup_notify_admin_ids"
   >
 >;

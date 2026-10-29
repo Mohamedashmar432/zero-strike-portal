@@ -10,7 +10,7 @@ from app.models.finding import Finding
 from app.models.scan import Scan
 from app.models.vulnerability import Vulnerability
 from app.schemas.report import GoReportIn
-from app.services import finding_review_service
+from app.services import finding_review_service, workspace_settings_service
 from app.services import report_ingestion_service as ingest_svc
 from tests.test_auth_flow import register_and_login
 from tests.test_scanner_endpoints import _raw_key, _scanner
@@ -20,7 +20,14 @@ from tests.test_vulnerabilities_api import VULN_URL, _create_project, _headers, 
 REVIEWS = "/api/v1/admin/finding-reviews"
 
 
-def _setup(client, tag):
+def _set_review_required(value: bool):
+    asyncio.run(workspace_settings_service.update_workspace_settings(finding_review_required=value))
+
+
+def _setup(client, tag, required=True):
+    """`required` is the workspace's admin-review switch; most tests here are about the review flow,
+    so it defaults on (the portal default is off -- see the auto-accept tests at the bottom)."""
+    _set_review_required(required)
     member = register_and_login(client, email=f"member-{tag}@zs.dev")
     project = _create_project(client, _headers(member), name=f"Review {tag}")
     register_and_login(client, email=f"admin-{tag}@zs.dev")
@@ -209,3 +216,89 @@ def test_unreviewed_false_positives_migrate_to_pending_and_dependencies_reopen(c
     assert code.review.request_comment == "old verdict" and code.review.requested_by_user_id == "u-legacy"
     assert dep.status == "open" and dep.review is None
     assert _exemptions(client, member, pid) == []
+
+
+# --- admin review off (the default): a request is its own acceptance -------------------------------
+
+
+def test_review_off_accepts_a_false_positive_at_once_and_the_gate_sees_it(client):
+    member, admin, pid = _setup(client, "i", required=False)
+    r = _request(client, member, pid, "fp-sqli", status="resolved", resolution_reason="false_positive",
+                 resolution_comment="query is a constant")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "resolved" and body["resolution_reason"] == "false_positive"
+    assert body["review"]["status"] == "accepted"
+    assert body["review"]["review_comment"] == "Auto-accepted: admin review is off"
+
+    async def exempt():
+        v = await Vulnerability.find_one(Vulnerability.project_id == pid, Vulnerability.fingerprint == "fp-sqli")
+        return v, await finding_review_service.accepted_exemptions(pid, v.repo_scope_key)
+
+    v, exemptions = asyncio.run(exempt())
+    assert v.review.reviewed_by_user_id == v.review.requested_by_user_id
+    assert exemptions == [{"fingerprint": "fp-sqli", "file": "src/db.py", "kind": "false_positive"}]
+    # The scanner's create-scan response carries it, so the next CI run stops counting it.
+    assert _exemptions(client, member, pid) == [{"fingerprint": "fp-sqli", "file": "src/db.py", "kind": "false_positive"}]
+
+    async def audit():
+        return await AuditLog.find_one(AuditLog.action == "Finding Review Auto-Accepted", AuditLog.target_id == str(v.id))
+
+    row = asyncio.run(audit())
+    assert row is not None and row.actor_type == "user"
+
+    # It lands on the admin page as an accepted row, and an admin can still revoke it.
+    queue = client.get(REVIEWS, headers=admin).json()
+    assert queue["pending_count"] == 0
+    vid = _vuln_id(pid, "fp-sqli")
+    r = client.post(f"{REVIEWS}/{vid}/revoke", json={"comment": "wrong call"}, headers=admin)
+    assert r.status_code == 200 and r.json()["vulnerability_status"] == "open"
+    assert _exemptions(client, member, pid) == []
+
+
+def test_review_off_accepts_dependency_accepted_risk_too(client):
+    member, _admin, pid = _setup(client, "j", required=False)
+    r = _request(client, member, pid, "fp-dep", status="accepted_risk", resolution_comment="not reachable")
+    assert r.json()["status"] == "accepted_risk" and r.json()["review"]["status"] == "accepted"
+    assert {"fingerprint": "fp-dep", "file": "requirements.txt", "kind": "accepted_risk"} in _exemptions(client, member, pid)
+
+
+def test_review_on_stays_pending_until_an_admin_accepts(client):
+    member, admin, pid = _setup(client, "k", required=True)
+    r = _request(client, member, pid, "fp-sqli", status="resolved", resolution_reason="false_positive",
+                 resolution_comment="c")
+    assert r.json()["status"] == "open" and r.json()["review"]["status"] == "pending"
+    assert _exemptions(client, member, pid) == []
+    client.post(f"{REVIEWS}/{_vuln_id(pid, 'fp-sqli')}/decide", json={"decision": "accept"}, headers=admin)
+    assert [e["fingerprint"] for e in _exemptions(client, member, pid)] == ["fp-sqli"]
+
+
+def test_flipping_the_switch_leaves_existing_reviews_alone(client):
+    member, _admin, pid = _setup(client, "l", required=True)
+    _request(client, member, pid, "fp-sqli", status="resolved", resolution_reason="false_positive", resolution_comment="c")
+    _set_review_required(False)
+    v = client.get(f"{VULN_URL.format(project_id=pid)}/{_vuln_id(pid, 'fp-sqli')}", headers=member).json()
+    assert v["review"]["status"] == "pending" and v["status"] == "open"  # not retroactively accepted
+    assert _exemptions(client, member, pid) == []
+
+
+def test_review_off_exemption_suppresses_the_finding_on_reingest(client):
+    member, _admin, pid = _setup(client, "m", required=False)
+    _request(client, member, pid, "fp-sqli", status="resolved", resolution_reason="false_positive", resolution_comment="c")
+    seen = _ingest(pid, [("fp-sqli", "src/db.py"), ("fp-sqli", "src/other.py")])
+    assert seen[("fp-sqli", "src/db.py")] == "false_positive"
+    assert seen[("fp-sqli", "src/other.py")] is None
+    # Excluded from the counts too: the visible findings list omits it.
+    scan = asyncio.run(Scan.find(Scan.project_id == pid).sort("-created_at").first_or_none())
+    r = client.get(f"/api/v1/scans/{scan.id}/findings", headers=member)
+    assert r.status_code == 200
+    assert [i["location"]["file"] for i in r.json()["items"]] == ["src/other.py"]
+
+
+def test_workspace_flag_is_admin_only_and_defaults_off(client):
+    member, admin, _pid = _setup(client, "n", required=False)
+    assert client.get("/api/v1/workspace-settings", headers=member).json()["finding_review_required"] is False
+    assert client.put("/api/v1/workspace-settings", json={"finding_review_required": True}, headers=member).status_code == 403
+    assert client.put("/api/v1/workspace-settings", json={"finding_review_required": None}, headers=admin).status_code == 422
+    r = client.put("/api/v1/workspace-settings", json={"finding_review_required": True}, headers=admin)
+    assert r.status_code == 200 and r.json()["finding_review_required"] is True
