@@ -28,6 +28,7 @@ export const queryKeys = {
     webhookEvents: () => ["admin", "webhook-channels", "events"] as const,
     digestSettings: () => ["admin", "digest-settings"] as const,
     digestPreview: () => ["admin", "digest-settings", "preview"] as const,
+    liveAlerts: () => ["admin", "live-alerts"] as const,
     mcpTokens: () => ["admin", "mcp-tokens"] as const,
     autoFixQuotaRequests: (status?: string) =>
       status === undefined
@@ -53,6 +54,7 @@ export const queryKeys = {
     repoScanHistory: (projectId: string, repoId: string) =>
       ["projects", projectId, "repos", repoId, "scan-history"] as const,
     scanActivity: (projectId: string) => ["projects", projectId, "scan-activity"] as const,
+    liveAlerts: (projectId: string) => ["projects", projectId, "live-alerts"] as const,
     aiUsage: (projectId: string) => ["projects", projectId, "ai-usage"] as const,
     aiProviders: (projectId: string) => ["projects", projectId, "ai-provider"] as const,
     aiBudget: (projectId: string) => ["projects", projectId, "ai-budget"] as const,

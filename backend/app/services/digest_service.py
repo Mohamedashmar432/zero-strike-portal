@@ -12,6 +12,8 @@ lookups made at scan time -- the portal holds no CVE feed, so the card never cla
 """
 
 import asyncio
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -20,6 +22,7 @@ from pymongo import ReturnDocument
 
 from app.core.config import settings
 from app.models.digest_settings import DigestSettings
+from app.models.finding import Finding
 from app.models.project import Project
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
@@ -30,6 +33,7 @@ from app.schemas.digest import (
     DigestSendError,
     DigestSendResponse,
     DigestTotals,
+    NewAdvisory,
     QuotaWarning,
     ScannerHealth,
     StaleProject,
@@ -50,8 +54,22 @@ logger = structlog.get_logger(__name__)
 STALE_AFTER = timedelta(days=30)
 QUOTA_WARN_FRACTION = 0.8
 _SLOT_GRACE = timedelta(hours=6)  # a slot missed by more than this (portal was down) is skipped, not sent late
+# The two OSV.dev endpoints the scanner itself calls at scan time (scanner: internal/scanner/sca/osv.go).
+_OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
 _OSV_PROBE_URL = "https://api.osv.dev/v1/vulns/GHSA-jfh8-c2jp-5v3q"
-_MAX_TABLE_ROWS = 25
+_OSV_BATCH_PROBE = {"queries": [{"package": {"name": "lodash", "ecosystem": "npm"}, "version": "4.17.20"}]}
+# Teams refuses a message over ~28 KB (Power Automate reports RequestEntityTooLarge), and a Workflows
+# webhook still answers 202 first, so an oversize card is accepted by the portal's POST and then never
+# appears. That is why the digest is several small cards, not one: a project row costs ~1.2 KB, so 10 per
+# card is ~13 KB. Workflows re-wraps each card in a larger, escaped message; _MAX_CARD_BYTES is the budget
+# a test holds every card to.
+_MAX_CARD_BYTES = 20_000
+_ROWS_PER_CARD = 10
+_MAX_PROJECT_CARDS = 6  # 60 projects; the summary card names how many were left out (totals cover them)
+_MAX_ADVISORIES = 8
+# Workflows runs each post as its own flow, so posts sent back to back can land out of order; the cards
+# are also numbered "n/N" so a reader can still tell.
+_CARD_GAP_SECONDS = 2.0
 _RUNNER_LOOKBACK = timedelta(days=14)
 
 
@@ -69,15 +87,39 @@ async def get_settings() -> DigestSettings:
 # --- gathering --------------------------------------------------------------------------------
 
 
-async def _probe_osv() -> bool:
-    """Whether OSV.dev answers from this server. Any HTTP response counts as reachable; only a
-    network failure or timeout does not. Tests replace this -- they never touch the network."""
-    try:
-        async with httpx.AsyncClient(timeout=3, follow_redirects=False) as client:
-            await client.get(_OSV_PROBE_URL)
-        return True
-    except Exception:
-        return False
+@dataclass(frozen=True)
+class OsvProbe:
+    """Round-trip in ms of each OSV.dev endpoint the scanner calls; None = unreachable or a 5xx."""
+
+    batch_ms: int | None
+    vuln_ms: int | None
+    checked_at: datetime
+
+    @property
+    def reachable(self) -> bool:
+        return self.batch_ms is not None and self.vuln_ms is not None
+
+
+async def _probe_osv_live(transport: httpx.AsyncBaseTransport | None = None) -> OsvProbe:
+    async def timed(client: httpx.AsyncClient, method: str, url: str, **kw) -> int | None:
+        started = time.perf_counter()
+        try:
+            resp = await client.request(method, url, **kw)
+        except Exception:
+            return None
+        return None if resp.status_code >= 500 else round((time.perf_counter() - started) * 1000)
+
+    async with httpx.AsyncClient(timeout=3, follow_redirects=False, transport=transport) as client:
+        batch, vuln = await asyncio.gather(
+            timed(client, "POST", _OSV_BATCH_URL, json=_OSV_BATCH_PROBE), timed(client, "GET", _OSV_PROBE_URL)
+        )
+    return OsvProbe(batch_ms=batch, vuln_ms=vuln, checked_at=datetime.now(timezone.utc))
+
+
+async def _probe_osv() -> OsvProbe:
+    """Whether OSV.dev answers from this server, per endpoint. Any non-5xx HTTP response counts as
+    reachable; a network failure or timeout does not. Tests replace this -- they never touch the network."""
+    return await _probe_osv_live()
 
 
 def _norm_version(version: str | None) -> str:
@@ -105,10 +147,26 @@ async def _outdated_ci_runners(latest: str | None) -> int:
     return sum(1 for row in rows if _norm_version(row["v"]) != _norm_version(latest))
 
 
-async def _scanner_health(new_ids: list[str]) -> ScannerHealth:
+def _advisory_summary(found: list[tuple[str, str, datetime]]) -> list[NewAdvisory]:
+    """One row per advisory id across projects: its worst severity and how many projects first reported it."""
+    by_id: dict[str, tuple[str, int]] = {}
+    for advisory_id, severity, _first in found:
+        worst, projects = by_id.get(advisory_id, ("", 0))
+        by_id[advisory_id] = (max(worst, severity, key=lambda v: _SEV_RANK.get(v, 0)), projects + 1)
+    rows = [NewAdvisory(id=i, severity=sev or "info", projects=n) for i, (sev, n) in by_id.items()]
+    return sorted(rows, key=lambda a: (-_SEV_RANK.get(a.severity, 0), -a.projects, a.id))
+
+
+async def _last_dependency_scan_at() -> datetime | None:
+    row = await Finding.find(Finding.kind == "sca").sort("-created_at").first_or_none()
+    return _utc(row.created_at) if row else None
+
+
+async def _scanner_health(advisories: list[NewAdvisory]) -> ScannerHealth:
     newest = await ScannerBinary.find_all().sort("-uploaded_at").first_or_none()
     latest = newest.version if newest else None
     pack = await scan_engine_service.active_pack()
+    osv = await _probe_osv()
     return ScannerHealth(
         engine_available=cloud_scan_service.scanner_available(),
         backend_scanner_version=settings.scanner_build_ref or "unknown",
@@ -116,8 +174,14 @@ async def _scanner_health(new_ids: list[str]) -> ScannerHealth:
         outdated_ci_runners=await _outdated_ci_runners(latest),
         rule_pack_version=pack.version if pack else None,
         rule_count=len(pack.custom_rules) if pack else 0,
-        osv_reachable=await _probe_osv(),
-        new_cve_ids=new_ids[:5],
+        osv_reachable=osv.reachable,
+        osv_batch_ms=osv.batch_ms,
+        osv_vuln_ms=osv.vuln_ms,
+        osv_checked_at=osv.checked_at,
+        last_dependency_scan_at=await _last_dependency_scan_at(),
+        new_cve_ids=[a.id for a in advisories[:5]],
+        new_advisories=advisories[:_MAX_ADVISORIES],
+        new_advisory_count=len(advisories),
     )
 
 
@@ -198,7 +262,7 @@ async def build_preview(digest: DigestSettings, now: datetime | None = None) -> 
         period_end=end,
         rows=rows,
         totals=totals,
-        scanner=await _scanner_health([a for a, _, _ in all_new]),
+        scanner=await _scanner_health(_advisory_summary(all_new)),
         stale_projects=stale,
         quota_warnings=warnings,
     )
@@ -213,6 +277,7 @@ def _utc(value: datetime | None) -> datetime | None:
 # --- the card (pure) --------------------------------------------------------------------------
 
 _SEV_LETTER = {"critical": "C", "high": "H", "medium": "M", "low": "L", "info": "I"}
+_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Column set, not the 1.5 Table element: legacy Office 365 connector webhooks (webhook.office.com)
 # render Adaptive Cards only up to 1.4 and drop a Table without an error, so the rows vanished.
 _COLUMNS = ("Project", "Pipeline", "Cloud", "Critical", "High", "Quota", "New CVEs")
@@ -235,7 +300,6 @@ def _grid_row(cells: list[dict], *, style: str | None = None, separator: bool = 
     row: dict = {
         "type": "ColumnSet",
         "spacing": "Small",
-        "separator": separator,
         "columns": [
             {"type": "Column", "width": w, "verticalContentAlignment": "Center", "items": [c]}
             for w, c in zip(_WIDTHS, cells)
@@ -243,6 +307,8 @@ def _grid_row(cells: list[dict], *, style: str | None = None, separator: bool = 
     }
     if style:
         row["style"] = style
+    if separator:
+        row["separator"] = True
     return row
 
 
@@ -305,37 +371,153 @@ def _rank(r) -> tuple:
     return (r.critical, r.high, r.pipeline_failed + r.cloud_failed, r.pipeline_runs + r.cloud_scans)
 
 
-def build_card(preview: DigestPreview, *, frontend_origin: str = "") -> dict:
-    """Adaptive Card 1.4 for the digest. Pure: the same preview always yields the same card."""
-    period = f"{preview.period_start:%d %b %Y %H:%M} to {preview.period_end:%d %b %Y %H:%M} UTC"
-    t = preview.totals
-    shown = sorted(preview.rows, key=_rank, reverse=True)[:_MAX_TABLE_ROWS]
+@dataclass(frozen=True)
+class _Part:
+    label: str
+    title: str
+    subtitle: str | None
+    body: list[dict]
+    style: str = "emphasis"
+    actions: list[dict] | None = None
 
-    body: list[dict] = [
+
+def _envelope(part: _Part, index: int, total: int) -> dict:
+    header = [
+        {
+            "type": "TextBlock",
+            "text": f"THINKSHIELD · SECURITY DIGEST · {index}/{total} · {part.label}",
+            "size": "Small",
+            "weight": "Bolder",
+            "isSubtle": True,
+            "wrap": True,
+        },
+        {"type": "TextBlock", "text": part.title, "size": "Large", "weight": "Bolder", "spacing": "None", "wrap": True},
+    ]
+    if part.subtitle:
+        header.append(
+            {"type": "TextBlock", "text": part.subtitle, "size": "Small", "isSubtle": True, "spacing": "None", "wrap": True}
+        )
+    card: dict = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "msteams": {"width": "Full"},
+        "body": [{"type": "Container", "style": part.style, "bleed": True, "items": header}, *part.body],
+    }
+    if part.actions:
+        card["actions"] = part.actions
+    return card
+
+
+def _note(text: str, *, spacing: str = "Small") -> dict:
+    return {"type": "TextBlock", "text": text, "isSubtle": True, "size": "Small", "wrap": True, "spacing": spacing}
+
+
+def _ms(value: int | None) -> str:
+    return "NOT REACHABLE" if value is None else f"reachable, {value} ms"
+
+
+def _health_part(preview: DigestPreview) -> _Part:
+    s = preview.scanner
+    ready = s.engine_available and s.osv_reachable
+    engine = [
+        ("Scan engine", "Available" if s.engine_available else "NOT AVAILABLE"),
+        ("Scanner in backend", s.backend_scanner_version),
+        ("Latest published binary", s.latest_binary_version or "None published"),
+        ("CI runners on an older scanner", str(s.outdated_ci_runners)),
+        ("Rule pack", f"v{s.rule_pack_version} ({s.rule_count} custom rules)" if s.rule_pack_version else "None published"),
+    ]
+    feed = [
+        ("Source", "OSV.dev, queried live at scan time. The scanner keeps no local CVE database."),
+        ("Batch lookup", _ms(s.osv_batch_ms)),
+        ("Advisory lookup", _ms(s.osv_vuln_ms)),
+        ("Checked", f"{s.osv_checked_at:%d %b %Y %H:%M} UTC" if s.osv_checked_at else "-"),
+        (
+            "Last dependency scan",
+            f"{s.last_dependency_scan_at:%d %b %Y %H:%M} UTC" if s.last_dependency_scan_at else "None recorded",
+        ),
+    ]
+    since = f"{preview.period_start:%d %b %H:%M} UTC"
+    advisories: list[dict] = [
+        {
+            "type": "TextBlock",
+            "text": f"New advisories since {since}: {s.new_advisory_count}",
+            "weight": "Bolder",
+            "wrap": True,
+        }
+    ]
+    if s.new_advisories:
+        advisories += [
+            {
+                "type": "TextBlock",
+                "text": f"- {a.id} ({a.severity}), {a.projects} project{'s' if a.projects != 1 else ''}",
+                "wrap": True,
+                "size": "Small",
+                "spacing": "None",
+                "color": "Attention" if a.severity in ("critical", "high") else "Default",
+            }
+            for a in s.new_advisories
+        ]
+        if s.new_advisory_count > len(s.new_advisories):
+            advisories.append(_note(f"+ {s.new_advisory_count - len(s.new_advisories)} more advisories."))
+    else:
+        advisories.append(_note("No advisory was first reported by any project in this period.", spacing="None"))
+    body = [
         {
             "type": "Container",
-            "style": "emphasis",
-            "bleed": True,
+            "spacing": "Medium",
             "items": [
-                {
-                    "type": "TextBlock",
-                    "text": "THINKSHIELD · SECURITY DIGEST",
-                    "size": "Small",
-                    "weight": "Bolder",
-                    "isSubtle": True,
-                    "wrap": True,
-                },
-                {
-                    "type": "TextBlock",
-                    "text": f"{len(preview.rows)} projects",
-                    "size": "Large",
-                    "weight": "Bolder",
-                    "spacing": "None",
-                    "wrap": True,
-                },
-                {"type": "TextBlock", "text": period, "size": "Small", "isSubtle": True, "spacing": "None", "wrap": True},
+                {"type": "TextBlock", "text": "Scanner", "weight": "Bolder", "wrap": True},
+                {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in engine]},
             ],
         },
+        {
+            "type": "Container",
+            "spacing": "Medium",
+            "separator": True,
+            "items": [
+                {"type": "TextBlock", "text": "CVE data (OSV.dev)", "weight": "Bolder", "wrap": True},
+                {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in feed]},
+            ],
+        },
+        {"type": "Container", "spacing": "Medium", "separator": True, "items": advisories},
+    ]
+    return _Part(
+        "SCANNER HEALTH",
+        "Scanner ready, CVE feed live" if ready else "Scanner NOT ready",
+        f"{s.backend_scanner_version} · {s.new_advisory_count} new advisories in this period",
+        body,
+        style="good" if ready else "attention",
+    )
+
+
+def _project_parts(preview: DigestPreview) -> tuple[list[_Part], int]:
+    """Project status cards, `_ROWS_PER_CARD` per card, worst exposure first; and how many projects
+    did not fit in `_MAX_PROJECT_CARDS` (the summary card names them as left out)."""
+    ordered = sorted(preview.rows, key=_rank, reverse=True)
+    shown = ordered[: _ROWS_PER_CARD * _MAX_PROJECT_CARDS]
+    parts: list[_Part] = []
+    for start in range(0, len(shown), _ROWS_PER_CARD):
+        chunk = shown[start : start + _ROWS_PER_CARD]
+        body = [_grid_row([_text(c, bold=True, center=i in _CENTERED) for i, c in enumerate(_COLUMNS)], style="emphasis")]
+        body += [_grid_row(_row_cells(r.name, r, _cves_text(r.new_cves)), separator=i > 0) for i, r in enumerate(chunk)]
+        body.append(
+            _note(
+                "Pipeline and Cloud count runs in this period. Critical and High are current exposure "
+                "(latest scan per repository).",
+                spacing="Medium",
+            )
+        )
+        parts.append(_Part("PROJECT STATUS", f"Projects {start + 1}-{start + len(chunk)} of {len(ordered)}", None, body))
+    return parts, len(ordered) - len(shown)
+
+
+def _summary_part(preview: DigestPreview, left_out: int, frontend_origin: str) -> _Part:
+    t, s = preview.totals, preview.scanner
+    end = preview.period_end
+    period = f"{preview.period_start:%d %b %Y %H:%M} to {end:%d %b %Y %H:%M} UTC"
+    ready = s.engine_available and s.osv_reachable
+    body: list[dict] = [
         {
             "type": "ColumnSet",
             "spacing": "Medium",
@@ -348,61 +530,26 @@ def build_card(preview: DigestPreview, *, frontend_origin: str = "") -> dict:
                 _kpi("High", t.high, "Warning" if t.high else None),
             ],
         },
-        {"type": "TextBlock", "text": "Projects", "weight": "Bolder", "spacing": "Large", "wrap": True},
-        _grid_row([_text(c, bold=True, center=i in _CENTERED) for i, c in enumerate(_COLUMNS)], style="emphasis"),
-    ]
-    for i, r in enumerate(shown):
-        body.append(_grid_row(_row_cells(r.name, r, _cves_text(r.new_cves)), separator=i > 0))
-    body.append(
-        _grid_row(_row_cells("Total", t, str(t.new_cves.count) if t.new_cves.count else "-", bold=True), style="emphasis")
-    )
-    if len(preview.rows) > len(shown):
-        body.append(
-            {
-                "type": "TextBlock",
-                "text": f"+ {len(preview.rows) - len(shown)} more projects (totals include them).",
-                "isSubtle": True,
-                "size": "Small",
-                "wrap": True,
-            }
-        )
-    body.append(
         {
-            "type": "TextBlock",
-            "text": "Pipeline and Cloud count runs in this period. Critical and High are current exposure "
-            "(latest scan per repository).",
-            "isSubtle": True,
-            "size": "Small",
-            "wrap": True,
-        }
-    )
-
-    s = preview.scanner
-    facts = [
-        ("Scan engine", "Available" if s.engine_available else "NOT AVAILABLE"),
-        ("Scanner in backend", s.backend_scanner_version),
-        ("Latest published binary", s.latest_binary_version or "None published"),
-        ("CI runners on an older scanner", str(s.outdated_ci_runners)),
-        ("Rule pack", f"v{s.rule_pack_version} ({s.rule_count} custom rules)" if s.rule_pack_version else "None published"),
-        ("Vulnerability data", "OSV.dev, live at scan time: " + ("reachable" if s.osv_reachable else "NOT REACHABLE")),
-    ]
-    if s.new_cve_ids:
-        facts.append(("New advisories this period", ", ".join(s.new_cve_ids)))
-    body.append(
-        {
-            "type": "Container",
-            "spacing": "Large",
-            "style": "good" if s.engine_available and s.osv_reachable else "attention",
-            "items": [
-                {"type": "TextBlock", "text": "Scanner health", "weight": "Bolder", "wrap": True},
-                {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in facts]},
+            "type": "FactSet",
+            "facts": [
+                {"title": "Projects", "value": str(len(preview.rows))},
+                {
+                    "title": "Scanner",
+                    "value": f"{'Ready' if ready else 'NOT READY'} ({s.backend_scanner_version}), OSV.dev "
+                    + ("live" if s.osv_reachable else "NOT REACHABLE"),
+                },
+                {"title": "New advisories", "value": str(s.new_advisory_count)},
             ],
-        }
-    )
-
+        },
+    ]
+    if left_out:
+        body.append(_note(f"{left_out} more projects were not listed on the project cards (totals include them)."))
     attention: list[str] = []
     if t.cloud_failed or t.pipeline_failed:
         attention.append(f"{t.pipeline_failed} pipeline run(s) and {t.cloud_failed} cloud scan(s) failed this period")
+    if not ready:
+        attention.append("The scanner or its CVE feed is not ready; see the scanner health card")
     if preview.quota_warnings:
         attention.append(
             "At 80% or more of cloud-scan quota: "
@@ -426,44 +573,63 @@ def build_card(preview: DigestPreview, *, frontend_origin: str = "") -> dict:
                 ],
             }
         )
-    card: dict = {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.4",
-        "msteams": {"width": "Full"},
-        "body": body,
-    }
-    if frontend_origin:
-        card["actions"] = [
-            {"type": "Action.OpenUrl", "title": "Open Control Panel", "url": f"{frontend_origin}/admin/control-panel"}
-        ]
-    return card
+    actions = (
+        [{"type": "Action.OpenUrl", "title": "Open Control Panel", "url": f"{frontend_origin}/admin/control-panel"}]
+        if frontend_origin
+        else None
+    )
+    return _Part(
+        "SUMMARY", f"Security digest, {end:%a %d %b %Y}", f"Updated {end:%H:%M} UTC · period {period}", body, actions=actions
+    )
+
+
+def build_cards(preview: DigestPreview, *, frontend_origin: str = "") -> list[dict]:
+    """The digest as ordered Adaptive Cards 1.4: scanner health and CVE feed status, then project status
+    (`_ROWS_PER_CARD` per card), then a dated summary. Pure: the same preview always yields the same
+    cards. Totals always cover every project; only the project cards are capped."""
+    project_parts, left_out = _project_parts(preview)
+    parts = [_health_part(preview), *project_parts, _summary_part(preview, left_out, frontend_origin)]
+    return [_envelope(part, i, len(parts)) for i, part in enumerate(parts, 1)]
 
 
 # --- sending ----------------------------------------------------------------------------------
+
+
+async def _post_cards(channel: WebhookChannel, cards: list[dict]) -> str | None:
+    """Post the cards to one channel in order; the error text of the first failure, else None. Stops
+    there: a digest missing its middle is worse than one that says which card it stopped at."""
+    for i, card in enumerate(cards, 1):
+        if i > 1:
+            await asyncio.sleep(_CARD_GAP_SECONDS)
+        ok, _status, error = await webhook_channel_service.send_card(channel, card)
+        if not ok:
+            return f"card {i} of {len(cards)}: {error or 'failed'}"
+    return None
 
 
 async def send_digest(digest: DigestSettings, *, now: datetime | None = None) -> DigestSendResponse:
     """Post the current digest to every enabled channel with `include_digest`. Never raises."""
     errors: list[DigestSendError] = []
     sent = 0
+    card_count = 0
     try:
         channels = await WebhookChannel.find(
             WebhookChannel.enabled == True, WebhookChannel.include_digest == True  # noqa: E712
         ).to_list()
         if not channels:
             return DigestSendResponse(sent=0, errors=[])
-        card = build_card(await build_preview(digest, now), frontend_origin=settings.frontend_origin)
-        results = await asyncio.gather(*(webhook_channel_service.send_card(c, card) for c in channels))
-        for channel, (ok, _status, error) in zip(channels, results):
-            if ok:
+        cards = build_cards(await build_preview(digest, now), frontend_origin=settings.frontend_origin)
+        results = await asyncio.gather(*(_post_cards(c, cards) for c in channels))
+        for channel, error in zip(channels, results):
+            if error is None:
                 sent += 1
             else:
-                errors.append(DigestSendError(channel_id=str(channel.id), name=channel.name, error=error or "failed"))
+                errors.append(DigestSendError(channel_id=str(channel.id), name=channel.name, error=error))
+        card_count = len(cards)
     except Exception as exc:
         logger.warning("digest send failed", exc_info=True)
         errors.append(DigestSendError(channel_id="", name="digest", error=type(exc).__name__))
-    return DigestSendResponse(sent=sent, errors=errors)
+    return DigestSendResponse(sent=sent, errors=errors, cards=card_count)
 
 
 async def record_outcome(result: DigestSendResponse, *, no_channels_ok: bool = False) -> None:

@@ -5,6 +5,9 @@ from beanie import Document
 from pydantic import Field
 
 ReportTemplate = Literal["standard", "executive"]
+# Lowest advisory severity that raises a live dependency alert (an admin can also turn them off outright
+# with `live_alerts_enabled`, so "off" is only a project-level choice).
+LiveAlertSeverity = Literal["critical", "high", "medium"]
 AuditScope = Literal["latest", "history"]
 
 
@@ -34,6 +37,15 @@ class WorkspaceSettings(Document):
     # project twin. Read by finding_review_service.request_review only; flipping it never touches
     # requests already pending or exemptions already accepted.
     finding_review_required: bool = False
+
+    # --- live dependency alerts (docs/LIVE_DEPENDENCY_ALERTS.md) ---------------
+    # Alert a project when a newly published advisory affects a package in its dependency inventory.
+    # Alerting policy, so admin-only; a project may only tighten the severity (Project.live_alert_min_severity).
+    # Resolved by workspace_settings_service.effective_live_alert_policy.
+    live_alerts_enabled: bool = True
+    live_alerts_min_severity: LiveAlertSeverity = "high"
+    # Report malicious-package (MAL-*) advisories, always rated critical.
+    live_alerts_include_malicious: bool = True
 
     # --- scan defaults -------------------------------------------------------
     # These three were hardcoded into the scanner argv in cloud_scan_service. The defaults

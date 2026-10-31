@@ -129,6 +129,29 @@ def test_admin_audience_event_never_reaches_a_non_admin(client):
     assert client.get(URL, headers=admin).json()["unread_count"] == 1
 
 
+def test_admin_audience_event_skips_an_admin_awaiting_approval(client):
+    admin = _admin_headers(client, email="nt-admin-ok@zs.dev")
+    _admin_headers(client, email="nt-admin-pending@zs.dev")
+
+    async def run():
+        from app.models.user import User
+
+        row = await User.find_one(User.email == "nt-admin-pending@zs.dev")
+        row.approval_status = "pending"
+        await row.save()
+        return await notification_service.notify("autofix.quota_requested", title="Wants 20 more")
+
+    asyncio.run(run())
+    assert client.get(URL, headers=admin).json()["unread_count"] == 1
+    from app.models.user import User
+
+    pending = asyncio.run(User.find_one(User.email == "nt-admin-pending@zs.dev"))
+    assert pending is not None  # its inbox is checked below through the model, not a login (pending cannot log in)
+    from app.models.notification import Notification
+
+    assert asyncio.run(Notification.find(Notification.user_id == str(pending.id)).count()) == 0
+
+
 def test_unknown_event_is_logged_not_raised(client):
     async def run():
         # A typo in an emission site must not kill the background task that was notifying.

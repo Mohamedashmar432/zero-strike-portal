@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
@@ -141,6 +141,9 @@ function AdminUsers() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["admin", "users", page, pendingOnly],
     queryFn: () => listUsers(page, PAGE_SIZE, pendingOnly ? "pending" : undefined),
+    // Without this, `data` is undefined while the next page loads, totalPages collapses to 1 and the
+    // snap-back below resets `page` to 1 — Next appeared to do nothing.
+    placeholderData: keepPreviousData,
   });
 
   // Always fetched, so the tab shows a live count even while looking at All users.
@@ -192,7 +195,7 @@ function AdminUsers() {
   // during render (React's "adjusting state when a prop changes" pattern)
   // rather than in a useEffect, which would cause an extra render pass.
   const [prevTotalPages, setPrevTotalPages] = useState(totalPages);
-  if (totalPages !== prevTotalPages) {
+  if (data && totalPages !== prevTotalPages) {
     setPrevTotalPages(totalPages);
     if (page > totalPages) {
       setPage(totalPages);

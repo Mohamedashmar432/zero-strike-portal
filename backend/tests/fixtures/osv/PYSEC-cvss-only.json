@@ -1,0 +1,9 @@
+{
+  "id": "PYSEC-2026-1",
+  "aliases": ["CVE-2026-0002"],
+  "summary": "Synthetic record that carries only a CVSS vector",
+  "published": "2026-10-30T08:00:00Z",
+  "modified": "2026-10-30T08:00:00Z",
+  "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+  "affected": [{"package": {"ecosystem": "PyPI", "name": "Example_Widget-Py"}, "versions": ["2.0.0"]}]
+}

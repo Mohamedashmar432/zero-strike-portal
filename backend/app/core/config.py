@@ -7,6 +7,10 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
+# The only hosts the live dependency alerts may read from (docs/LIVE_DEPENDENCY_ALERTS.md). Both are
+# overridable for a local stub, but only in development: see production_secret_problems.
+DEFAULT_ADVISORY_FEED_BASE_URL = "https://osv-vulnerabilities.storage.googleapis.com/"
+DEFAULT_OSV_API_BASE_URL = "https://api.osv.dev/"
 
 
 class Settings(BaseSettings):
@@ -171,6 +175,24 @@ class Settings(BaseSettings):
     # Admin MCP server mounted at /mcp (docs/ADMIN_MCP.md). Kill switch: False leaves /mcp unmounted.
     mcp_enabled: bool = True
 
+    # Live dependency advisory alerts (services/live_alert_service.py, docs/LIVE_DEPENDENCY_ALERTS.md).
+    # advisory_watch_enabled is the environment kill switch; the admin toggle lives on WorkspaceSettings.
+    advisory_watch_enabled: bool = True
+    advisory_watch_interval_minutes: int = 60  # floored at 15 in code: OSV is a shared public service
+    advisory_max_age_hours: int = 72  # an advisory published longer ago than this is never "new"
+    advisory_catchup_hours: int = 72  # after downtime, look back at most this far (the rest is a recorded gap)
+    # Rows modified in the last few minutes are left for the next run, so a record still propagating
+    # to the feed is never skipped by a cursor that already moved past it.
+    advisory_settle_minutes: int = 10
+    advisory_max_records_per_run: int = 1000
+    advisory_feed_unreachable_alert_hours: int = 6
+    live_alert_inventory_max_age_days: int = 180  # an inventory from a scan older than this is ignored
+    # Where the feed and the OSV API are read from. The SSRF guard: a production process refuses to
+    # boot with anything but the defaults (production_secret_problems); only development may point
+    # these at a local stub.
+    advisory_feed_base_url: str = DEFAULT_ADVISORY_FEED_BASE_URL
+    osv_api_base_url: str = DEFAULT_OSV_API_BASE_URL
+
     # GitHub/Azure DevOps OAuth repo import (connections.py, connection_service.py).
     github_client_id: str = ""
     github_client_secret: str = ""
@@ -264,6 +286,10 @@ def production_secret_problems(s: Settings) -> list[str]:
     for i, key in enumerate(s.oauth_encryption_key_previous):
         if not _valid_fernet_key(key):
             problems.append(f"OAUTH_ENCRYPTION_KEY_PREVIOUS entry {i} is not a valid Fernet key")
+    if s.advisory_feed_base_url.rstrip("/") != DEFAULT_ADVISORY_FEED_BASE_URL.rstrip("/"):
+        problems.append("ADVISORY_FEED_BASE_URL may only be overridden when APP_ENV=development")
+    if s.osv_api_base_url.rstrip("/") != DEFAULT_OSV_API_BASE_URL.rstrip("/"):
+        problems.append("OSV_API_BASE_URL may only be overridden when APP_ENV=development")
     return problems
 
 

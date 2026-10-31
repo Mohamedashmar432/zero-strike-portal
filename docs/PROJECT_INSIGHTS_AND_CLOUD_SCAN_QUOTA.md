@@ -204,6 +204,37 @@ atomic `find_one_and_update` on `digest_last_sent_for` (period key), so a restar
 replica can never double-send. Every send writes an audit row and is visible in the tab with its
 result (sent / webhook error). Webhook URL is vetted with the existing `vet_webhook_url` (SSRF).
 
+### 6a. The digest is several cards, not one (2026-10-30)
+
+**Why.** One card for a 24-project portal was ~40 KB. Teams refuses a message over ~28 KB, and a Power
+Automate Workflows webhook answers the portal's POST with 202 *before* it tries to post, so the portal
+logged "Digest Sent, 0 errors" while the flow failed with `RequestEntityTooLarge` and nothing appeared.
+The portal cannot see that failure, so the only fix is to never send a card near the limit.
+
+**Cards, in order**, each "n/N" in its header so a reader can tell if Workflows reordered them:
+
+1. **Scanner health** (green "Scanner ready, CVE feed live", red "Scanner NOT ready"): scan engine,
+   backend scanner version, latest published binary, CI runners on an older scanner, rule pack; then
+   **CVE data (OSV.dev)**: the two endpoints the scanner itself calls at scan time (`querybatch` and
+   `vulns/{id}`, see the scanner's `internal/scanner/sca/osv.go`) probed from the server with their
+   round-trip in ms, when they were checked, and the last dependency scan seen (newest `kind=sca`
+   finding); then **new advisories** first reported in the period (id, worst severity, how many projects),
+   top 8. There is still no local CVE database to "load": the status is the live feed's reachability plus
+   what was first seen. The card never claims a feed date or "CVEs published today" (OSV offers no such
+   query); it says "first reported by a project since <period start>".
+2. **Project status**, `_ROWS_PER_CARD` (10) per card, worst exposure first, at most `_MAX_PROJECT_CARDS`
+   (6, so 60 projects); each ~16 KB.
+3. **Summary**: titled with the date ("Security digest, Fri 30 Oct 2026"), "Updated HH:MM UTC" and the
+   period, the KPI row (totals always cover every project), a Scanner/OSV fact set, anything left off the
+   project cards, and the needs-attention list (failures, scanner or CVE feed not ready, quota >= 80%,
+   stale projects). It carries the Open Control Panel button.
+
+**Sending.** `_post_cards` posts a channel's cards sequentially with `_CARD_GAP_SECONDS` (2 s) between
+them and stops at the first failure, reporting "card i of N: <error>" (a digest missing its middle is worse
+than one that says where it stopped). Channels run in parallel. `DigestSendResponse.cards` is N.
+`_MAX_CARD_BYTES` (20 KB) is the budget a test holds every card to (Workflows re-wraps the card in an
+escaped message, ~17% larger).
+
 ## 7. Microsoft Clarity — dropped (2026-10-28, user decision); recommendation kept for the record
 
 Clarity records sessions and heatmaps by shipping DOM content and interactions to Microsoft. In this

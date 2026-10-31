@@ -29,6 +29,8 @@ class NotificationEvent:
     # a notification system whose defaults are "everything" trains people to ignore it.
     default_in_app: bool = True
     default_email: bool = False
+    # False = in-app only; notify() never emails it, whatever a user's stored preference says.
+    emailable: bool = True
 
 
 EVENTS: tuple[NotificationEvent, ...] = (
@@ -104,7 +106,7 @@ EVENTS: tuple[NotificationEvent, ...] = (
         label="Finding review decided",
         description="An admin accepted, rejected or revoked your request to exempt a finding.",
         audience="project",
-        default_email=True,
+        emailable=False,
     ),
     NotificationEvent(
         key="scanner.unhealthy",
@@ -161,6 +163,22 @@ EVENTS: tuple[NotificationEvent, ...] = (
         description="A project whose pipeline normally scans several days a week has sent no scan for 24 hours.",
         audience="project",
         default_in_app=False,
+    ),
+    NotificationEvent(
+        key="dependency.new_advisory",
+        label="New dependency advisory",
+        description="An advisory published in the last 72 hours affects a package in your project's "
+        "latest dependency inventory.",
+        audience="project",
+        default_email=True,
+    ),
+    NotificationEvent(
+        key="advisories.feed_unreachable",
+        label="Advisory feed unreachable",
+        description="The portal could not read the OSV advisory feed for several hours, so new "
+        "dependency advisories are not being checked.",
+        audience="admin",
+        default_email=True,
     ),
     NotificationEvent(
         key="portal.error",

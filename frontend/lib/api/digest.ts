@@ -45,7 +45,14 @@ export type DigestPreview = {
     rule_pack_version: string | null;
     rule_count: number | null;
     osv_reachable: boolean;
+    // Round-trip of each OSV.dev endpoint the scanner calls; null = unreachable.
+    osv_batch_ms: number | null;
+    osv_vuln_ms: number | null;
+    osv_checked_at: string | null;
+    last_dependency_scan_at: string | null;
     new_cve_ids: string[];
+    new_advisories: { id: string; severity: string; projects: number }[];
+    new_advisory_count: number;
   };
   stale_projects: { project_id: string; name: string; last_scan_at: string | null }[];
   quota_warnings: { project_id: string; name: string; used: number; limit: number }[];
@@ -53,6 +60,7 @@ export type DigestPreview = {
 
 export type DigestSendResult = {
   sent: number;
+  cards: number;
   errors: { channel_id: string; name: string; error: string }[];
 };
 

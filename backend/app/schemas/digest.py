@@ -50,6 +50,14 @@ class DigestTotals(BaseModel):
     new_cves: NewCves = Field(default_factory=NewCves)
 
 
+class NewAdvisory(BaseModel):
+    """An advisory id first reported by at least one project in the period (OSV lookup at scan time)."""
+
+    id: str
+    severity: str
+    projects: int
+
+
 class ScannerHealth(BaseModel):
     engine_available: bool
     backend_scanner_version: str
@@ -60,7 +68,15 @@ class ScannerHealth(BaseModel):
     # portal does not hold a count of them.
     rule_count: int
     osv_reachable: bool
+    # Round-trip of each OSV.dev endpoint the scanner calls at scan time (querybatch, vulns/{id}); None =
+    # unreachable or 5xx. The scanner keeps no local CVE database, so this is the whole "feed" status.
+    osv_batch_ms: int | None = None
+    osv_vuln_ms: int | None = None
+    osv_checked_at: datetime | None = None
+    last_dependency_scan_at: datetime | None = None
     new_cve_ids: list[str] = Field(default_factory=list)  # at most 5
+    new_advisories: list[NewAdvisory] = Field(default_factory=list)  # at most 8, worst first
+    new_advisory_count: int = 0
 
 
 class StaleProject(BaseModel):
@@ -95,3 +111,4 @@ class DigestSendError(BaseModel):
 class DigestSendResponse(BaseModel):
     sent: int
     errors: list[DigestSendError]
+    cards: int = 0  # cards posted to each channel (scanner health, project status, summary)

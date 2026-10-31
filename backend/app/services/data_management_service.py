@@ -38,6 +38,8 @@ from app.models.project_repo import ProjectRepo
 from app.models.remediation_project_doc import RemediationProjectDoc
 from app.models.report import Report
 from app.models.scan import Scan
+from app.models.dependency_inventory import DependencyInventory
+from app.models.live_dependency_alert import LiveDependencyAlert
 from app.models.vulnerability import Vulnerability
 from app.services import secret_store
 
@@ -61,7 +63,7 @@ CATEGORIES: tuple[Category, ...] = (
         key="scan_data",
         label="Scans, findings & reports",
         description="Every scan and everything derived from it. Projects, keys and users are kept.",
-        models=(Scan, Finding, Report, FindingComment, Vulnerability),
+        models=(Scan, Finding, Report, FindingComment, Vulnerability, DependencyInventory, LiveDependencyAlert),
         implies=("ai_artifacts", "compliance"),
     ),
     Category(

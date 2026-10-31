@@ -54,7 +54,10 @@ async def _recipients(event_key: str, project_id: str | None) -> list[User]:
     """Who is eligible for this event, before per-user preferences are applied."""
     event = BY_KEY[event_key]
     if event.audience == "admin":
-        return await User.find(User.role == "admin", User.is_active == True).to_list()  # noqa: E712
+        # An admin still awaiting signup approval is not yet trusted with operational alerts.
+        return await User.find(
+            User.role == "admin", User.is_active == True, User.approval_status == "approved"  # noqa: E712
+        ).to_list()
 
     if project_id is None:
         return []
@@ -143,7 +146,7 @@ async def notify(
         email_targets = [
             u.email
             for u in users
-            if only_user_ids is not None or wants(u, event_key, "email")
+            if BY_KEY[event_key].emailable and (only_user_ids is not None or wants(u, event_key, "email"))
         ]
         if email_targets:
             # smtplib is blocking; the whole batch goes to one worker thread so a slow or

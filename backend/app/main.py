@@ -28,6 +28,7 @@ from app.routers import (
     admin_downloads,
     admin_mcp_tokens,
     admin_digest,
+    admin_live_alerts,
     admin_project_insights,
     admin_webhook_channels,
     oauth_consent,
@@ -63,6 +64,7 @@ from app.services import (
     cloud_scan_service,
     digest_service,
     finding_review_service,
+    live_alert_service,
     pricing_service,
     notification_service,
     compliance_queue_service,
@@ -126,6 +128,7 @@ async def lifespan(app: FastAPI):
     compliance_poll_task = asyncio.create_task(compliance_queue_service.poll_loop())
     pricing_task = asyncio.create_task(pricing_service.refresh_loop())
     digest_task = asyncio.create_task(digest_service.scheduler_loop())
+    live_alert_task = asyncio.create_task(live_alert_service.watch_loop())
     async with contextlib.AsyncExitStack() as stack:
         for name in ("mcp_server", "mcp_user_server"):
             mcp = getattr(app.state, name, None)
@@ -134,6 +137,7 @@ async def lifespan(app: FastAPI):
         yield
     pricing_task.cancel()
     digest_task.cancel()
+    live_alert_task.cancel()
     poll_task.cancel()
     ai_poll_task.cancel()
     remediation_poll_task.cancel()
@@ -194,6 +198,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_project_insights.router, prefix="/api/v1")
     app.include_router(admin_webhook_channels.router, prefix="/api/v1")
     app.include_router(admin_digest.router, prefix="/api/v1")
+    app.include_router(admin_live_alerts.router, prefix="/api/v1")
     app.include_router(oauth_consent.router, prefix="/api/v1")
     app.include_router(admin_scanner_status.router, prefix="/api/v1")
     app.include_router(admin_scan_engine.router, prefix="/api/v1")

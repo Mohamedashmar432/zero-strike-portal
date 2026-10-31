@@ -1,0 +1,8 @@
+{
+  "id": "MAL-2026-0001",
+  "summary": "Malicious code in example-evil (npm)",
+  "published": "2026-10-30T09:00:00Z",
+  "modified": "2026-10-30T09:05:00Z",
+  "database_specific": {"malicious-packages-origins": [{"source": "example", "id": "x"}]},
+  "affected": [{"package": {"ecosystem": "npm", "name": "example-evil"}, "versions": ["0.0.1"]}]
+}

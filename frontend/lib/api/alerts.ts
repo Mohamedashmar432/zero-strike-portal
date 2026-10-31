@@ -2,6 +2,8 @@ import { apiFetch } from "./client";
 
 export type AlertTrigger = "critical" | "high" | "vulnerable_package" | "scan_failed";
 
+export type LiveAlertPolicy = "critical" | "high" | "medium" | "off";
+
 export interface ProjectAlerts {
   webhook_enabled: boolean;
   webhook_configured: boolean;
@@ -10,6 +12,11 @@ export interface ProjectAlerts {
   email_enabled: boolean;
   emails: string[];
   triggers: AlertTrigger[];
+  /** The project's own choice; null = inherit the workspace. */
+  live_alert_min_severity: LiveAlertPolicy | null;
+  /** What actually applies after workspace precedence. */
+  live_alert_effective: LiveAlertPolicy;
+  workspace_live_alert_min_severity: LiveAlertPolicy;
 }
 
 export interface ProjectAlertsInput {
@@ -19,6 +26,7 @@ export interface ProjectAlertsInput {
   email_enabled?: boolean;
   emails?: string[];
   triggers?: AlertTrigger[];
+  live_alert_min_severity?: "inherit" | LiveAlertPolicy;
 }
 
 export interface GlobalAlerts {

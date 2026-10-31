@@ -104,7 +104,8 @@ function DigestForm({
       // has "Include scheduled digest" on, and a green toast there reads as a Teams delivery.
       if (r.errors.length === 0 && r.sent === 0)
         toast.error("Nothing was sent. No enabled webhook channel has “Include scheduled digest” switched on.");
-      else if (r.errors.length === 0) toast.success(`Digest sent to ${r.sent} channel${r.sent === 1 ? "" : "s"}`);
+      else if (r.errors.length === 0)
+        toast.success(`Digest sent to ${r.sent} channel${r.sent === 1 ? "" : "s"}, ${r.cards} cards each`);
       else
         toast.error(
           `Sent to ${r.sent}, failed for ${r.errors.map((e) => `${e.name}: ${e.error}`).join("; ")}`
@@ -229,7 +230,7 @@ function DigestForm({
         open={confirmSend}
         onOpenChange={setConfirmSend}
         title="Send the digest now?"
-        description="This posts the current digest to every enabled channel that includes the digest — real Teams channels, not a sandbox."
+        description="This posts the current digest to every enabled channel that includes the digest — real Teams channels, not a sandbox. It arrives as several cards: scanner health, project status (10 per card), then a dated summary."
         confirmLabel="Send to Teams"
         pendingLabel="Sending…"
         pending={sendTest.isPending}

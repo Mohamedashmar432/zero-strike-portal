@@ -187,3 +187,34 @@ async def effective_remediation_policy(project: Project | None) -> RemediationPo
             overridden.add("confidence_threshold")
 
     return RemediationPolicy(enabled, threshold, frozenset(overridden))
+
+
+@dataclass(frozen=True)
+class LiveAlertPolicy:
+    enabled: bool
+    #: "critical" | "high" | "medium" | "off". "off" never meets any severity.
+    min_severity: str
+    include_malicious: bool
+    #: Whether the project's own setting changed the result (it tightened or silenced the workspace's).
+    overridden: bool
+
+
+async def effective_live_alert_policy(project: Project | None) -> LiveAlertPolicy:
+    """Live dependency alert policy for one project. Tighten-only, resolved here at read time so a
+    workspace admin raising the floor later is never undone by an older, looser project value."""
+    from app.core import advisory
+
+    ws = await get_workspace_settings()
+    if not ws.live_alerts_enabled:
+        return LiveAlertPolicy(False, "off", ws.live_alerts_include_malicious, False)
+    floor = ws.live_alerts_min_severity
+    chosen = project.live_alert_min_severity if project is not None else None
+    if chosen is None:
+        return LiveAlertPolicy(True, floor, ws.live_alerts_include_malicious, False)
+    effective = advisory.stricter(floor, chosen)
+    return LiveAlertPolicy(
+        enabled=effective != "off",
+        min_severity=effective,
+        include_malicious=ws.live_alerts_include_malicious,
+        overridden=effective != floor,
+    )

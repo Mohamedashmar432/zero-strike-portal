@@ -150,6 +150,18 @@ class GoExemptedIn(BaseModel):
     finding: GoFindingIn = Field(alias="Finding")
 
 
+class GoDependencyRefIn(BaseModel):
+    """One parsed manifest entry of the scanner's dependency inventory (docs/LIVE_DEPENDENCY_ALERTS.md).
+    Deliberately no severity: the report's CI gates grep `^      "Severity"` at exactly six spaces."""
+
+    model_config = _go
+    ecosystem: str | None = Field(None, alias="Ecosystem")
+    package: str | None = Field(None, alias="Package")
+    version: str | None = Field(None, alias="Version")
+    manifest: str | None = Field(None, alias="Manifest")
+    direct: bool | None = Field(None, alias="Direct")
+
+
 class GoReportIn(BaseModel):
     model_config = _go
     scanner_scan_id: str | None = Field(None, alias="ScanID")
@@ -172,6 +184,10 @@ class GoReportIn(BaseModel):
     accepted_exemptions: Annotated[list[GoExemptedIn], BeforeValidator(_nz_list)] = Field(
         default_factory=list, alias="AcceptedExemptions"
     )
+    # The scanner's full dependency inventory. Unlike every collection above, null/absent must stay
+    # None: it means "this scanner build (or this run, no --enable-sca) reported no inventory", which
+    # leaves the stored snapshot alone, while an empty list is a real, empty inventory that replaces it.
+    dependencies: list[GoDependencyRefIn] | None = Field(None, alias="Dependencies")
 
 
 # --- API response models (portal -> frontend) ---

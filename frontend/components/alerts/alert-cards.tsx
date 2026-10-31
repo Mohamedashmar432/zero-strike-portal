@@ -15,10 +15,12 @@ import {
   type AlertTrigger,
 } from "@/lib/api/alerts";
 import { queryKeys } from "@/lib/api/query-keys";
+import { POLICY_LABEL, projectSeverityOptions } from "@/lib/live-alerts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
@@ -247,6 +249,41 @@ export function ProjectAlertsCard({ projectId }: { projectId: string }) {
                   />
                 </div>
               ))}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="alert-live-min">Live dependency alerts</Label>
+              <Select
+                value={a.live_alert_min_severity ?? "inherit"}
+                onValueChange={(v) =>
+                  v && save.mutate({ live_alert_min_severity: v as "inherit" | "critical" | "high" | "medium" | "off" })
+                }
+                disabled={save.isPending}
+              >
+                <SelectTrigger id="alert-live-min" className="w-72" aria-label="Live dependency alerts">
+                  <SelectValue>
+                    {projectSeverityOptions(a.workspace_live_alert_min_severity).find(
+                      (o) => o.value === (a.live_alert_min_severity ?? "inherit")
+                    )?.label ?? "Inherit"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {projectSeverityOptions(a.workspace_live_alert_min_severity).map((o) => (
+                    <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
+                      {o.label}
+                      {o.disabled && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          A project can only tighten the workspace setting.
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Effective for this project: {POLICY_LABEL[a.live_alert_effective]}. Alerts for newly published
+                advisories that affect this project&apos;s dependencies go to the webhook and emails above.
+              </p>
             </div>
           </>
         )}

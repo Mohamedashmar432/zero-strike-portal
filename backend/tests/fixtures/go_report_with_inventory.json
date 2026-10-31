@@ -1,0 +1,16 @@
+{
+  "ScanID": "example-scan-1",
+  "ScannerVersion": "v0.0.0-test",
+  "RootPath": "/tmp/zs-clone-example",
+  "GitCommit": "0123456789abcdef0123456789abcdef01234567",
+  "Branch": "main",
+  "Findings": [],
+  "Stats": {"FilesScanned": 3, "TotalFindings": 0},
+  "AcceptedExemptions": [],
+  "Dependencies": [
+    {"Ecosystem": "npm", "Package": "example-widget", "Version": "1.2.3", "Manifest": "/tmp/zs-clone-example/package-lock.json", "Direct": true},
+    {"Ecosystem": "npm", "Package": "example-widget", "Version": "1.2.3", "Manifest": "web/package-lock.json", "Direct": false},
+    {"Ecosystem": "PyPI", "Package": "Example_Widget-Py", "Version": "2.0.0", "Manifest": "requirements.txt", "Direct": true},
+    {"Ecosystem": "Go", "Package": "example.invalid/mod", "Version": "v1.0.0", "Manifest": "go.mod", "Direct": true}
+  ]
+}

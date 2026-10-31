@@ -88,7 +88,10 @@ async def send_message(
     return True, status, None
 
 
-_BAD = ("failed", "failing", "unhealthy", "missing", "error", "stalled", "silent", "exhausted")
+_BAD = (
+    "failed", "failing", "unhealthy", "missing", "error", "stalled", "silent", "exhausted",
+    "new_advisory", "unreachable",
+)
 _WARN = ("threshold", "requested", "noisy")
 _GOOD = ("completed", "decided", "proposal_created")
 

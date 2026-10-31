@@ -1,0 +1,16 @@
+{
+  "id": "GHSA-aaaa-bbbb-cccc",
+  "aliases": ["CVE-2026-0001"],
+  "summary": "Prototype pollution in example-widget",
+  "details": "Synthetic advisory used only by the test suite.",
+  "published": "2026-10-30T10:00:00Z",
+  "modified": "2026-10-30T11:30:00Z",
+  "database_specific": {"severity": "HIGH"},
+  "affected": [
+    {
+      "package": {"ecosystem": "npm", "name": "Example-Widget"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.2.4"}]}],
+      "versions": ["1.2.0", "1.2.1", "1.2.2", "1.2.3"]
+    }
+  ]
+}

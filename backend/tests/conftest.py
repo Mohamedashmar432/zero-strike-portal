@@ -76,14 +76,35 @@ def _isolate_alerting_and_activity(monkeypatch):
     activity_service.reset()
 
     async def _osv_up():
-        return True
+        from datetime import datetime, timezone
+
+        return digest_service.OsvProbe(batch_ms=40, vuln_ms=55, checked_at=datetime.now(timezone.utc))
 
     async def _no_network(url, content):
         raise RuntimeError("tests never post to a real webhook")
 
     monkeypatch.setattr(digest_service, "_probe_osv", _osv_up)
+    monkeypatch.setattr(digest_service, "_CARD_GAP_SECONDS", 0)
+    # The once-an-hour "email is failing" admin alert is a process-wide gate; one test failing an email
+    # must not silence the alert another test asserts on.
+    from app.services import notification_service
+
+    monkeypatch.setattr(notification_service, "_last_email_failure_alert", None)
     monkeypatch.setattr(alert_service, "post_card", _no_network)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_advisory_feed(monkeypatch):
+    """Tests never reach OSV. The live-alert watcher's only two network functions raise unless a test
+    installs its own fake (tests/test_live_alerts.py FakeFeed)."""
+    from app.services import advisory_feed_service
+
+    async def _offline(*args, **kwargs):
+        raise RuntimeError("tests never reach OSV")
+
+    monkeypatch.setattr(advisory_feed_service, "_get", _offline)
+    monkeypatch.setattr(advisory_feed_service, "_post", _offline)
 
 
 @pytest.fixture()

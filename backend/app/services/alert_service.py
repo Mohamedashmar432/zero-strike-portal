@@ -165,10 +165,12 @@ async def _safe_webhook(
     project_id: str | None,
     meta: dict,
     facts: list[tuple[str, str]] | None = None,
-) -> None:
+    **style,
+) -> str:
+    """Returns the outcome ("delivered" or "failed: <ExceptionType>") as well as auditing it."""
     outcome = "delivered"
     try:
-        await post_webhook(decrypt_secret(encrypted), title, text, link, facts)
+        await post_webhook(decrypt_secret(encrypted), title, text, link, facts, **style)
     except Exception as exc:
         outcome = f"failed: {type(exc).__name__}"
         logger.warning("alert webhook failed", host=host_of(encrypted), error=type(exc).__name__)
@@ -178,6 +180,7 @@ async def _safe_webhook(
         project_id,
         {**meta, "channel": "webhook", "outcome": outcome},
     )
+    return outcome
 
 
 async def _render_pdf(scan_id: str) -> tuple[str, bytes] | None:
@@ -199,7 +202,8 @@ async def _render_pdf(scan_id: str) -> tuple[str, bytes] | None:
 
 async def _safe_emails(
     addresses: list[str], title: str, text: str, link: str | None, project_id: str, meta: dict, scan_id: str | None
-) -> None:
+) -> str:
+    """Returns "sent" when at least one address was accepted, else "failed" (same rule as the audit row)."""
     pdf = await _render_pdf(scan_id) if scan_id else None
 
     def _send() -> int:
@@ -225,6 +229,7 @@ async def _safe_emails(
         project_id,
         {**meta, "channel": "email", "recipients": len(addresses), "failed": failed, "pdf_attached": pdf is not None},
     )
+    return "sent" if failed < len(addresses) else "failed"
 
 
 async def send_project_alert(
@@ -246,6 +251,38 @@ async def send_project_alert(
         _spawn(_safe_webhook(project.alert_webhook_enc, title, text, link, project_id, meta, facts))
     if project.alert_email_enabled and project.alert_emails:
         _spawn(_safe_emails(list(project.alert_emails), title, text, link, project_id, meta, scan_id))
+
+
+async def send_project_live_alert(
+    project: Project, title: str, text: str, link: str | None, facts: list[tuple[str, str]] | None = None
+) -> tuple[str, str]:
+    """A live dependency alert on this project's own webhook and mailboxes. Returns (webhook, email)
+    outcomes for the delivery record. Bypasses `alert_triggers` (there is no tick-box for it: switching
+    the project's alerts to Off is the opt-out), but still needs the channel itself switched on.
+
+    Awaited rather than spawned, so the ledger records what actually happened. Email is never attempted
+    while SMTP is unset, and "sent" is only ever returned by a send that was accepted. Never raises."""
+    project_id = str(project.id)
+    meta = {"trigger": "live_dependency_alert", "project": project.name}
+    webhook, email = "off", "off"
+    try:
+        if project.alert_webhook_enabled and project.alert_webhook_enc:
+            outcome = await _safe_webhook(
+                project.alert_webhook_enc, title, text, link, project_id, meta, facts,
+                tone="attention", eyebrow="New dependency advisory",
+            )
+            webhook = "sent" if outcome == "delivered" else "failed"
+        if project.alert_email_enabled and project.alert_emails:
+            if not settings.smtp_host:
+                email = "not_configured"
+            else:
+                lines = "\n".join(f"{k}: {v}" for k, v in facts or [])
+                body = f"{text}\n\n{lines}" if lines else text
+                email = await _safe_emails(list(project.alert_emails), title, body, link, project_id, meta, None)
+    except Exception:
+        logger.warning("project live alert failed", project_id=project_id, exc_info=True)
+        webhook = "failed" if webhook == "off" and project.alert_webhook_enabled else webhook
+    return webhook, email
 
 
 async def on_scan_completed(scan, findings: list, link: str) -> None:

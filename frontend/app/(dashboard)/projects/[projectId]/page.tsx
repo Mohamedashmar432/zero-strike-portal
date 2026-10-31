@@ -77,6 +77,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/providers/auth-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/common/stat-card";
+import { LiveAlertsCard } from "@/components/projects/live-alerts-card";
 import { ProjectOverviewHub } from "@/components/projects/project-overview-hub";
 import { ProjectDastTab } from "@/components/projects/project-dast-tab";
 import { ProjectAttackSimTab } from "@/components/projects/project-attack-sim-tab";
@@ -1338,13 +1339,16 @@ export default function ProjectDetailPage() {
           {/* Module View Content */}
           <div>
             {activeTab === "overview" && (
-              <ProjectOverviewHub
-                project={project}
-                activity={activity}
-                repos={repos}
-                aiUsage={aiUsage}
-                onNavigateTab={handleTabChange}
-              />
+              <div className="space-y-6">
+                <ProjectOverviewHub
+                  project={project}
+                  activity={activity}
+                  repos={repos}
+                  aiUsage={aiUsage}
+                  onNavigateTab={handleTabChange}
+                />
+                <LiveAlertsCard projectId={projectId} />
+              </div>
             )}
             {activeTab === "scans" && <ScansTab projectId={projectId} />}
             {activeTab === "dast" && <ProjectDastTab projectId={projectId} />}

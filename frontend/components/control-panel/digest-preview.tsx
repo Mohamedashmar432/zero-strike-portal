@@ -118,10 +118,35 @@ export function DigestPreviewTable({
             label="Rule pack"
             value={`${s.rule_pack_version ?? "unknown"}${s.rule_count !== null ? ` (${fmt(s.rule_count)} rules)` : ""}`}
           />
-          <Fact label="OSV.dev" value={s.osv_reachable ? "reachable" : "unreachable"} bad={!s.osv_reachable} />
+          <Fact label="Scanner" value={s.engine_available && s.osv_reachable ? "ready" : "not ready"} bad={!(s.engine_available && s.osv_reachable)} />
         </dl>
-        {s.new_cve_ids.length > 0 && (
-          <p className="font-mono text-xs text-muted-foreground">New advisory ids: {s.new_cve_ids.join(", ")}</p>
+        <h3 className="legend pt-1 text-foreground">CVE data (OSV.dev, queried live at scan time)</h3>
+        <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+          <Fact
+            label="Batch lookup"
+            value={s.osv_batch_ms === null ? "unreachable" : `${s.osv_batch_ms} ms`}
+            bad={s.osv_batch_ms === null}
+          />
+          <Fact
+            label="Advisory lookup"
+            value={s.osv_vuln_ms === null ? "unreachable" : `${s.osv_vuln_ms} ms`}
+            bad={s.osv_vuln_ms === null}
+          />
+          <Fact label="Checked" value={when(s.osv_checked_at)} />
+          <Fact label="Last dependency scan" value={when(s.last_dependency_scan_at)} />
+          <Fact label="New advisories" value={fmt(s.new_advisory_count)} />
+        </dl>
+        {s.new_advisories.length > 0 && (
+          <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
+            {s.new_advisories.map((a) => (
+              <li key={a.id}>
+                {a.id} ({a.severity}), {a.projects} project{a.projects === 1 ? "" : "s"}
+              </li>
+            ))}
+            {s.new_advisory_count > s.new_advisories.length && (
+              <li>+ {s.new_advisory_count - s.new_advisories.length} more advisories.</li>
+            )}
+          </ul>
         )}
       </div>
 

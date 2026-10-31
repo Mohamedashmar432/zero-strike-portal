@@ -2,6 +2,9 @@
 test-send, and a scheduler that cannot double-send. OSV and webhooks are stubbed in conftest."""
 
 import asyncio
+import json
+
+import httpx
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings as app_settings
@@ -13,6 +16,7 @@ from app.schemas.digest import (
     DigestPreview,
     DigestRow,
     DigestTotals,
+    NewAdvisory,
     QuotaWarning,
     ScannerHealth,
     StaleProject,
@@ -72,7 +76,16 @@ def _preview_fixture() -> DigestPreview:
             rule_pack_version=4,
             rule_count=7,
             osv_reachable=True,
+            osv_batch_ms=120,
+            osv_vuln_ms=95,
+            osv_checked_at=t0 + timedelta(days=1),
+            last_dependency_scan_at=t0 + timedelta(hours=20),
             new_cve_ids=["CVE-2026-1234", "GHSA-xxxx-yyyy-zzzz"],
+            new_advisories=[
+                NewAdvisory(id="GHSA-xxxx-yyyy-zzzz", severity="critical", projects=2),
+                NewAdvisory(id="CVE-2026-1234", severity="high", projects=1),
+            ],
+            new_advisory_count=2,
         ),
         stale_projects=[StaleProject(project_id="p2", name="Ledger", last_scan_at=None)],
         quota_warnings=[QuotaWarning(project_id="p1", name="Payments", used=25, limit=30)],
@@ -98,47 +111,153 @@ def _walk(node):
             yield from _walk(v)
 
 
-def test_card_builder_against_fixture():
-    card = digest_service.build_card(_preview_fixture(), frontend_origin="https://portal.example")
-    # 1.4 and no Table: legacy Office 365 connector webhooks silently drop newer elements.
-    assert card["type"] == "AdaptiveCard" and card["version"] == "1.4"
-    assert not any(n.get("type") == "Table" for n in _walk(card))
+def _header(card):
+    return card["body"][0]["items"][0]["text"]
 
-    rows = _grid(card)
+
+def _title(card):
+    return card["body"][0]["items"][1]["text"]
+
+
+def _facts(card):
+    return {f["title"]: f["value"] for n in _walk(card) if n.get("type") == "FactSet" for f in n["facts"]}
+
+
+def _text_of(card):
+    return " ".join(n.get("text", "") for n in _walk(card))
+
+
+def _realistic_rows(n):
+    return [
+        DigestRow(project_id=f"p{i}", name=f"Project number {i} with a long name", pipeline_runs=12, pipeline_failed=1,
+                  cloud_scans=5, critical=3, high=40, quota_used=4, quota_limit=10,
+                  new_cves=NewCves(count=2, latest=[CveRef(id="CVE-2026-1234", severity="high"),
+                                                    CveRef(id="GHSA-xxxx-yyyy-zzzz", severity="critical")]))
+        for i in range(n)
+    ]
+
+
+def _cards(preview=None):
+    return digest_service.build_cards(preview or _preview_fixture(), frontend_origin="https://portal.example")
+
+
+def test_the_digest_is_scanner_health_then_projects_then_a_dated_summary():
+    cards = _cards()
+    assert [_header(c).split(" · ", 2)[2] for c in cards] == ["1/3 · SCANNER HEALTH", "2/3 · PROJECT STATUS", "3/3 · SUMMARY"]
+    # 1.4 and no Table: legacy Office 365 connector webhooks silently drop newer elements.
+    assert all(c["type"] == "AdaptiveCard" and c["version"] == "1.4" for c in cards)
+    assert not any(n.get("type") == "Table" for c in cards for n in _walk(c))
+    summary = cards[-1]
+    preview = _preview_fixture()
+    assert _title(summary) == f"Security digest, {preview.period_end:%a %d %b %Y}"
+    assert f"Updated {preview.period_end:%H:%M} UTC" in _text_of(summary)
+    assert summary["actions"][0]["url"] == "https://portal.example/admin/control-panel"
+
+
+def test_health_card_reports_the_scanner_and_the_live_cve_feed():
+    health = _cards()[0]
+    assert _title(health) == "Scanner ready, CVE feed live" and health["body"][0]["style"] == "good"
+    f = _facts(health)
+    assert f["Scanner in backend"] == "v0.40.0" and f["Latest published binary"] == "v0.41.0"
+    assert f["CI runners on an older scanner"] == "2" and f["Scan engine"] == "Available"
+    assert f["Batch lookup"] == "reachable, 120 ms" and f["Advisory lookup"] == "reachable, 95 ms"
+    assert f["Checked"] == "28 Oct 2026 03:30 UTC" and f["Last dependency scan"] == "27 Oct 2026 23:30 UTC"
+    assert "no local CVE database" in f["Source"]
+    text = _text_of(health)
+    assert "New advisories since 27 Oct 03:30 UTC: 2" in text
+    assert "GHSA-xxxx-yyyy-zzzz (critical), 2 projects" in text and "CVE-2026-1234 (high), 1 project" in text
+
+
+def test_health_card_says_not_ready_when_osv_is_unreachable():
+    preview = _preview_fixture()
+    preview.scanner.osv_reachable = False
+    preview.scanner.osv_batch_ms = None
+    preview.scanner.new_advisories, preview.scanner.new_advisory_count = [], 0
+    health, _projects, summary = _cards(preview)
+    assert _title(health) == "Scanner NOT ready" and health["body"][0]["style"] == "attention"
+    assert _facts(health)["Batch lookup"] == "NOT REACHABLE"
+    assert "No advisory was first reported" in _text_of(health)
+    assert "The scanner or its CVE feed is not ready" in _text_of(summary)
+
+
+def test_project_card_lists_worst_first_with_a_header_row_and_no_totals_row():
+    _health, projects, _summary = _cards()
+    rows = _grid(projects)
     assert rows[0] == ["Project", "Pipeline", "Cloud", "Critical", "High", "Quota", "New CVEs"]
     assert rows[1] == [
         "Payments", "12 (1 failed)", "4 (2 failed)", "3", "9", "25/30", "3: CVE-2026-1234 (H), GHSA-xxxx-yyyy-zzzz (C)",
     ]
-    assert rows[2][0] == "Ledger" and rows[2][-1] == "-"
-    assert rows[-1] == ["Total", "14 (1 failed)", "4 (2 failed)", "3", "9", "25/60", "3"]
-
-    [facts] = [n for n in _walk(card) if n.get("type") == "FactSet"]
-    values = {f["title"]: f["value"] for f in facts["facts"]}
-    assert values["Scanner in backend"] == "v0.40.0"
-    assert values["Latest published binary"] == "v0.41.0"
-    assert values["CI runners on an older scanner"] == "2"
-    assert values["Vulnerability data"].endswith("reachable")
-    text = " ".join(n.get("text", "") for n in _walk(card))
-    assert "CVE-2026-1234" in text and "25/30" in text and "No scan in 30 days: Ledger" in text
-    assert card["actions"][0]["url"] == "https://portal.example/admin/control-panel"
-
-
-def test_card_builder_caps_the_table_but_not_the_totals():
-    preview = _preview_fixture()
-    preview.rows = [DigestRow(project_id=f"p{i}", name=f"P{i}") for i in range(40)]
-    card = digest_service.build_card(preview)
-    assert len(_grid(card)) == 1 + 25 + 1
-    assert any("+ 15 more projects" in b.get("text", "") for b in card["body"])
-
-
-def test_card_builder_puts_the_worst_project_first():
+    assert rows[2][0] == "Ledger" and rows[2][-1] == "-" and len(rows) == 3
     preview = _preview_fixture()
     preview.rows = [
         DigestRow(project_id="a", name="Calm"),
         DigestRow(project_id="b", name="Burning", critical=5),
         DigestRow(project_id="c", name="Failing", cloud_failed=2),
     ]
-    assert [r[0] for r in _grid(digest_service.build_card(preview))[1:4]] == ["Burning", "Failing", "Calm"]
+    assert [r[0] for r in _grid(_cards(preview)[1])[1:4]] == ["Burning", "Failing", "Calm"]
+
+
+def test_summary_carries_the_totals_and_what_needs_attention():
+    summary = _cards()[-1]
+    text = _text_of(summary)
+    assert "No scan in 30 days: Ledger" in text and "Payments (25/30)" in text
+    assert "1 pipeline run(s) and 2 cloud scan(s) failed" in text
+    f = _facts(summary)
+    assert f["Projects"] == "2" and f["Scanner"] == "Ready (v0.40.0), OSV.dev live" and f["New advisories"] == "2"
+
+
+def test_projects_are_split_ten_per_card_and_every_card_fits_teams():
+    preview = _preview_fixture()
+    preview.rows = _realistic_rows(24)
+    cards = _cards(preview)
+    # 24 projects in one card was ~40 KB; Teams drops a message over ~28 KB without an error.
+    assert [_title(c) for c in cards[1:-1]] == ["Projects 1-10 of 24", "Projects 11-20 of 24", "Projects 21-24 of 24"]
+    assert [len(_grid(c)) - 1 for c in cards[1:-1]] == [10, 10, 4]
+    assert [_header(c).split(" · ")[2] for c in cards] == ["1/5", "2/5", "3/5", "4/5", "5/5"]
+    assert all(len(json.dumps(c).encode()) <= digest_service._MAX_CARD_BYTES for c in cards)
+
+
+def test_projects_beyond_the_card_cap_are_named_as_left_out_but_still_in_the_totals():
+    preview = _preview_fixture()
+    preview.rows = _realistic_rows(75)
+    cards = _cards(preview)
+    assert len(cards) == 1 + digest_service._MAX_PROJECT_CARDS + 1
+    assert "15 more projects were not listed on the project cards (totals include them)" in _text_of(cards[-1])
+    assert _facts(cards[-1])["Projects"] == "75"
+
+
+def test_no_projects_means_a_health_card_and_a_summary_only():
+    preview = _preview_fixture()
+    preview.rows = []
+    assert [_header(c).split(" · ")[3] for c in _cards(preview)] == ["SCANNER HEALTH", "SUMMARY"]
+
+
+def test_advisories_merge_across_projects_worst_severity_first():
+    t = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    out = digest_service._advisory_summary(
+        [("CVE-1", "high", t), ("CVE-1", "critical", t), ("GHSA-2", "low", t), ("CVE-3", "high", t)]
+    )
+    assert [(a.id, a.severity, a.projects) for a in out] == [
+        ("CVE-1", "critical", 2), ("CVE-3", "high", 1), ("GHSA-2", "low", 1),
+    ]
+
+
+def test_live_osv_probe_times_each_endpoint_and_flags_a_5xx_or_a_network_failure():
+    def ok(request):
+        return httpx.Response(200, json={})
+
+    def batch_down(request):
+        return httpx.Response(503) if request.url.path.endswith("querybatch") else httpx.Response(200, json={})
+
+    def offline(request):
+        raise httpx.ConnectError("no route")
+
+    up = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(ok)))
+    assert up.reachable and isinstance(up.batch_ms, int) and isinstance(up.vuln_ms, int)
+    half = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(batch_down)))
+    assert half.batch_ms is None and half.vuln_ms is not None and not half.reachable
+    down = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(offline)))
+    assert (down.batch_ms, down.vuln_ms, down.reachable) == (None, None, False)
 
 
 # --- settings ---------------------------------------------------------------------------------
@@ -217,6 +336,10 @@ def test_preview_uses_current_exposure_counts_quota_stale_and_new_cves(client):
     assert [w["project_id"] for w in body["quota_warnings"]] == [pid]
     assert [s["project_id"] for s in body["stale_projects"]] == [stale_pid]
     assert body["scanner"]["osv_reachable"] is True and body["scanner"]["new_cve_ids"] == ["CVE-2026-9999"]
+    assert body["scanner"]["osv_batch_ms"] == 40 and body["scanner"]["osv_vuln_ms"] == 55
+    assert body["scanner"]["new_advisory_count"] == 1
+    assert body["scanner"]["new_advisories"] == [{"id": "CVE-2026-9999", "severity": "high", "projects": 1}]
+    assert body["scanner"]["last_dependency_scan_at"]
     assert body["scanner"]["backend_scanner_version"] == (app_settings.scanner_build_ref or "unknown")
     assert body["scanner"]["latest_binary_version"] is None and body["scanner"]["outdated_ci_runners"] == 0
     assert set(body) == {"period_start", "period_end", "rows", "totals", "scanner", "stale_projects", "quota_warnings"}
@@ -228,11 +351,12 @@ def test_preview_uses_current_exposure_counts_quota_stale_and_new_cves(client):
 
 def test_osv_unreachable_is_reported_not_fatal(client, monkeypatch):
     async def down():
-        return False
+        return digest_service.OsvProbe(batch_ms=None, vuln_ms=None, checked_at=datetime.now(timezone.utc))
 
     monkeypatch.setattr(digest_service, "_probe_osv", down)
     admin = _admin_headers(client, email="dg-osv@zs.dev")
-    assert client.get(f"{BASE}/preview", headers=admin).json()["scanner"]["osv_reachable"] is False
+    scanner = client.get(f"{BASE}/preview", headers=admin).json()["scanner"]
+    assert scanner["osv_reachable"] is False and scanner["osv_batch_ms"] is None and scanner["osv_checked_at"]
 
 
 # --- sending ----------------------------------------------------------------------------------
@@ -267,9 +391,12 @@ def test_send_test_posts_the_card_to_digest_channels_only(client, monkeypatch):
     _digest_channel(client, admin, url=HOOK + "/disabled", enabled=False)
 
     r = client.post(f"{BASE}/send-test", headers=admin).json()
-    assert r == {"sent": 1, "errors": []}
-    [(url, card)] = cards
-    assert url == HOOK and card["version"] == "1.4" and len(_grid(card)) >= 2
+    assert r["sent"] == 1 and r["errors"] == [] and r["cards"] == len(cards) >= 2
+    assert {url for url, _ in cards} == {HOOK}  # only the digest channel
+    # In order: scanner health first, the dated summary last.
+    labels = [_header(card).split(" · ")[3] for _, card in cards]
+    assert labels[0] == "SCANNER HEALTH" and labels[-1] == "SUMMARY"
+    assert all(card["version"] == "1.4" for _, card in cards)
     state = client.get(BASE, headers=admin).json()
     assert state["last_status"] == "sent" and state["last_sent_at"]
 
@@ -284,7 +411,8 @@ def test_send_test_reports_a_failing_channel_without_raising(client, monkeypatch
     admin = _admin_headers(client, email="dg-send-fail@zs.dev")
     _digest_channel(client, admin)
     r = client.post(f"{BASE}/send-test", headers=admin).json()
-    assert r["sent"] == 0 and len(r["errors"]) == 1 and r["errors"][0]["error"] == "RuntimeError"
+    assert r["sent"] == 0 and len(r["errors"]) == 1
+    assert r["errors"][0]["error"].startswith("card 1 of ") and r["errors"][0]["error"].endswith("RuntimeError")
     assert "secret-token" not in str(r)
     assert client.get(BASE, headers=admin).json()["last_status"] == "error"
 
@@ -292,11 +420,16 @@ def test_send_test_reports_a_failing_channel_without_raising(client, monkeypatch
 def test_send_test_with_no_digest_channel_sends_nothing(client, monkeypatch):
     cards = _capture_cards(monkeypatch)
     admin = _admin_headers(client, email="dg-send-none@zs.dev")
-    assert client.post(f"{BASE}/send-test", headers=admin).json() == {"sent": 0, "errors": []}
+    assert client.post(f"{BASE}/send-test", headers=admin).json() == {"sent": 0, "errors": [], "cards": 0}
     assert cards == []
 
 
 # --- scheduler --------------------------------------------------------------------------------
+
+
+def _summaries(cards):
+    """How many digests were posted: one dated summary card closes each."""
+    return sum(1 for _, card in cards if _header(card).endswith("SUMMARY"))
 
 
 def _enable(client, admin, **overrides):
@@ -331,13 +464,13 @@ def test_scheduler_sends_once_per_period_even_when_racing(client, monkeypatch):
     first = asyncio.run(race())
     assert sorted(first) == [False, True]
     assert asyncio.run(digest_service.run_due(now + timedelta(minutes=5))) is False
-    assert len(cards) == 1
+    assert _summaries(cards) == 1
     state = client.get(BASE, headers=admin).json()
     assert state["last_status"] == "sent"
 
     # Next day's slot is a new period.
     assert asyncio.run(digest_service.run_due(now + timedelta(days=1))) is True
-    assert len(cards) == 2
+    assert _summaries(cards) == 2
 
 
 def test_scheduler_does_nothing_when_disabled_or_outside_the_slot(client, monkeypatch):

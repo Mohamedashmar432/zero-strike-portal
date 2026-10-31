@@ -4,6 +4,7 @@ Consumed by both the scanner upload endpoint and the server-side cloud scan
 service — the single place the Go PascalCase report becomes portal data.
 """
 
+import json
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -333,6 +334,21 @@ async def _apply_suppression(scan: Scan, findings: list[Finding]) -> int:
     return n
 
 
+def _without_inventory(raw_json: str, report: GoReportIn) -> str:
+    """The raw report minus its `Dependencies` list. The package list is kept once, as the project's
+    DependencyInventory (replaced on every scan); leaving it in each scan's stored report too would add
+    ~0.1 MB per scan for nothing, since nothing reads the stored raw JSON back, and a very large list could
+    push the report past the inline limit below. Any failure keeps the report as received."""
+    if not report.dependencies:
+        return raw_json
+    try:
+        doc = json.loads(raw_json)
+        doc.pop("Dependencies", None)
+        return json.dumps(doc, indent=2, ensure_ascii=False)
+    except (ValueError, AttributeError):
+        return raw_json
+
+
 async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     """Write findings + report for `scan` from a parsed Go report, mark the scan completed.
 
@@ -370,6 +386,7 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
     else:
         duration_ms = None
     diagnostics = [_diagnostic(d) for d in report.diagnostics]
+    raw_json = _without_inventory(raw_json, report)
     stored_raw_json: str | None = raw_json
     if len(raw_json.encode("utf-8", errors="replace")) > _MAX_RAW_JSON_BYTES:
         stored_raw_json = None
@@ -400,6 +417,15 @@ async def ingest(scan: Scan, report: GoReportIn, raw_json: str) -> int:
         raw_json=stored_raw_json,
         json_uploaded_at=now,
     ).insert()
+
+    # The dependency inventory is what live advisory alerts match against. Like reconcile below it must
+    # never fail the ingest; upsert_from_report swallows and logs its own errors.
+    try:
+        from app.services import dependency_inventory_service
+
+        await dependency_inventory_service.upsert_from_report(scan, report)
+    except Exception:
+        logger.warning("dependency inventory hook failed", scan_id=scan_id, exc_info=True)
 
     # Stamped before reconcile so lifecycle transitions record the commit/branch they were observed
     # in; the report's own commit/branch win, a cloud scan's post-clone rev-parse is the fallback.

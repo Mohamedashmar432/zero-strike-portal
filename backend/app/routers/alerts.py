@@ -16,9 +16,11 @@ from app.schemas.alerts import (
     ProjectAlertsUpdateRequest,
 )
 from app.schemas.common import MessageResponse
+from app.schemas.live_alerts import ProjectLiveAlerts
 from app.services import (
     alert_service,
     audit_service,
+    live_alert_service,
     project_service,
     webhook_channel_service,
     workspace_settings_service,
@@ -37,7 +39,9 @@ def _encrypt_vetted(url: str) -> str | None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
 
-def _project_response(p: Project) -> ProjectAlertsResponse:
+async def _project_response(p: Project) -> ProjectAlertsResponse:
+    ws = await workspace_settings_service.get_workspace_settings()
+    policy = await workspace_settings_service.effective_live_alert_policy(p)
     return ProjectAlertsResponse(
         webhook_enabled=p.alert_webhook_enabled,
         webhook_configured=bool(p.alert_webhook_enc),
@@ -45,6 +49,9 @@ def _project_response(p: Project) -> ProjectAlertsResponse:
         email_enabled=p.alert_email_enabled,
         emails=p.alert_emails,
         triggers=p.alert_triggers,
+        live_alert_min_severity=p.live_alert_min_severity,
+        live_alert_effective=policy.min_severity,
+        workspace_live_alert_min_severity=ws.live_alerts_min_severity,
     )
 
 
@@ -52,7 +59,7 @@ def _project_response(p: Project) -> ProjectAlertsResponse:
 async def get_project_alerts(project_id: str, user: User = Depends(get_current_user)):
     project = await project_service.get_project_or_404(project_id)
     await project_service.require_owner_or_admin(project_id, user)
-    return _project_response(project)
+    return await _project_response(project)
 
 
 @router.put("/projects/{project_id}/alerts", response_model=ProjectAlertsResponse)
@@ -75,6 +82,10 @@ async def update_project_alerts(
         project.alert_emails = list(seen.values())
     if payload.triggers is not None:
         project.alert_triggers = list(dict.fromkeys(payload.triggers))
+    if payload.live_alert_min_severity is not None:
+        project.live_alert_min_severity = (
+            None if payload.live_alert_min_severity == "inherit" else payload.live_alert_min_severity
+        )
     if project.alert_webhook_enabled and not project.alert_webhook_enc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Add a webhook URL before enabling it")
     if project.alert_email_enabled and not project.alert_emails:
@@ -91,9 +102,10 @@ async def update_project_alerts(
             "email_enabled": project.alert_email_enabled,
             "email_count": len(project.alert_emails),
             "triggers": project.alert_triggers,
+            "live_alert_min_severity": project.live_alert_min_severity or "inherit",
         },
     )
-    return _project_response(project)
+    return await _project_response(project)
 
 
 @router.post("/projects/{project_id}/alerts/test", response_model=MessageResponse)
@@ -121,6 +133,15 @@ async def test_project_alerts(project_id: str, user: User = Depends(get_current_
         metadata={"channel": "webhook", "project": project.name},
     )
     return MessageResponse(message="Test alert sent")
+
+
+@router.get("/projects/{project_id}/live-alerts", response_model=ProjectLiveAlerts)
+async def get_project_live_alerts(project_id: str, user: User = Depends(get_current_user)):
+    """Any member: the project's dependency inventory coverage and the live advisory alerts it received.
+    Carries no webhook or address, only delivery outcomes."""
+    project = await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await live_alert_service.project_feed(project)
 
 
 # --- portal-wide webhook ---------------------------------------------------------------------

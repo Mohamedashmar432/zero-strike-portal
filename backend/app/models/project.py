@@ -47,6 +47,10 @@ class Project(Document):
     auto_fix_enabled: bool | None = None
     auto_fix_confidence_threshold: float | None = None
 
+    # Live dependency alerts: None = inherit the workspace minimum. "off" silences them for this project.
+    # A project may only tighten the workspace floor; effective_live_alert_policy enforces that at read time.
+    live_alert_min_severity: Literal["critical", "high", "medium", "off"] | None = None
+
     # AI budget (docs/AI_PRICING_AND_BUDGETS.md). Limits are per calendar month (UTC); None = no
     # limit. A project limit can only add a stop, never grant spend, so owners/admins set it.
     ai_budget_usd_monthly: float | None = None

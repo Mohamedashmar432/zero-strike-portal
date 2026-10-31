@@ -5,6 +5,9 @@ from pydantic import BaseModel, EmailStr, Field
 AlertTrigger = Literal["critical", "high", "vulnerable_package", "scan_failed"]
 
 
+LiveAlertMinSeverity = Literal["critical", "high", "medium", "off"]
+
+
 class ProjectAlertsResponse(BaseModel):
     webhook_enabled: bool
     webhook_configured: bool
@@ -12,6 +15,11 @@ class ProjectAlertsResponse(BaseModel):
     email_enabled: bool
     emails: list[str]
     triggers: list[AlertTrigger]
+    # Live dependency alerts: the project's own choice (None = inherit), what actually applies after the
+    # tighten-only rule, and the workspace floor the UI needs to disable looser options.
+    live_alert_min_severity: LiveAlertMinSeverity | None
+    live_alert_effective: LiveAlertMinSeverity
+    workspace_live_alert_min_severity: LiveAlertMinSeverity
 
 
 class ProjectAlertsUpdateRequest(BaseModel):
@@ -21,6 +29,8 @@ class ProjectAlertsUpdateRequest(BaseModel):
     email_enabled: bool | None = None
     emails: list[EmailStr] | None = Field(None, max_length=3)
     triggers: list[AlertTrigger] | None = None
+    # Omitted = unchanged; "inherit" = follow the workspace setting (stored as None).
+    live_alert_min_severity: Literal["inherit", "critical", "high", "medium", "off"] | None = None
 
 
 class GlobalAlertsResponse(BaseModel):
