@@ -523,15 +523,35 @@ async def _propose_all(findings, propose, on_done, concurrency: int) -> list:
     sem = asyncio.Semaphore(concurrency)
     done = 0
 
+    failed = False
+
     async def one(finding):
-        nonlocal done
+        nonlocal done, failed
         async with sem:
-            result = await propose(finding)
+            # A failure releases its slot before the cancel below lands; don't let the next queued
+            # finding start in that gap.
+            if failed:
+                raise asyncio.CancelledError
+            try:
+                result = await propose(finding)
+            except BaseException:
+                failed = True
+                raise
         done += 1
         await on_done(done)
         return result
 
-    return await asyncio.gather(*(one(f) for f in findings))
+    tasks = [asyncio.ensure_future(one(f)) for f in findings]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        # gather does not cancel the siblings of a failed task. Without this, findings still queued on
+        # the semaphore would go on spending tokens against a workdir the caller is about to delete,
+        # under a job already marked failed.
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def run_job(job: RemediationJob) -> None:

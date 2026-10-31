@@ -249,3 +249,18 @@ def test_feedback_continues_the_transcript_as_untrusted(monkeypatch):
     assert any(m.get("role") == "tool" and m.get("tool_call_id") == "s1" for m in second)
     last = second[-1]["content"]
     assert "untrusted_review_feedback" in last and "TRUSTED reviewer" not in last
+
+
+def test_forced_submit_stays_in_the_transcript(monkeypatch):
+    submit = {"finding_id": "F1", "can_fix": True, "confidence_score": 70, "file_path": "app.py",
+              "original_code": "x", "patched_code": "y", "explanation": "e"}
+    _script(monkeypatch, [
+        _resp([_tool_call("read_excerpt", {"path": "app.py", "start_line": 10, "end_line": 10}, cid="r1")]),
+        _resp([_tool_call("submit_fix_proposal", submit, cid="forced")]),
+    ])
+    transcript: list[dict] = []
+    tight = AgentBudgets(max_steps=1, token_budget=100000, max_invalid=2)
+    result = asyncio.run(run_agent({"finding_id": "F1"}, _ctx(), tight, transcript=transcript))
+    assert result.can_fix is True
+    # The forced patch is in the transcript, so a critic "revise" can refer to it.
+    assert any(tc["id"] == "forced" for m in transcript for tc in m.get("tool_calls") or [])

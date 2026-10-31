@@ -27,13 +27,17 @@ async def autofix_quality(*, project_id: str | None, days: int) -> dict:
     # ever holds tens of thousands of proposals.
     proposals = await AIFixProposal.find({"created_at": {"$gte": since}, **scope}).to_list()
     drafted = [p for p in proposals if p.can_fix]
+    # Over every critiqued proposal, not just drafted ones: a reject turns can_fix off, so counting only
+    # can_fix=True would hide every reject.
     verdicts = Counter(
-        "skipped" if "skipped" in (p.critique or {}) else (p.critique or {}).get("verdict", "none")
-        for p in drafted
+        "skipped" if "skipped" in p.critique else str(p.critique.get("verdict") or "none").strip().lower()
+        for p in proposals
+        if p.critique
     )
     accepted = sum(1 for p in drafted if p.review_state in _ACCEPTED or p.pr_state)
     dismissed = sum(1 for p in drafted if p.review_state == "dismissed")
-    validated = [p for p in drafted if p.validation]
+    # A re-scan disabled by config writes {"skipped": True}; it neither cleared nor failed to clear.
+    validated = [p for p in drafted if p.validation and "target_cleared" in p.validation]
     cleared = sum(1 for p in validated if p.validation.get("target_cleared"))
 
     events = await AIUsageEvent.find(

@@ -188,7 +188,8 @@ def _snippet(finding: Finding) -> str | None:
     """The flagged code, clipped and redacted -- enough for an exploitability judgment without
     blowing a local model's context. Repo content, so secrets are masked like every other prompt."""
     text = next((e.snippet for e in finding.evidence if e.snippet), None)
-    return secret_redaction.redact(_clip(text, 600)) if text else None
+    # Redact before clipping: a token cut at the boundary no longer matches its redaction pattern.
+    return _clip(secret_redaction.redact(text), 600) if text else None
 
 
 def _finding_payload(finding: Finding) -> dict:
@@ -234,7 +235,8 @@ def _representative(members: list[Finding]) -> Finding:
     """The highest-severity member of a (rule, path class) group -- the one finding we actually send to the LLM
     for the whole group. Its verdict is fanned out to every member (see zero-strike-cli's
     per-rule enrichment). Same vulnerability across N files = one LLM call, applied to all N."""
-    return min(members, key=lambda f: _SEV_ORDER.get((f.severity or "").lower(), 9))
+    # Ties go to an application-code member, so the model sees the copy that matters.
+    return min(members, key=lambda f: (_SEV_ORDER.get((f.severity or "").lower(), 9), _path_class(f) == "test"))
 
 
 async def _persist_insight(
@@ -319,13 +321,16 @@ async def _enrich_group_chunk(
     async with semaphore:
         rep_to_group: dict[str, list[Finding]] = {}
         payload_reps: list[dict] = []
-        for (rule_id, _cls), members in chunk_groups:
+        for (rule_id, cls), members in chunk_groups:
             fp_members = [m for m in members if m.fingerprint]
             if not fp_members:
                 continue
             rep = _representative(fp_members)
             rep_to_group[rep.fingerprint] = fp_members
-            payload_reps.append({"fingerprint": rep.fingerprint, "rule_id": rule_id, **_finding_payload(rep)})
+            # The group's class, not the rep's own path: a test file sharing an app fingerprint is app.
+            payload_reps.append(
+                {"fingerprint": rep.fingerprint, "rule_id": rule_id, **_finding_payload(rep), "path_class": cls}
+            )
         if not payload_reps:
             return [], 0
 
@@ -380,9 +385,14 @@ async def analyze_findings_batch(
         else settings.ai_analysis_cloud_batch_size
     )
 
+    # AIFindingInsight is keyed by fingerprint, and the fingerprint carries no path: the same snippet in
+    # tests/ and in app code shares one insight row. Judge such a fingerprint as app code (the
+    # conservative side) so a test-fixture verdict can never be the one stored for it.
+    app_fps = {f.fingerprint for f in findings if f.fingerprint and _path_class(f) == "app"}
     groups: dict[tuple[str, str], list[Finding]] = defaultdict(list)
     for f in findings:
-        groups[(f.rule_id or "unknown", _path_class(f))].append(f)
+        cls = "app" if f.fingerprint in app_fps else _path_class(f)
+        groups[(f.rule_id or "unknown", cls)].append(f)
     group_items = list(groups.items())
 
     total = len(group_items)  # progress is measured in (rule, path class) groups, not raw findings

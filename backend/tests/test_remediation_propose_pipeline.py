@@ -455,3 +455,29 @@ def test_propose_all_bounds_concurrency_and_reports_progress():
     assert results == [10, 20, 30, 40, 50]  # order preserved
     assert peak == 2
     assert progress == [1, 2, 3, 4, 5]
+
+
+def test_propose_all_cancels_queued_findings_when_one_raises():
+    import asyncio
+
+    import pytest
+
+    from app.services import ai_remediation_service
+
+    started: list[int] = []
+
+    async def propose(n):
+        started.append(n)
+        await asyncio.sleep(0.01)
+        if n == 1:
+            raise RuntimeError("boom")
+        await asyncio.sleep(0.05)
+        return n
+
+    async def on_done(done):
+        pass
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(ai_remediation_service._propose_all([1, 2, 3, 4, 5], propose, on_done, concurrency=2))
+    # Only the two that held the semaphore ever started; the queued three never spent anything.
+    assert started == [1, 2]

@@ -628,3 +628,42 @@ def test_path_class():
     assert ai_analysis_service._path_class(mk("pkg/db_test.go")) == "test"
     assert ai_analysis_service._path_class(mk("src/db.py")) == "app"
     assert ai_analysis_service._path_class(mk("src/contest/db.py")) == "app"
+
+
+def test_shared_fingerprint_in_tests_and_app_is_judged_as_app_code(client, monkeypatch):
+    # The fingerprint has no path, so one insight row serves both copies: the test copy must never
+    # be judged on its own (as test code) and have that verdict stored for the app copy.
+    sent: list[list[dict]] = []
+
+    async def fake(messages, **kwargs):
+        payload = json.loads(messages[1]["content"])["findings"]
+        sent.append(payload)
+        return {"findings": [
+            {"fingerprint": f["fingerprint"], "is_false_positive": f["path_class"] == "test"} for f in payload
+        ]}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake)
+
+    async def run():
+        await _create_active_provider()
+        findings = [
+            _make_finding("fp-shared", "rule-a", location=LocationEmbedded(file="tests/fixtures/db.py", start_line=3)),
+            _make_finding("fp-shared", "rule-a", location=LocationEmbedded(file="src/db.py", start_line=3)),
+        ]
+        insights = await ai_analysis_service.analyze_findings_batch(findings)
+        assert len(sent[0]) == 1
+        assert sent[0][0]["path_class"] == "app"
+        assert sent[0][0]["file"] == "src/db.py"  # the app copy is the one the model sees
+        assert all(i.is_false_positive is False for i in insights)
+
+    asyncio.run(run())
+
+
+def test_snippet_redacts_before_clipping():
+    from app.services import secret_redaction
+
+    secret = "ghp_" + "A" * 36
+    f = _make_finding("fp-1", "rule-a", evidence=[EvidenceEmbedded(snippet="x" * 590 + secret)])
+    code = ai_analysis_service._finding_payload(f)["code"]
+    assert "AAAAAA" not in code
+    assert secret_redaction.redact(secret) != secret  # the pattern this test relies on is real

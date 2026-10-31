@@ -173,6 +173,9 @@ async def _force_submit(messages: list[dict], ctx: ToolContext, reason: str) -> 
             scan_id=ctx.scan_id,
             feature="autofix",
         )
+        # Keep the forced patch in the transcript: a critic "revise" continues this conversation, and
+        # feedback about a patch the model can't see is useless (close_open_tool_calls answers it).
+        messages.append(_assistant_message(resp))
         for tc in resp.tool_calls:
             if tc.name == "submit_fix_proposal" or tc.name in _RECOVERED_TOOL_NAMES:
                 try:
