@@ -391,7 +391,7 @@ def test_bulk_trigger_reports_the_findings_the_quota_trimmed(client, monkeypatch
     "3 findings were not queued" instead of letting them look unfixable."""
     from app.services import ai_remediation_agent, ai_remediation_service
 
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **_kw):
         return ai_remediation_service.SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"], can_fix=False, confidence_score=0.0,
             file_path="app.py", explanation="no fix", patch_scope="none",

@@ -2,7 +2,7 @@
 portal-wide provider configured in the dev database, then scores each proposal. Costs tokens, so it
 is opt-in and never part of pytest (only score() is unit-tested).
 
-    cd backend && ./.venv/Scripts/python -m evals.autofix_eval
+    cd backend && ./.venv/Scripts/python -m evals.autofix_eval [project_id]
 
 Run it before and after any change to an Auto-Fix prompt, tool or model, and compare pass count,
 calls, tokens and cost. Usage rows land in AIUsageEvent under job_id "eval-<timestamp>".
@@ -10,6 +10,7 @@ calls, tokens and cost. Usage rows land in AIUsageEvent under job_id "eval-<time
 
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -38,12 +39,12 @@ def score(case: dict, p: SubmitFixProposalArgs) -> list[str]:
     return fails
 
 
-async def _run_case(case_dir: Path, job_id: str) -> dict:
+async def _run_case(case_dir: Path, job_id: str, project_id: str | None) -> dict:
     case = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
     repo = case_dir / "repo"
     ctx = ToolContext(
         provider="", repo_full_name="", branch="main", allowed_paths=[case["file"]],
-        project_id=None, scan_id=None, trace_id=job_id,
+        project_id=project_id, scan_id=None, trace_id=job_id,
         finding_context={
             "finding_id": case["id"], "file_path": case["file"], "language": case["language"],
             "original_code": case["snippet"], "start_line": case["line"], "end_line": case["line"],
@@ -55,9 +56,13 @@ async def _run_case(case_dir: Path, job_id: str) -> dict:
     excerpt = (repo / case["file"]).read_text(encoding="utf-8")
     started = time.perf_counter()
     with llm_client.call_scope(job_id=job_id, finding_id=case["id"]):
-        draft = await ai_remediation_agent.run_agent(bundle, ctx, ai_remediation_agent.budgets_from_settings())
+        try:
+            draft = await ai_remediation_agent.run_agent(bundle, ctx, ai_remediation_agent.budgets_from_settings())
+        except llm_client.LLMError as exc:  # report it per case, as the pipeline would, not as a crash
+            return {"id": case["id"], "fails": [f"provider error: {type(exc).__name__}"],
+                    "seconds": round(time.perf_counter() - started, 1), "critic": "skipped"}
         verdict = await remediation_critic.critique(
-            bundle, draft, project_id=None, scan_id=None, file_excerpt=excerpt
+            bundle, draft, project_id=project_id, scan_id=None, file_excerpt=excerpt
         )
     if verdict is not None:
         draft = remediation_critic.apply_to_draft(draft, verdict)
@@ -67,10 +72,10 @@ async def _run_case(case_dir: Path, job_id: str) -> dict:
     }
 
 
-async def main() -> None:
+async def main(project_id: str | None) -> None:
     await connect_to_mongo()
     job_id = f"eval-{int(time.time())}"
-    results = [await _run_case(d, job_id) for d in sorted(p for p in CASES.iterdir() if p.is_dir())]
+    results = [await _run_case(d, job_id, project_id) for d in sorted(p for p in CASES.iterdir() if p.is_dir())]
     events = await AIUsageEvent.find({"job_id": job_id}).to_list()
     for r in results:
         mine = [e for e in events if e.finding_id == r["id"]]
@@ -84,4 +89,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # With Project BYOK on, a call with no project has no key it may use; pass a project id whose own
+    # provider should run the eval (its usage is billed to that project).
+    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else None))
