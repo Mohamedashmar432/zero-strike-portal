@@ -562,3 +562,28 @@ def test_successful_job_clears_its_stage(client, monkeypatch):
         assert reloaded.error_code is None
 
     asyncio.run(run())
+
+
+def test_synthesize_scan_under_byok_uses_the_projects_own_config(client, monkeypatch):
+    async def fake_get_completion(messages, **kwargs):
+        return {"summary": "model summary", "top_recommendations": []}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake_get_completion)
+    project = "aaaaaaaaaaaaaaaaaaaaaaaa"
+
+    async def run():
+        await ai_provider_config_service.set_byok_enabled(True)
+        # Only a project key exists -- no portal config at all.
+        await ai_provider_config_service.create_config(
+            name="Project", provider="anthropic", model_name="claude-x", base_url=None,
+            temperature=0.0, api_key="sk-project", created_by=None, project_id=project,
+        )
+        now = datetime.now(timezone.utc)
+        scan = Scan(project_id=project, scan_type="cloud", triggered_by="cloud", status="completed",
+                    created_at=now, updated_at=now)
+        await scan.insert()
+        insights = [AIFindingInsight(fingerprint="fp-1", project_id=project)]
+        result = await ai_analysis_service.synthesize_scan(scan, insights)
+        assert result.summary == "model summary"
+
+    asyncio.run(run())

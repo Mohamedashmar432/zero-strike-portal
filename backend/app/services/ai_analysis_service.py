@@ -345,7 +345,7 @@ async def analyze_findings_batch(
     # Only needed for batch sizing + stamping provider/model. Don't hard-fail if absent: a fully-cached
     # batch short-circuits without any LLM call, and an actual enrichment call raises
     # LLMNotConfiguredError from get_completion itself when there's no provider.
-    config = await ai_provider_config_service.get_active_config()
+    config = await ai_provider_config_service.resolve_active_config(project_id)
     batch_size = (
         settings.ai_analysis_local_batch_size
         if config is not None and config.provider in settings.ai_analysis_local_providers
@@ -440,7 +440,7 @@ async def synthesize_scan(
     intended = intended if intended is not None else total
     false_positive_count = sum(1 for i in insights if i.is_false_positive)
 
-    config = await ai_provider_config_service.get_active_config()
+    config = await ai_provider_config_service.resolve_active_config(scan.project_id)
     if config is None:
         raise llm_client.LLMNotConfiguredError("No active AI provider configured")
     now = datetime.now(timezone.utc)
