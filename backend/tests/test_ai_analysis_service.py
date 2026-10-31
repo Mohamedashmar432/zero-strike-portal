@@ -9,7 +9,7 @@ import app.services.ai_analysis_service as ai_analysis_service
 import app.services.llm_client as llm_client
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.ai_finding_insight import AIFindingInsight
-from app.models.finding import Finding, LocationEmbedded
+from app.models.finding import EvidenceEmbedded, Finding, LocationEmbedded
 from app.models.scan import Scan
 from app.services import ai_provider_config_service
 
@@ -587,3 +587,44 @@ def test_synthesize_scan_under_byok_uses_the_projects_own_config(client, monkeyp
         assert result.summary == "model summary"
 
     asyncio.run(run())
+
+
+def test_false_positive_verdict_does_not_cross_from_tests_to_app_code(client, monkeypatch):
+    sent: list[list[dict]] = []
+
+    async def fake(messages, **kwargs):
+        payload = json.loads(messages[1]["content"])["findings"]
+        sent.append(payload)
+        return {"findings": [
+            {"fingerprint": f["fingerprint"], "is_false_positive": f["path_class"] == "test"} for f in payload
+        ]}
+
+    monkeypatch.setattr(llm_client, "get_completion", fake)
+
+    async def run():
+        await _create_active_provider()
+        findings = [
+            _make_finding("fp-app", "rule-a", location=LocationEmbedded(file="src/db.py", start_line=3)),
+            _make_finding("fp-test", "rule-a", location=LocationEmbedded(file="tests/fixtures/db.py", start_line=3)),
+        ]
+        insights = await ai_analysis_service.analyze_findings_batch(findings)
+        by = {i.fingerprint: i for i in insights}
+        assert by["fp-test"].is_false_positive is True
+        assert by["fp-app"].is_false_positive is False
+        assert len(sent[0]) == 2  # one representative per (rule, path class)
+
+    asyncio.run(run())
+
+
+def test_payload_carries_the_code_snippet():
+    f = _make_finding("fp-1", "rule-a", evidence=[EvidenceEmbedded(snippet="cursor.execute('SELECT ' + uid)")])
+    assert ai_analysis_service._finding_payload(f)["code"] == "cursor.execute('SELECT ' + uid)"
+
+
+def test_path_class():
+    mk = lambda p: _make_finding("x", "r", location=LocationEmbedded(file=p, start_line=1))  # noqa: E731
+    assert ai_analysis_service._path_class(mk("tests/test_db.py")) == "test"
+    assert ai_analysis_service._path_class(mk("web/src/login.spec.ts")) == "test"
+    assert ai_analysis_service._path_class(mk("pkg/db_test.go")) == "test"
+    assert ai_analysis_service._path_class(mk("src/db.py")) == "app"
+    assert ai_analysis_service._path_class(mk("src/contest/db.py")) == "app"
