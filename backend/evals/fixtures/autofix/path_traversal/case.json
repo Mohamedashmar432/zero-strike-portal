@@ -1,0 +1,4 @@
+{"id": "path_traversal", "rule_id": "python.path-traversal.open-join", "cwe": ["CWE-22"], "language": "python",
+ "message": "File path built from user input without containment", "file": "files/store.py", "line": 7,
+ "snippet": "with open(os.path.join(BASE_DIR, name), \"rb\") as fh:",
+ "expect": {"can_fix": true, "must_not_contain": [], "must_contain_any": ["realpath", "resolve(", "commonpath", "is_relative_to"]}}

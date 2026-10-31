@@ -1,0 +1,4 @@
+{"id": "sqli_python", "rule_id": "python.sqli.string-concat", "cwe": ["CWE-89"], "language": "python",
+ "message": "SQL query built by string concatenation with user input", "file": "app/db.py", "line": 5,
+ "snippet": "cur = conn.cursor(); cur.execute(\"SELECT * FROM users WHERE id = \" + user_id)",
+ "expect": {"can_fix": true, "must_not_contain": ["+ user_id"], "must_contain_any": ["%s", "?", ":id"]}}

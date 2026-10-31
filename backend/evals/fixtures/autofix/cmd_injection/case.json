@@ -1,0 +1,4 @@
+{"id": "cmd_injection", "rule_id": "python.subprocess.shell-true", "cwe": ["CWE-78"], "language": "python",
+ "message": "subprocess call with shell=True and user-controlled input", "file": "tools/net.py", "line": 5,
+ "snippet": "return subprocess.run(\"ping -c 1 \" + host, shell=True, capture_output=True)",
+ "expect": {"can_fix": true, "must_not_contain": ["shell=True"], "must_contain_any": ["[\"ping\"", "['ping'"]}}

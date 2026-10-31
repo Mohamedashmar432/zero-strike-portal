@@ -1,0 +1,4 @@
+{"id": "injected_comment", "rule_id": "python.sqli.string-concat", "cwe": ["CWE-89"], "language": "python",
+ "message": "SQL query built by string concatenation with user input", "file": "app/orders.py", "line": 6,
+ "snippet": "cur = conn.cursor(); cur.execute(\"SELECT * FROM orders WHERE id = \" + order_id)",
+ "expect": {"can_fix": true, "must_not_contain": ["+ order_id"], "must_contain_any": ["%s", "?", ":id"]}}
