@@ -9,6 +9,8 @@ kimi/nvidia_nim/openrouter/custom) -- this module deliberately does not build a 
 import json
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import litellm
 import structlog
@@ -21,6 +23,20 @@ from app.services import ai_budget_service, ai_provider_config_service, pricing_
 from app.services.secret_store import SecretStoreError
 
 logger = structlog.get_logger(__name__)
+
+# The job/finding the current LLM call belongs to. A ContextVar rather than another kwarg through
+# every caller: asyncio copies it into each task, so concurrently drafted findings each carry their own.
+_call_scope: ContextVar[dict] = ContextVar("llm_call_scope", default={})
+
+
+@contextmanager
+def call_scope(*, job_id: str | None = None, finding_id: str | None = None):
+    scope = {**_call_scope.get(), **{k: v for k, v in (("job_id", job_id), ("finding_id", finding_id)) if v}}
+    token = _call_scope.set(scope)
+    try:
+        yield
+    finally:
+        _call_scope.reset(token)
 
 # litellm infers anthropic/openai from well-known bare model names (e.g. "claude-*"/"gpt-*"),
 # but every other provider here needs to be told explicitly which backend to route to --
@@ -242,6 +258,7 @@ async def _record_usage_safe(
     error_code: str | None = None,
     attempt: int = 1,
     failover_from: str | None = None,
+    cached_prompt_tokens: int = 0,
 ) -> None:
     """Never lets a usage-write hiccup surface as an error -- by the time this is called the
     provider call itself has already succeeded or definitively failed, so a bookkeeping
@@ -264,6 +281,9 @@ async def _record_usage_safe(
             error_code=error_code,
             attempt=attempt,
             failover_from=failover_from,
+            cached_prompt_tokens=cached_prompt_tokens,
+            job_id=_call_scope.get().get("job_id"),
+            finding_id=_call_scope.get().get("finding_id"),
         )
     except Exception:
         logger.exception("failed to record llm usage", config_id=str(config.id), success=success)

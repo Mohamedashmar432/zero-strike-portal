@@ -71,6 +71,13 @@ class AIUsageEvent(Document):
     # outages instead of one chain that ended in a success.
     attempt: int = 1
     failover_from: str | None = None
+    # Which job and which finding spent this call. Without them an Auto-Fix run's 2-28 calls are
+    # indistinguishable from any other run's, so per-finding cost, turn count and cache hit rate
+    # (ai_quality_service) can't be computed. Set via llm_client.call_scope, not per caller.
+    job_id: str | None = None
+    finding_id: str | None = None
+    # Prompt tokens the provider served from its prompt cache (a subset of prompt_tokens).
+    cached_prompt_tokens: int = 0
     duration_ms: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0

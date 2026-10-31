@@ -348,6 +348,9 @@ async def record_usage(
     error_code: str | None = None,
     attempt: int = 1,
     failover_from: str | None = None,
+    job_id: str | None = None,
+    finding_id: str | None = None,
+    cached_prompt_tokens: int = 0,
 ) -> None:
     """Atomic $inc so concurrent llm_client calls (analyze_findings_batch runs one call per
     rule_id group, gathered concurrently under a semaphore) against the same active
@@ -390,6 +393,9 @@ async def record_usage(
         error_code=error_code,
         attempt=attempt,
         failover_from=failover_from,
+        job_id=job_id,
+        finding_id=finding_id,
+        cached_prompt_tokens=cached_prompt_tokens,
         duration_ms=duration_ms,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

@@ -582,9 +582,10 @@ async def run_job(job: AIAnalysisJob) -> None:
                 )
 
             await _stage(job, "analyzing")
-            insights = await analyze_findings_batch(findings, force=job.force, progress_cb=_progress)
-            await _stage(job, "synthesizing")
-            await synthesize_scan(scan, insights, intended=len(findings))
+            with llm_client.call_scope(job_id=str(job.id)):
+                insights = await analyze_findings_batch(findings, force=job.force, progress_cb=_progress)
+                await _stage(job, "synthesizing")
+                await synthesize_scan(scan, insights, intended=len(findings))
     except Exception as exc:
         logger.exception("ai analysis job failed", job_id=str(job.id), kind=job.kind)
         now = datetime.now(timezone.utc)

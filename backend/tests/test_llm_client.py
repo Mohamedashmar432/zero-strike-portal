@@ -789,3 +789,30 @@ def test_truncated_answer_reports_the_token_limit_not_an_empty_reply(client, mon
             await llm_client.get_completion([{"role": "user", "content": "hi"}], max_tokens=4000)
 
     asyncio.run(run())
+
+
+def test_call_scope_attributes_usage_rows_to_job_and_finding(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import ai_provider_config_service
+
+    seen: list[dict] = []
+
+    async def fake_record_usage(config_id, **kw):
+        seen.append(kw)
+
+    monkeypatch.setattr(ai_provider_config_service, "record_usage", fake_record_usage)
+    config = SimpleNamespace(id="c1", provider="openai", model_name="gpt-4o")
+
+    async def run():
+        with llm_client.call_scope(job_id="J1", finding_id="F1"):
+            await llm_client._record_usage_safe(config, success=True, prompt_tokens=5, cached_prompt_tokens=3)
+        await llm_client._record_usage_safe(config, success=True)
+
+    asyncio.run(run())
+    assert seen[0]["job_id"] == "J1"
+    assert seen[0]["finding_id"] == "F1"
+    assert seen[0]["cached_prompt_tokens"] == 3
+    # Outside the scope nothing leaks from the previous call.
+    assert seen[1]["job_id"] is None and seen[1]["finding_id"] is None
+
