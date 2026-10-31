@@ -112,7 +112,11 @@ is the single place that policy is decided; with BYOK on a project runs *only* o
 never falls back to the portal's. Every LLM call — success or failure — writes one `AIUsageEvent`
 (feature, latency, tokens, cost, error type; **never** prompt/response content, 180-day TTL), read
 back by `ai_analytics_service` at two scopes: per-project (`/projects/{id}/ai-analytics`,
-member-gated) and portal-wide (`/admin/ai-analytics`, admin-gated).
+member-gated) and portal-wide (`/admin/ai-analytics`, admin-gated). Rows also carry `job_id`/`finding_id`
+(set by `llm_client.call_scope`, never per caller) and `cached_prompt_tokens`, which `ai_quality_service`
+(`/admin/ai-analytics/quality`) turns into Auto-Fix acceptance, re-scan and per-finding cost/cache rates. AI
+analysis groups findings by (rule, path class): a false-positive verdict on test/fixture code must never
+transfer to the same rule in application code, and the model is sent the redacted snippet, not just a locator.
 
 **AI cost and budgets** (`services/pricing_service.py`, `services/ai_budget_service.py`; see
 `docs/AI_PRICING_AND_BUDGETS.md`): tokens come from the provider's `usage` block; cost is a

@@ -277,3 +277,26 @@ shipped instead is the two gates above, because:
   and a *weaker* critic than the drafter is worse than no critic. `AIProviderConfig` is a single-active
   singleton; going multi-role is schema + admin UI for no quality gain here.
 - **Seven agents** would cost ~6× tokens and latency per finding at `max_concurrent_remediation_jobs=1`.
+
+## October 2026 changes (`docs/superpowers/plans/2026-10-31-ai-agent-quality-and-efficiency.md`)
+
+- **Critic feedback is untrusted.** The critic reads repository code, so a crafted comment could reach the
+  fixer through it. Its issues now go back as an `untrusted_review_feedback` message
+  (`remediation_critic.review_feedback`), never through the trusted `revision_note` channel, which stays
+  reserved for an authenticated human reviewer.
+- **A "revise" continues the conversation.** `_propose_for_finding` holds one transcript per finding and
+  `run_agent(transcript=..., feedback=...)` appends to it (`close_open_tool_calls` answers the submit call
+  first), so a redraft no longer pays for every exploration turn again.
+- **`compute_diff` checks the real file** in clone mode: it applies the same exact, unique replacement the
+  apply step will, and reports `original_code_occurrences`, so the model can repair a non-matching quote
+  before `_finalize` rejects it.
+- **Findings are drafted concurrently** (`remediation_findings_concurrency`, default 2) via `_propose_all`;
+  job progress is written with `$max` so out-of-order completions cannot move it backwards. The per-run
+  wall clock is 300 s (above the 3 × 90 s retry envelope) and `read_file` is capped at 60 kB.
+- **Prompt caching.** Anthropic gets `cache_control_injection_points` (system prompt + newest message);
+  OpenAI/Azure cache automatically. `AIUsageEvent.cached_prompt_tokens` records hits.
+- **Measurement.** Every call carries `job_id`/`finding_id`; `ai_quality_service` reports acceptance,
+  dismissal, re-scan clearance, critic verdicts and calls/tokens/cost/cache rate per finding.
+- **Live eval.** `backend/evals/autofix_eval.py` runs the real agent and critic over synthetic vulnerable
+  files (including a prompt-injection case) against the configured provider. Opt-in, costs tokens; run it
+  before and after any prompt, tool or model change.
