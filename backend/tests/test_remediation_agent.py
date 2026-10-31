@@ -199,3 +199,26 @@ def test_tool_message_keeps_non_ascii_verbatim():
     from app.services.ai_remediation_agent import _tool_message
 
     assert "⚠" in _tool_message("id", {"content": "'⚠ x'"})["content"]
+
+
+def _clone_ctx(tmp_path):
+    (tmp_path / "app.py").write_text("a = 1\nq = 'SELECT ' + id\nb = 2\n", encoding="utf-8")
+    ctx = _ctx()
+    ctx.workdir = str(tmp_path)
+    return ctx
+
+
+def test_compute_diff_in_clone_mode_diffs_the_real_file(tmp_path):
+    args = json.dumps({"path": "app.py", "original_code": "q = 'SELECT ' + id", "patched_code": "q = bind(id)"})
+    out = asyncio.run(remediation_tools.dispatch("compute_diff", args, _clone_ctx(tmp_path)))
+    assert out["original_code_occurrences"] == 1
+    assert "-q = 'SELECT ' + id" in out["unified_diff"]
+    assert "+q = bind(id)" in out["unified_diff"]
+    assert " a = 1" in out["unified_diff"]  # real-file context, not the excerpt
+
+
+def test_compute_diff_in_clone_mode_reports_a_non_matching_original(tmp_path):
+    args = json.dumps({"path": "app.py", "original_code": "not in the file", "patched_code": "x"})
+    out = asyncio.run(remediation_tools.dispatch("compute_diff", args, _clone_ctx(tmp_path)))
+    assert out["original_code_occurrences"] == 0
+    assert "error" in out
