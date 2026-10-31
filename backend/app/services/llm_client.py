@@ -71,6 +71,29 @@ _PLACEHOLDER_API_KEY = "not-needed"
 # parsing (_extract_json) -- mirrors zero-strike-cli, which uses no response_format at all.
 _JSON_OBJECT_PROVIDERS = {"anthropic", "openai"}
 
+# Anthropic caches only prefixes it is told about; litellm injects the cache_control markers.
+# OpenAI/Azure cache any stable >=1024-token prefix automatically, so they need nothing.
+_CACHE_MARKER_PROVIDERS = {"anthropic"}
+
+
+def _cache_kwargs(provider: str) -> dict:
+    if provider not in _CACHE_MARKER_PROVIDERS:
+        return {}
+    # The system prompt (tools sit before it in Anthropic's prefix) and the newest message: every
+    # agent turn then reads the previous turn's entire prefix from cache instead of paying for it again.
+    return {
+        "cache_control_injection_points": [
+            {"location": "message", "role": "system"},
+            {"location": "message", "index": -1},
+        ]
+    }
+
+
+def _cached_tokens(usage) -> int:
+    """litellm normalizes both OpenAI's cached_tokens and Anthropic's cache_read_input_tokens here."""
+    details = getattr(usage, "prompt_tokens_details", None)
+    return getattr(details, "cached_tokens", 0) or 0
+
 
 def _extract_json(content: str) -> dict:
     """Best-effort JSON out of an LLM reply. Strips ```json / ``` fences, then takes the
@@ -392,6 +415,7 @@ async def _completion_with_config(
     }
     if api_base:
         kwargs["api_base"] = api_base
+    kwargs.update(_cache_kwargs(config.provider))
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
     if response_format_json and config.provider in _JSON_OBJECT_PROVIDERS:
@@ -446,6 +470,7 @@ async def _completion_with_config(
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        cached_prompt_tokens=_cached_tokens(usage),
         cost_usd=cost or 0.0,
         cost_known=cost is not None,
         duration_ms=duration_ms,
@@ -615,6 +640,7 @@ async def _tool_completion_with_config(
     }
     if api_base:
         kwargs["api_base"] = api_base
+    kwargs.update(_cache_kwargs(config.provider))
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
@@ -663,6 +689,7 @@ async def _tool_completion_with_config(
         success=True,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        cached_prompt_tokens=_cached_tokens(usage),
         cost_usd=cost or 0.0,
         cost_known=cost is not None,
         duration_ms=_ms(started),

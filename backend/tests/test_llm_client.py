@@ -816,3 +816,18 @@ def test_call_scope_attributes_usage_rows_to_job_and_finding(monkeypatch):
     # Outside the scope nothing leaks from the previous call.
     assert seen[1]["job_id"] is None and seen[1]["finding_id"] is None
 
+
+def test_cache_markers_only_for_anthropic():
+    assert llm_client._cache_kwargs("openai") == {}
+    points = llm_client._cache_kwargs("anthropic")["cache_control_injection_points"]
+    assert {"location": "message", "role": "system"} in points
+    assert {"location": "message", "index": -1} in points
+
+
+def test_cached_tokens_read_from_usage_details():
+    from types import SimpleNamespace
+
+    usage = SimpleNamespace(prompt_tokens_details=SimpleNamespace(cached_tokens=1200))
+    assert llm_client._cached_tokens(usage) == 1200
+    assert llm_client._cached_tokens(SimpleNamespace()) == 0
+    assert llm_client._cached_tokens(None) == 0
