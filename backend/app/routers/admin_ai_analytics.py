@@ -8,9 +8,9 @@ The per-project equivalents live in routers/projects.py behind require_member.
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import require_admin
-from app.schemas.ai_analytics import AiAnalyticsResponse, AiUsageEventPage
+from app.schemas.ai_analytics import AiAnalyticsResponse, AiQualityResponse, AiUsageEventPage
 from app.schemas.ai_provider_config import AIPricingStatusResponse
-from app.services import ai_analytics_service, pricing_service
+from app.services import ai_analytics_service, ai_quality_service, pricing_service
 
 router = APIRouter(prefix="/admin/ai-analytics", tags=["admin"], dependencies=[Depends(require_admin)])
 # Where the cost figures above come from (docs/AI_PRICING_AND_BUDGETS.md).
@@ -47,3 +47,11 @@ async def list_portal_ai_events(
     return await ai_analytics_service.list_events(
         project_id=project_id, page=page, page_size=page_size, days=days, feature=feature, status=status
     )
+
+
+@router.get("/quality", response_model=AiQualityResponse)
+async def get_portal_ai_quality(
+    days: int = Query(30, ge=1, le=365),
+    project_id: str | None = Query(None),
+):
+    return await ai_quality_service.autofix_quality(project_id=project_id, days=days)

@@ -104,3 +104,18 @@ class AiUsageEventPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class AiQualityResponse(BaseModel):
+    days: int
+    proposals: int
+    drafted: int
+    acceptance_rate: float | None
+    dismissal_rate: float | None
+    rescan_cleared_rate: float | None
+    merged: int
+    critic_verdicts: dict[str, int]
+    avg_calls_per_finding: float | None
+    avg_tokens_per_finding: float | None
+    avg_cost_usd_per_finding: float | None
+    cache_hit_rate: float | None

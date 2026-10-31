@@ -311,3 +311,13 @@ def test_failure_reasons_break_down_why_calls_failed(client):
         {"error_code": "unknown", "count": 1},
     ]
     assert sum(row["count"] for row in body["failure_reasons"]) == body["totals"]["failed"]
+
+
+def test_portal_quality_is_admin_only(client):
+    admin_headers = _admin_headers(client, email="an-admin-q@zerostrike.dev")
+    member = register_and_login(client, email="an-member-q@zerostrike.dev")
+
+    ok = client.get("/api/v1/admin/ai-analytics/quality", headers=admin_headers)
+    assert ok.status_code == 200
+    assert ok.json()["drafted"] == 0
+    assert client.get("/api/v1/admin/ai-analytics/quality", headers=_headers(member)).status_code == 403

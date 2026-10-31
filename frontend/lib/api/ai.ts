@@ -474,3 +474,22 @@ export function refreshAiPricing() {
 export function getAiModelCatalog() {
   return apiFetch<Record<string, string[]>>("/ai/models");
 }
+
+export interface AiQuality {
+  days: number;
+  proposals: number;
+  drafted: number;
+  acceptance_rate: number | null;
+  dismissal_rate: number | null;
+  rescan_cleared_rate: number | null;
+  merged: number;
+  critic_verdicts: Record<string, number>;
+  avg_calls_per_finding: number | null;
+  avg_tokens_per_finding: number | null;
+  avg_cost_usd_per_finding: number | null;
+  cache_hit_rate: number | null;
+}
+
+export function getPortalAiQuality(days = 30) {
+  return apiFetch<AiQuality>(`/admin/ai-analytics/quality?days=${days}`);
+}

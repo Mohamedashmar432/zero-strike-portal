@@ -1,6 +1,7 @@
 "use client";
 
 import { AiAnalyticsDashboard } from "@/components/ai/ai-analytics-dashboard";
+import { AiQualityCard } from "@/components/ai/ai-quality-card";
 import { PageHeader } from "@/components/layout/page-header";
 
 export default function AdminAiAnalyticsPage() {
@@ -13,6 +14,7 @@ export default function AdminAiAnalyticsPage() {
       {/* Same component the project tab renders — portal scope just widens the query and adds
           the per-project breakdown. */}
       <AiAnalyticsDashboard scope="portal" />
+      <AiQualityCard />
     </div>
   );
 }
