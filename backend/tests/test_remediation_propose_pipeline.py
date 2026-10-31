@@ -430,3 +430,28 @@ def test_rerun_skips_findings_that_already_have_a_proposal(client, monkeypatch):
         assert (await RemediationJob.get(forced.id)).skipped_existing == 0
 
     asyncio.run(run())
+
+
+def test_propose_all_bounds_concurrency_and_reports_progress():
+    import asyncio
+
+    from app.services import ai_remediation_service
+
+    in_flight = peak = 0
+    progress: list[int] = []
+
+    async def propose(n):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return n * 10
+
+    async def on_done(done):
+        progress.append(done)
+
+    results = asyncio.run(ai_remediation_service._propose_all([1, 2, 3, 4, 5], propose, on_done, concurrency=2))
+    assert results == [10, 20, 30, 40, 50]  # order preserved
+    assert peak == 2
+    assert progress == [1, 2, 3, 4, 5]

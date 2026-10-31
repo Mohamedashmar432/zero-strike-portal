@@ -90,7 +90,7 @@ def test_confidence_threshold_rebuckets_proposals(client, monkeypatch):
     # A proposal at confidence 70: with the default threshold (80) it's "needs review", but
     # after an admin lowers the threshold to 60 the same proposal re-buckets as confidently
     # fixable on the next read — proving the knob is applied at read time, end to end.
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **_kw):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"],
             can_fix=True,

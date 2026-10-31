@@ -109,7 +109,7 @@ def test_trigger_409_when_active_provider_not_tool_capable(client):
 
 
 def test_scan_trigger_polls_to_completed_with_proposal_and_patch(client, monkeypatch):
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **_kw):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"],
             can_fix=True,
@@ -157,7 +157,7 @@ def test_scan_trigger_polls_to_completed_with_proposal_and_patch(client, monkeyp
 
 
 def test_cannot_fix_becomes_manual_review(client, monkeypatch):
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **_kw):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"],
             can_fix=False,
@@ -554,7 +554,7 @@ def test_repeated_runs_advance_through_a_scan_larger_than_one_batch(client, monk
     so it is asserted at every step.
     """
 
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **_kw):
         return SubmitFixProposalArgs(
             finding_id=issue_bundle["finding_id"], can_fix=True, confidence_score=90,
             file_path="app.py", original_code="a = 1", patched_code="a = 2",

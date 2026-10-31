@@ -517,6 +517,23 @@ async def _set_stage(job: RemediationJob, stage: str) -> None:
         logger.warning("could not record job stage", stage=stage)
 
 
+async def _propose_all(findings, propose, on_done, concurrency: int) -> list:
+    """Draft findings concurrently, at most `concurrency` at a time, results in input order.
+    on_done(n) reports progress as each one lands, so the bar still advances one by one."""
+    sem = asyncio.Semaphore(concurrency)
+    done = 0
+
+    async def one(finding):
+        nonlocal done
+        async with sem:
+            result = await propose(finding)
+        done += 1
+        await on_done(done)
+        return result
+
+    return await asyncio.gather(*(one(f) for f in findings))
+
+
 async def run_job(job: RemediationJob) -> None:
     start = datetime.now(timezone.utc)
     job.status = "running"
@@ -585,29 +602,33 @@ async def run_job(job: RemediationJob) -> None:
             await _set_stage(job, "cloning")
             workdir = await _try_clone(scan, repo, branch, job)
             if workdir is not None:
-                overview_md = await remediation_project_doc_service.get_or_generate(
-                    project_id=job.project_id,
-                    project_repo_id=scan.project_repo_id if scan else None,
-                    repo_url=scan.repo_url if scan else None,
-                    base_commit_sha=scan.git_commit if scan else None,
-                    workdir=workdir,
-                    provider=provider,
-                    model=model,
-                    scan_id=job.scan_id,
-                )
+                with llm_client.call_scope(job_id=str(job.id)):
+                    overview_md = await remediation_project_doc_service.get_or_generate(
+                        project_id=job.project_id,
+                        project_repo_id=scan.project_repo_id if scan else None,
+                        repo_url=scan.repo_url if scan else None,
+                        base_commit_sha=scan.git_commit if scan else None,
+                        workdir=workdir,
+                        provider=provider,
+                        model=model,
+                        scan_id=job.scan_id,
+                    )
 
         await _set_stage(job, "proposing")
-        fixable = 0
-        for done, finding in enumerate(findings, start=1):
-            proposal = await _propose_for_finding(
-                finding, job, branch, provider, model, job.revision_note,
-                workdir=workdir, overview_md=overview_md,
-            )
-            if proposal.can_fix:
-                fixable += 1
+        async def _propose(finding: Finding) -> AIFixProposal:
+            with llm_client.call_scope(job_id=str(job.id), finding_id=str(finding.id)):
+                return await _propose_for_finding(
+                    finding, job, branch, provider, model, job.revision_note,
+                    workdir=workdir, overview_md=overview_md,
+                )
+
+        async def _progress(done: int) -> None:
             await job.set(
                 {RemediationJob.progress_completed: done, RemediationJob.updated_at: datetime.now(timezone.utc)}
             )
+
+        proposals = await _propose_all(findings, _propose, _progress, settings.remediation_findings_concurrency)
+        fixable = sum(1 for p in proposals if p.can_fix)
     except Exception as exc:
         logger.exception("remediation propose job failed", job_id=str(job.id))
         now = datetime.now(timezone.utc)

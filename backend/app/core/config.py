@@ -110,12 +110,15 @@ class Settings(BaseSettings):
     # Agent loop bounds (per finding). Any exhaustion yields a can_fix=False proposal, never a job failure.
     remediation_agent_max_steps: int = 12  # tool-call iterations
     remediation_agent_token_budget: int = 60000  # cumulative prompt+completion per finding run
-    remediation_agent_wall_clock_seconds: int = 180  # per-finding asyncio.wait_for
+    remediation_agent_wall_clock_seconds: int = 300  # per agent run; > retry envelope (3 x 90s) so failover can happen
     remediation_max_invalid_steps: int = 2  # consecutive no-tool/bad-arg responses before fail-fast
     remediation_max_findings_per_job: int = 20
+    # Findings drafted at once within one job. Each is an independent read-only agent run over the
+    # same clone; 2 halves a job's wall clock without tripping provider rate limits on small plans.
+    remediation_findings_concurrency: int = 2
     # Only can_fix=True AND confidence_score >= this surfaces as actionable (CLI parity, gate at read time).
     remediation_confidence_threshold: float = 80.0
-    remediation_max_file_bytes: int = 200_000  # read_file cap
+    remediation_max_file_bytes: int = 60_000  # read_file cap (~15k tokens); larger files -> read_excerpt
     remediation_max_excerpt_lines: int = 400
     remediation_llm_request_timeout_seconds: int = 90  # per acompletion; tool calls run longer than analysis
     remediation_max_output_tokens: int = 4000  # per-call max_tokens
