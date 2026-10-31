@@ -133,11 +133,11 @@ def test_patch_and_code_go_in_as_untrusted_context(monkeypatch):
     assert "AKIAIOSFODNN7EXAMPLE" not in user_msg
 
 
-def test_revision_note_carries_the_concrete_issues():
+def test_review_feedback_is_the_concrete_issues():
     result = remediation_critic.CritiqueResult(
-        verdict="revise", issues=["use a bound parameter", "keep the return type"], reasoning="close"
+        verdict="revise", issues=["use a bound parameter", " ", "keep the return type"], reasoning="close"
     )
-    note = remediation_critic.revision_note_from(result)
-    assert "use a bound parameter" in note
-    assert "keep the return type" in note
-    assert "same single file" in note
+    assert remediation_critic.review_feedback(result) == ["use a bound parameter", "keep the return type"]
+    assert remediation_critic.review_feedback(remediation_critic.CritiqueResult(verdict="revise")) == [
+        "Address the review feedback."
+    ]

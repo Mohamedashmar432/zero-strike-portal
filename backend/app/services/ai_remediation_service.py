@@ -316,13 +316,20 @@ async def _propose_for_finding(
     prior_fixes = await fix_pattern_service.recent_accepted(job.project_id, finding.rule_id)
     bundle = _issue_bundle(finding, redacted, overview_md, prior_fixes)
 
-    async def _draft(note: str | None) -> SubmitFixProposalArgs:
+    transcript: list[dict] = []  # one conversation per finding; a redraft continues it
+
+    async def _draft(note: str | None, feedback: list[str] | None = None) -> SubmitFixProposalArgs:
         """One bounded agent run. Never raises: a timeout/provider error becomes a can_fix=False
         proposal so one difficult finding can't fail the job."""
         try:
             return await asyncio.wait_for(
                 ai_remediation_agent.run_agent(
-                    bundle, ctx, ai_remediation_agent.budgets_from_settings(), revision_note=note
+                    bundle,
+                    ctx,
+                    ai_remediation_agent.budgets_from_settings(),
+                    revision_note=note,
+                    transcript=transcript,
+                    feedback=feedback,
                 ),
                 timeout=settings.remediation_agent_wall_clock_seconds,
             )
@@ -372,8 +379,9 @@ async def _propose_for_finding(
         else:
             critique_artifact = remediation_critic.skipped("unavailable")
     else:
-        # "revise" -> one bounded redraft, fed back through the agent's existing TRUSTED
-        # revision_note channel (the same one a human reviewer uses). No new plumbing.
+        # "revise" -> one bounded redraft that continues the same conversation, with the critic's
+        # issues sent as UNTRUSTED feedback (the critic read repo code), never through the trusted
+        # revision_note channel.
         redrafts = 0
         while (
             verdict_obj.normalized_verdict == "revise"
@@ -381,7 +389,7 @@ async def _propose_for_finding(
         ):
             redrafts += 1
             logger.info("redrafting fix after critique", finding_id=str(finding.id), attempt=redrafts)
-            result = await _draft(remediation_critic.revision_note_from(verdict_obj))
+            result = await _draft(None, feedback=remediation_critic.review_feedback(verdict_obj))
             excerpt = _file_window(workdir, result.file_path or loc.file, loc.start_line)
             again = await remediation_critic.critique(
                 bundle, result, project_id=job.project_id, scan_id=job.scan_id, file_excerpt=excerpt

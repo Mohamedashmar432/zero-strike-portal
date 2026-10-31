@@ -43,11 +43,12 @@ async def _seed(file="app.py", kind="sast", dependency=None):  # returns (findin
 
 def _mock_agent(monkeypatch, drafts):
     """drafts: list of (can_fix, confidence, patched) consumed in order, one per agent run."""
-    calls = {"n": 0, "notes": []}
+    calls = {"n": 0, "notes": [], "feedback": []}
     queue = list(drafts)
 
-    async def fake_run_agent(bundle, ctx, budgets, *, revision_note=None):
+    async def fake_run_agent(bundle, ctx, budgets, *, revision_note=None, feedback=None, **kwargs):
         calls["n"] += 1
+        calls["feedback"].append(feedback)
         calls["notes"].append(revision_note)
         can_fix, confidence, patched = queue.pop(0) if queue else (True, 90.0, "fixed")
         return ai_remediation_service.SubmitFixProposalArgs(
@@ -165,7 +166,8 @@ def test_revise_verdict_triggers_exactly_one_redraft(client, monkeypatch):
         proposal = await ai_remediation_service._propose_for_finding(f, job, "main", "anthropic", "m")
         assert agent["n"] == 2, "one draft + one redraft"
         assert agent["notes"][0] is None
-        assert "use a bound parameter" in agent["notes"][1], "critic issues feed the revision note"
+        assert agent["notes"][1] is None, "critic text never rides the trusted revision_note channel"
+        assert agent["feedback"][1] == ["use a bound parameter"], "critic issues go in as untrusted feedback"
         assert proposal.patched_code == "second"
         assert proposal.review_state == "proposed"
         assert proposal.critique["redrafted"] is True

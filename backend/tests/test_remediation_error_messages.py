@@ -39,7 +39,7 @@ def test_propose_run_job_never_leaks_raw_exception_text(client, monkeypatch):
 
     raw_secret = "GroqException - org_01kf198j7qerbarbkm12z0a6np rate_limit_exceeded"
 
-    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None):
+    async def fake_run_agent(issue_bundle, ctx, budgets, revision_note=None, **kwargs):
         raise llm_client.LLMTransientError(raw_secret)
 
     monkeypatch.setattr(ai_remediation_agent, "run_agent", fake_run_agent)

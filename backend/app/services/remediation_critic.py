@@ -88,17 +88,12 @@ def skipped(reason: str) -> dict:
     return {"skipped": reason}
 
 
-def revision_note_from(result: CritiqueResult) -> str:
-    """Turn a "revise" verdict into a note for the agent's existing trusted revision_note channel.
-    Framed as a reviewer request because that is exactly what the channel is for -- no new
-    plumbing, and the agent already knows how to honor it."""
+def review_feedback(result: CritiqueResult) -> list[str]:
+    """A "revise" verdict's concrete issues, for the agent's UNTRUSTED feedback channel. The critic
+    read repository code, so its words can carry an injected instruction; the agent must treat
+    them as hints, never as the trusted reviewer channel a human's revision_note uses."""
     issues = [i.strip() for i in result.issues if i and i.strip()]
-    bullets = "\n".join(f"- {i}" for i in issues) or f"- {result.reasoning or 'Address the review feedback.'}"
-    return (
-        "An automated code review of your previous patch found the problems below. Produce a "
-        "corrected patch that resolves them, staying within the same single file. If they cannot "
-        "be resolved in one file, submit can_fix=false and explain why.\n" + bullets
-    )
+    return issues or [result.reasoning or "Address the review feedback."]
 
 
 def _payload(finding_bundle: dict, draft: SubmitFixProposalArgs, file_excerpt: str | None) -> dict:
