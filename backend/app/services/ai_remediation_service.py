@@ -623,8 +623,12 @@ async def run_job(job: RemediationJob) -> None:
                 )
 
         async def _progress(done: int) -> None:
-            await job.set(
-                {RemediationJob.progress_completed: done, RemediationJob.updated_at: datetime.now(timezone.utc)}
+            # Two findings can finish together and their writes land in either order, so a plain $set
+            # could leave "4 of 5" stored. $max keeps the stored count monotonic; the local copy is
+            # kept in step because the completion path save()s the whole document.
+            job.progress_completed = max(job.progress_completed, done)
+            await job.update(
+                {"$max": {"progress_completed": done}, "$set": {"updated_at": datetime.now(timezone.utc)}}
             )
 
         proposals = await _propose_all(findings, _propose, _progress, settings.remediation_findings_concurrency)
