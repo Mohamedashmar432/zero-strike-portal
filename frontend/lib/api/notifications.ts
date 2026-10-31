@@ -23,6 +23,7 @@ export interface NotificationEvent {
   description: string;
   /** "admin" events are only ever delivered to portal admins, whatever a user subscribes to. */
   audience: "project" | "admin";
+  emailable: boolean;
 }
 
 export interface NotificationPreferences {

@@ -38,6 +38,7 @@ class NotificationEventOut(BaseModel):
     label: str
     description: str
     audience: str
+    emailable: bool = True
 
 
 class NotificationPreferencesResponse(BaseModel):

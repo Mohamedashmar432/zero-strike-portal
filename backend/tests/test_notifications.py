@@ -93,6 +93,31 @@ def test_project_event_reaches_a_member_and_shows_as_unread(client):
     assert body["items"][0]["title"] == "Scan completed"
 
 
+def test_a_non_emailable_event_is_never_emailed_even_when_addressed_to_a_user(client, monkeypatch):
+    """`finding.review_decided` is sent with only_user_ids, which used to bypass the email preference."""
+    admin = _admin_headers(client, email="nt-noemail@zs.dev")
+    project = _create_project(client, admin, name="No Email")
+    uid = client.get("/api/v1/users/me", headers=admin).json()["id"]
+    sent = []
+
+    async def fake_send(addresses, *a, **k):
+        sent.extend(addresses)
+
+    monkeypatch.setattr(notification_service, "_send_emails", fake_send)
+
+    async def run():
+        n = await notification_service.notify(
+            "finding.review_decided", project_id=project["id"], title="accepted", only_user_ids=[uid]
+        )
+        await asyncio.sleep(0)
+        return n
+
+    assert asyncio.run(run()) == 1  # still shown in the portal
+    assert sent == []
+    events = {e["key"]: e for e in client.get(PREFS_URL, headers=admin).json()["events"]}
+    assert events["finding.review_decided"]["emailable"] is False
+
+
 def test_a_user_who_unsubscribed_receives_nothing(client):
     admin = _admin_headers(client, email="nt-unsub@zs.dev")
     project = _create_project(client, admin, name="Unsub")

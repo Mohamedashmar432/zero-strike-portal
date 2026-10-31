@@ -84,7 +84,8 @@ def _preferences(user: User) -> NotificationPreferencesResponse:
     return NotificationPreferencesResponse(
         events=[
             NotificationEventOut(
-                key=e.key, label=e.label, description=e.description, audience=e.audience
+                key=e.key, label=e.label, description=e.description, audience=e.audience,
+                emailable=e.emailable
             )
             for e in visible_events(is_admin=is_admin)
         ],

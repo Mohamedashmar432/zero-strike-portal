@@ -127,13 +127,17 @@ export default function NotificationSettingsPage() {
                       />
                     </td>
                     <td className="py-3 text-center">
-                      <input
-                        type="checkbox"
-                        className="size-4"
-                        aria-label={`${event.label} by email`}
-                        checked={form.email.includes(event.key)}
-                        onChange={() => toggle("email", event.key)}
-                      />
+                      {event.emailable ? (
+                        <input
+                          type="checkbox"
+                          className="size-4"
+                          aria-label={`${event.label} by email`}
+                          checked={form.email.includes(event.key)}
+                          onChange={() => toggle("email", event.key)}
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Not emailed</span>
+                      )}
                     </td>
                   </tr>
                 ))}
