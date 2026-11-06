@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from bson import ObjectId
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 
 from app.core import rate_limit
@@ -39,7 +40,19 @@ async def register(payload: RegisterRequest, request: Request, background: Backg
         settings.rate_limit_register_max_attempts,
         settings.rate_limit_register_window_seconds,
     )
-    user = await auth_service.register(payload.email, payload.password, payload.name, payload.invite_token)
+    try:
+        user = await auth_service.register(payload.email, payload.password, payload.name, payload.invite_token)
+    except auth_service.EmailAlreadyRegistered:
+        # Same status, same body shape as a real signup: the response must not reveal that the address
+        # has an account. The owner is told by email instead; the attempt is audited.
+        background.add_task(auth_service.send_already_registered_notice, payload.email)
+        await audit_service.record(
+            "Register Rejected", ip_address=client_ip(request), metadata={"reason": "email_exists"}
+        )
+        return UserResponse(
+            id=str(ObjectId()), email=payload.email, name=payload.name, role="user",
+            approval_status=await auth_service.new_signup_status(),
+        )
     await audit_service.record(
         "register",
         actor_user_id=str(user.id),

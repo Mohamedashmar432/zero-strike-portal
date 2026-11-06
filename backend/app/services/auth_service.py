@@ -30,16 +30,42 @@ def require_allowed_email_domain(email: str) -> None:
         )
 
 
+class EmailAlreadyRegistered(Exception):
+    """Internal signal only. The router answers it exactly like a successful signup (see
+    `decoy_signup_response`) so the endpoint cannot be used to learn which addresses have accounts."""
+
+
+async def new_signup_status() -> str:
+    return "pending" if await _approval_required() else "approved"
+
+
+async def send_already_registered_notice(email: str) -> None:
+    """Tell the address's real owner that someone tried to sign up with it -- the only place that fact
+    is disclosed, since the HTTP response must look identical to a fresh signup. Run as a background
+    task; never raises."""
+    try:
+        text = (
+            "Someone tried to create a thinkShield account with this email address, but one already "
+            f"exists.\n\nIf it was you, sign in or reset your password at {settings.frontend_origin}/login. "
+            "If it was not, you can ignore this message; your account is unchanged."
+        )
+        await asyncio.to_thread(email_service.send_email, email, "thinkShield sign-up attempt", text)
+    except Exception:
+        logger.exception("already-registered notice failed")
+
+
 async def register(email: str, password: str, name: str, invite_token: str | None = None) -> User:
     require_allowed_email_domain(email)
     if await User.find_one(User.email == email):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email already registered")
+        # Hash anyway: skipping bcrypt here would make "exists" measurably faster than "new".
+        await asyncio.to_thread(security.hash_password, password)
+        raise EmailAlreadyRegistered
     now = datetime.now(timezone.utc)
     user = User(
         email=email,
         password_hash=security.hash_password(password),
         name=name,
-        approval_status="pending" if await _approval_required() else "approved",
+        approval_status=await new_signup_status(),
         created_at=now,
         updated_at=now,
     )
@@ -279,6 +305,7 @@ def _revoke_all_refresh_tokens(user: User, now: datetime) -> None:
     """
     for record in user.refresh_tokens:
         record.revoked_at = record.revoked_at or now
+        record.ended_at = record.ended_at or now
 
 
 async def issue_token_pair(
@@ -299,8 +326,8 @@ async def issue_token_pair(
             else timedelta(hours=settings.session_refresh_ttl_hours)
         )
         expires_at = datetime.now(timezone.utc) + ttl
-    access_token = security.create_access_token(str(user.id), user.role)
     refresh_token, jti, expires_at = security.create_refresh_token(str(user.id), expires_at)
+    access_token = security.create_access_token(str(user.id), user.role, sid=jti)
     user.refresh_tokens.append(
         RefreshTokenRecord(
             jti=jti,
@@ -362,8 +389,10 @@ async def logout(refresh_token: str) -> str | None:
     if not user:
         return None
     record = next((r for r in user.refresh_tokens if r.jti == claims.get("jti")), None)
-    if record and record.revoked_at is None:
-        record.revoked_at = datetime.now(timezone.utc)
+    if record and record.ended_at is None:
+        now = datetime.now(timezone.utc)
+        record.revoked_at = record.revoked_at or now
+        record.ended_at = now
         await user.save()
     return str(user.id)
 

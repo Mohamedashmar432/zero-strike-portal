@@ -860,7 +860,10 @@ async def test_project_ai_provider(
             target_id=str(config.id),
             metadata={"project_id": project_id, "provider": config.provider, "error": str(exc)},
         )
+        # A project owner chose this host, so any distinguishing answer would make the test a probe
+        # for it; see connection_error_message(opaque=...).
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, llm_client.connection_error_message(exc)
+            status.HTTP_400_BAD_REQUEST,
+            llm_client.connection_error_message(exc, opaque=bool(config.base_url)),
         ) from exc
     return AIProviderTestResponse(message="Connection successful")

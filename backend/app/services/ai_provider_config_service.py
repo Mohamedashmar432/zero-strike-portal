@@ -38,6 +38,10 @@ def _validate_base_url(base_url: str | None, provider: AIProvider, project_id: s
     try:
         parsed = check_repo_url_syntax(base_url)
         resolve_vetted_ips(parsed.hostname)
+        # A keyed provider's API key travels to this host with every call; never over cleartext http.
+        # Self-hosted providers (lmstudio, custom) send no real key, so plain http stays allowed there.
+        if project_id is not None and provider not in NO_KEY_REQUIRED_PROVIDERS and parsed.scheme != "https":
+            raise ValueError("this provider's base_url must use https")
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"base_url is invalid: {exc}")
 

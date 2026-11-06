@@ -12,6 +12,9 @@ _SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Content-Security-Policy": "frame-ancestors 'none'",
     "Referrer-Policy": "no-referrer",
+    # Responses carry tokens and per-user data; a shared proxy or the browser's back/forward cache
+    # must not keep them. No route sets its own Cache-Control today, so this applies to all.
+    "Cache-Control": "no-store",
 }
 
 

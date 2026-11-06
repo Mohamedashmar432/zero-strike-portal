@@ -10,14 +10,9 @@ def test_health_reports_ok_when_mongo_and_scanner_are_up(client, monkeypatch):
     monkeypatch.setattr(cloud_scan_service, "scanner_available", lambda: True)
     resp = client.get("/health")
     assert resp.status_code == 200
-    # Exact shape on purpose -- /health is a contract other things poll. scanner_build says WHICH
-    # engine is baked in, which "scanner": True cannot (a ten-releases-old binary is present too).
-    assert resp.json() == {
-        "status": "ok",
-        "mongo": True,
-        "scanner": True,
-        "scanner_build": "unknown",  # not stamped outside a Docker build
-    }
+    # Exact shape on purpose: /health is anonymous, so it says up/degraded and nothing about the
+    # datastore engine or scanner build (VAPT F-05). Admins read those via the MCP status tools.
+    assert resp.json() == {"status": "ok"}
 
 
 def test_health_returns_503_when_mongo_ping_fails(client, monkeypatch):
@@ -30,19 +25,14 @@ def test_health_returns_503_when_mongo_ping_fails(client, monkeypatch):
 
     resp = client.get("/health")
     assert resp.status_code == 503
-    body = resp.json()
-    assert body["status"] == "degraded"
-    assert body["mongo"] is False
-    assert body["scanner"] is True
+    assert resp.json() == {"status": "degraded"}
 
 
 def test_health_returns_503_when_scanner_binary_missing(client, monkeypatch):
     monkeypatch.setattr(cloud_scan_service, "scanner_available", lambda: False)
     resp = client.get("/health")
     assert resp.status_code == 503
-    body = resp.json()
-    assert body["mongo"] is True
-    assert body["scanner"] is False
+    assert resp.json() == {"status": "degraded"}
 
 
 def test_response_echoes_inbound_request_id(client):

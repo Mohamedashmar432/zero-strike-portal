@@ -724,14 +724,26 @@ async def _tool_completion_with_config(
     )
 
 
-def connection_error_message(exc: Exception) -> str:
+OPAQUE_CONNECTION_FAILURE = (
+    "The connection test failed. Check the base URL, model id and API key, then try again."
+)
+
+
+def connection_error_message(exc: Exception, *, opaque: bool = False) -> str:
     """A connection test is someone typing credentials and pressing a button, so the answer has to
     read as a verdict on what they typed. Returning str(exc) puts litellm's exception repr, the
     provider's raw JSON error body and a request id in a toast, which tells a project owner nothing
     about which field is wrong. The raw text is still preserved in the audit record.
+
+    `opaque` is for a test aimed at a caller-chosen host (a project's custom base_url): there, "the
+    key works but the model name is wrong" / "rate limited" / "rejected the key" each prove the target
+    answered, which turns the button into a reachability probe for any public host. One fixed message
+    for every failure removes that signal.
     """
     if isinstance(exc, LLMNotConfiguredError):
         return "Pick a provider and model before testing the connection."
+    if opaque:
+        return OPAQUE_CONNECTION_FAILURE
     lowered = str(exc).lower()
     if "authentication" in lowered or "invalid x-api-key" in lowered or "401" in lowered:
         return "The provider rejected this API key. Check the key and try again."

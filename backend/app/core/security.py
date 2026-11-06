@@ -35,11 +35,15 @@ def _encode(claims: dict) -> str:
     return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id: str, role: str, sid: str | None = None) -> str:
+    """`sid` is the jti of the refresh token this access token was issued alongside -- the session it
+    belongs to. `get_current_user` looks it up so logout / password change end the access token too,
+    rather than letting it live out its TTL."""
     now = datetime.now(timezone.utc)
     claims = {
         "sub": user_id,
         "role": role,
+        "sid": sid,
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_ttl_minutes),

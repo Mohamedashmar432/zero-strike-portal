@@ -24,6 +24,11 @@ async def get_current_user(
     user = await User.get(claims["sub"])
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    # The session this token belongs to was ended (logout / password change / reuse detection). A token
+    # whose session record has been pruned, or one minted before `sid` existed, has nothing to check.
+    sid = claims.get("sid")
+    if sid and any(r.jti == sid and r.ended_at is not None for r in user.refresh_tokens):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session ended")
     # Login already refuses these; this covers a token minted before the account was gated.
     if user.approval_status != "approved":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account has not been approved")

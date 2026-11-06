@@ -12,6 +12,9 @@ class RefreshTokenRecord(BaseModel):
     issued_at: datetime
     expires_at: datetime
     revoked_at: datetime | None = None
+    # Set when the session itself was ended (logout, password change, theft detection), as opposed to
+    # `revoked_at`, which rotation also sets. Access tokens issued under this session stop working at once.
+    ended_at: datetime | None = None
     user_agent: str | None = None
     ip: str | None = None
 

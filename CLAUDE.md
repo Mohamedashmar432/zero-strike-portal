@@ -284,6 +284,17 @@ shadcn/ui (Tailwind v4) for components.
 - `lib/validation/*.schema.ts` — zod schemas shared between forms and (implicitly) the
   API contract.
 
+**Content-Security-Policy is per request, in `frontend/proxy.ts`** (nonce for scripts and `<style>` elements,
+`strict-dynamic`, `default-src 'self'`, `connect-src` = self + the API origin). Four things hang off it and
+break silently if forgotten: the root layout reads `headers()` so every page renders per request (a prebuilt
+page has no nonce, so its scripts would be blocked); `next-themes` gets the nonce as a prop; `style-src-attr`
+is the one deliberate `'unsafe-inline'` (UI primitives set `style=""`); and sonner injects its own un-nonced
+`<style>` at import, allowed by hash in `lib/csp-hashes.ts` -- `csp-hashes.test.ts` fails when a sonner upgrade
+changes it, so update the hash then. Do not inject `<style>` or inline `<script>` from components (the chart
+colours are inline custom properties for this reason), and keep `app/not-found.tsx` (Next's default 404 ships an
+inline style). Dev allows `'unsafe-inline'` styles and `'unsafe-eval'`, so **only a production build
+(`next build && next start`) proves the strict policy** -- check the console for CSP violations there.
+
 **Read `frontend/AGENTS.md` before writing Next.js-specific code** — it flags that this
 Next.js version (16.2.10) has breaking API/convention changes vs. what's in most training
 data; check `node_modules/next/dist/docs/` rather than assuming.

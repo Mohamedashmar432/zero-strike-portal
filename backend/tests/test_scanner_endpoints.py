@@ -255,21 +255,15 @@ def test_scan_from_another_project_key_is_404(client):
     assert r.status_code == 404
 
 
-def test_health_reports_which_scanner_build_is_deployed(client, monkeypatch):
-    """Which engine is deployed is the fact that made the large-repo failures diagnosable, and it
-    was unanswerable from outside the container -- "scanner": true only ever meant the file
-    exists, which a ten-releases-old build satisfies just as well as a current one."""
+def test_health_does_not_disclose_the_scanner_build(client, monkeypatch):
+    """The deployed scanner build used to ride on anonymous /health (VAPT F-05). It is now an admin
+    fact (MCP get_scanner_status, the digest's scanner card), so the anonymous probe must not carry it."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "scanner_build_ref", "v0.34.0")
-    body = client.get("/health").json()
-    assert body["scanner_build"] == "v0.34.0"
-
-    # An image built without the ref stamped must say so rather than render as blank: an ARG
-    # default does not cross Docker build stages, so this is a realistic mis-build, not a
-    # hypothetical one.
-    monkeypatch.setattr(settings, "scanner_build_ref", "")
-    assert client.get("/health").json()["scanner_build"] == "unknown"
+    resp = client.get("/health")
+    assert "v0.34.0" not in resp.text
+    assert "scanner_build" not in resp.json()
 
 
 # --- CI metadata on scan registration (classic Azure DevOps pipelines etc.) ---
