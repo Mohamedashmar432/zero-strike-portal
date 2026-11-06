@@ -67,6 +67,13 @@ export const queryKeys = {
       ["projects", projectId, "vulnerabilities", filters] as const,
     vulnerabilitySummary: (projectId: string, repo?: string) =>
       ["projects", projectId, "vulnerabilities", "summary", repo ?? ""] as const,
+    vulnerabilityFacets: (projectId: string, filters: string) =>
+      ["projects", projectId, "vulnerabilities", "facets", filters] as const,
+    riskAcceptances: (projectId: string, status: string, page: number) =>
+      ["projects", projectId, "risk-acceptances", status, page] as const,
+    ackBatches: (projectId: string) => ["projects", projectId, "risk-acknowledgements"] as const,
+    ackBatch: (projectId: string, batchId: string) =>
+      ["projects", projectId, "risk-acknowledgements", batchId] as const,
     vulnerability: (projectId: string, vulnerabilityId: string) =>
       ["projects", projectId, "vulnerabilities", vulnerabilityId] as const,
   },

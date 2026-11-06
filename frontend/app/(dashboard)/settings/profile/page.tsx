@@ -20,7 +20,7 @@ export default function ProfilePage() {
 
   const profileForm = useForm<UpdateProfileInput>({
     resolver: zodResolver(updateProfileSchema),
-    values: user ? { name: user.name, email: user.email } : undefined,
+    values: user ? { name: user.name } : undefined,
   });
 
   const passwordForm = useForm<ChangePasswordInput>({
@@ -79,10 +79,9 @@ export default function ProfilePage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" {...profileForm.register("email")} />
-              {profileForm.formState.errors.email && (
-                <p className="text-sm text-destructive">{profileForm.formState.errors.email.message}</p>
-              )}
+              {/* The registered email is the account's identity and cannot be changed (the API refuses it). */}
+              <Input id="email" type="email" value={user.email} readOnly disabled />
+              <p className="text-xs text-muted-foreground">Your sign-in email cannot be changed.</p>
             </div>
             <Button type="submit" disabled={profileForm.formState.isSubmitting}>
               {profileForm.formState.isSubmitting ? "Saving…" : "Save changes"}

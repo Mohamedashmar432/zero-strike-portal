@@ -18,10 +18,16 @@ from tests.test_users import _promote_to_admin
 from tests.test_vulnerabilities_api import VULN_URL, _create_project, _headers, _seed_and_reconcile, _vuln_id
 
 REVIEWS = "/api/v1/admin/finding-reviews"
+RISK_COMMENT = "The vulnerable code path is not reachable from any of our entry points."
 
 
-def _set_review_required(value: bool):
-    asyncio.run(workspace_settings_service.update_workspace_settings(finding_review_required=value))
+def _set_review_required(value: bool, risk: bool | None = None):
+    """Both switches follow `value` unless `risk` pins accepted-risk review separately."""
+    asyncio.run(
+        workspace_settings_service.update_workspace_settings(
+            finding_review_required=value, risk_acceptance_review_required=value if risk is None else risk
+        )
+    )
 
 
 def _setup(client, tag, required=True):
@@ -133,7 +139,7 @@ def test_dependency_findings_get_accepted_risk_never_false_positive(client):
     r = _request(client, member, pid, "fp-dep", status="resolved", resolution_reason="false_positive", resolution_comment="c")
     assert r.status_code == 422 and "accepted risk" in r.json()["detail"]
 
-    r = _request(client, member, pid, "fp-dep", status="accepted_risk", resolution_comment="not reachable from our code")
+    r = _request(client, member, pid, "fp-dep", status="accepted_risk", resolution_comment=RISK_COMMENT)
     assert r.status_code == 200 and r.json()["review"]["kind"] == "accepted_risk"
     assert r.json()["status"] == "open"
 
@@ -258,7 +264,7 @@ def test_review_off_accepts_a_false_positive_at_once_and_the_gate_sees_it(client
 
 def test_review_off_accepts_dependency_accepted_risk_too(client):
     member, _admin, pid = _setup(client, "j", required=False)
-    r = _request(client, member, pid, "fp-dep", status="accepted_risk", resolution_comment="not reachable")
+    r = _request(client, member, pid, "fp-dep", status="accepted_risk", resolution_comment=RISK_COMMENT)
     assert r.json()["status"] == "accepted_risk" and r.json()["review"]["status"] == "accepted"
     assert {"fingerprint": "fp-dep", "file": "requirements.txt", "kind": "accepted_risk"} in _exemptions(client, member, pid)
 

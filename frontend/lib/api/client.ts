@@ -96,6 +96,24 @@ export async function tryRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/** A 401 from the API outside the /auth/* routes means the session is over (the refresh above
+ * already failed): a wrong password on /auth/login is also a 401 and must stay on the form. */
+export function isSessionExpiry(path: string): boolean {
+  return !path.startsWith("/auth/");
+}
+
+let redirecting = false;
+
+/** Session gone: send the user to sign in again and back here afterwards, instead of every query on
+ * the page rendering "Failed to load". A full navigation, not a router push, so no cached query or
+ * stale in-memory user survives into the next session. */
+function redirectToLogin() {
+  if (redirecting || typeof window === "undefined" || window.location.pathname === "/login") return;
+  redirecting = true;
+  const here = window.location.pathname + window.location.search;
+  window.location.assign(`/login?expired=1&next=${encodeURIComponent(here)}`);
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
   const { accessToken } = getTokens();
   const headers = new Headers(options.headers);
@@ -111,6 +129,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _retr
     if (refreshed) return apiFetch<T>(path, options, true);
     clearTokens();
   }
+  if (res.status === 401 && isSessionExpiry(path)) redirectToLogin();
 
   if (!res.ok) {
     const body = await res.json().catch(() => null);

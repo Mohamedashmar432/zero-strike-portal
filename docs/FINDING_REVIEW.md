@@ -75,7 +75,36 @@ consumers read, so the portal and the pipeline cannot disagree:
   is indented eight and the unchanged gate does not count it. `TestReportLayoutContract` in the
   scanner fails if that ever changes. Do not "fix" the test; fix the layout.
 
+## Accepted risk: any finding, its own switch, a real justification (2026-11-05)
+
+See `docs/RISK_ACCEPT_REVIEW_AND_VULN_REDESIGN.md` for the full design.
+
+- **Any finding kind** can be accepted as a risk (`finding_review_service.kinds_allowed`); false positive
+  stays code-only. A request of the other kind while one is pending is a 409.
+- **Two independent switches.** `finding_review_required` now governs false positives only;
+  `risk_acceptance_review_required` (admin-only, no project twin, default off) governs accepted risk. A
+  startup migration (`migrate_risk_review_toggle`) seeds the new one from the old one when it was never
+  stored, so an upgrade never loosens review.
+- **The justification is validated** (`validate_risk_comment`): at least 40 characters, at least 6 words of
+  two or more letters, not a placeholder or one word repeated. False positives keep "any non-empty comment".
+- **Status changes** go through `vulnerability_triage_service.apply_status_change`, shared by the PATCH and
+  the bulk route. Moving a finding to `open` / `in_progress` while its review is `accepted` is a 409 ("Ask an
+  admin to revoke the exemption") for both kinds.
+- **Notifications.** The requester is told in-app only (`finding.review_decided` is not emailable).
+  `risk.acknowledgement_requested` (project owner, in-app) and `risk.acknowledged` (admins, in-app) are new.
+- **Acknowledgement** (`risk_acknowledgement_service`): an admin, never automatically, emails the project
+  owner plus up to 10 extra addresses a PDF and CSV of the accepted risks with a single-use link (token in
+  the URL fragment, sha256-stored, 14 days, max 5 sends per recipient, 10 minute resend throttle, a resend
+  rotates it). With `smtp_host` unset a recipient is `not_configured` and nothing says "sent". The batch is a
+  frozen snapshot; an acknowledgement stops counting once any covered risk is re-decided or revoked
+  (state `superseded`). Extra recipients move finding data outside the portal: flag for NDA/MSA review.
+
 ## Migration
+
+`migrate_unreviewed_accepted_risks` does the same for accepted risks set by the old owner/admin-only direct
+triage: a review-less `accepted_risk` row reopens as `open`, with a pending accepted-risk review when the
+audit trail names who set it (and the original comment), otherwise with no review. Never auto-accepted;
+idempotent. The CI gate is unchanged: those rows stop being exempt until an admin accepts.
 
 On startup, `migrate_unreviewed_false_positives` moves every `resolved / false_positive` row that has
 no review back to `open` with a **pending** review, keeping the original comment and requester.

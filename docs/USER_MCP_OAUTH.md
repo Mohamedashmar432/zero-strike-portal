@@ -86,7 +86,7 @@ vulnerabilities page does). Lists default to 50 items, hard cap 200.
 portal's status route, so the workspace "Require admin review" setting applies: with it off (the
 default) the exemption is accepted at once and the next scan stops counting the finding; with it on
 the result is `review_status: "pending"` until an admin accepts. Any project member may call it, as
-on the REST route. Dependency (SCA) findings are refused (request accepted risk in the portal). It
+on the REST route. Dependency (SCA) findings are refused (request accepted risk in the portal's Vulnerabilities page: accepted risk needs a longer written justification, at least 40 characters and 6 words, and has its own admin-review switch). It
 is registered with `readOnlyHint=False` and audited like every tool (`MCP tool called`, plus the
 `Finding Review Auto-Accepted` / `Requested` row).
 

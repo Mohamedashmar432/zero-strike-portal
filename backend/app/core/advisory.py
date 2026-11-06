@@ -25,6 +25,7 @@ _PEP503 = re.compile(r"[-_.]+")
 _MAX_SUMMARY = 200
 _MAX_FIXED = 3
 _MAX_FACT_ADVISORIES = 5
+_MAX_IMPACT = 140  # the advisory's one-line summary, as shown in an alert fact
 
 
 # --- the feed index ---------------------------------------------------------------------------
@@ -326,8 +327,11 @@ def _fact_for(row) -> tuple[str, str]:
         return key, f"MALICIOUS PACKAGE · remove {row.package} {row.version}"
     locations = list(row.locations)
     sev = row.severity.upper() + (f" {row.cvss_score:.1f}" if row.cvss_score is not None else "")
-    fix = row.fixed_versions[0] if row.fixed_versions else "none yet"
-    parts = [sev, f"{row.package} {row.version} -> fix {fix}"]
+    fix = f"fix {row.fixed_versions[0]}" if row.fixed_versions else "no fix yet"
+    parts = [sev, f"{row.package} {row.version} -> {fix}"]
+    impact = " ".join((getattr(row, "summary", "") or "").split())
+    if impact:
+        parts.append(impact if len(impact) <= _MAX_IMPACT else impact[: _MAX_IMPACT - 3].rstrip() + "...")
     # No direct/transitive wording: the scanner's Direct flag is unreliable in every ecosystem (a real
     # npm lockfile reported 735 of 807 entries direct), so it is stored as raw data but never shown.
     manifest_part = next((m for loc in locations for m in loc.manifests), None)
@@ -344,10 +348,10 @@ def _fact_for(row) -> tuple[str, str]:
 
 def build_alert(project_name: str, project_id: str, rows: list, now: datetime) -> AlertMessage:
     """The one grouped message a project gets per run. `rows` are ledger rows (LiveDependencyAlert, or any
-    object with the same attributes): advisory_id, advisory_ids, ecosystem, package, version, severity,
+    object with the same attributes): advisory_id, advisory_ids, summary, ecosystem, package, version, severity,
     cvss_score, malicious, published_at, fixed_versions and locations[repo_label, manifests, direct,
-    inventory_scanned_at, git_commit]. The advisory's own `details` text is never included: it is
-    third-party prose that would land in a Teams channel unfiltered."""
+    inventory_scanned_at, git_commit]. Only the advisory's one-line summary is shown
+    (truncated); its `details` text is never included: it is third-party prose that would land in a Teams channel unfiltered."""
     if not rows:
         raise ValueError("build_alert needs at least one row")
     ordered = sorted(

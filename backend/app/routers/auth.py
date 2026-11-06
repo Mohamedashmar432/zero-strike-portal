@@ -115,11 +115,16 @@ async def me(user: User = Depends(get_current_user)):
 
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(payload: ForgotPasswordRequest, request: Request, background: BackgroundTasks):
-    rate_limit.enforce(
-        f"forgot-password:{client_ip(request)}:{payload.email}",
-        settings.rate_limit_forgot_password_max_attempts,
-        settings.rate_limit_forgot_password_window_seconds,
-    )
+    email = payload.email.strip().lower()
+    # Three buckets: a caller flooding the endpoint (any addresses), a caller hammering one address,
+    # and an address mailed by many callers (rotating IPs) -- the old ip+address key covered none
+    # of the first or last, so distinct addresses or distinct IPs sailed through.
+    for key, cap in (
+        (f"forgot-password:ip:{client_ip(request)}", settings.rate_limit_forgot_password_ip_max_attempts),
+        (f"forgot-password:{client_ip(request)}:{email}", settings.rate_limit_forgot_password_max_attempts),
+        (f"forgot-password:email:{email}", settings.rate_limit_forgot_password_max_attempts),
+    ):
+        rate_limit.enforce(key, cap, settings.rate_limit_forgot_password_window_seconds)
     await auth_service.request_password_reset(payload.email, background)
     # Always the same message/status — must not reveal whether the email is registered.
     return MessageResponse(message="If that email is registered, a reset link has been sent.")

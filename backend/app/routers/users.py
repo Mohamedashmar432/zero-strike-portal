@@ -48,18 +48,8 @@ async def get_my_profile(user: User = Depends(get_current_user)):
 
 @router.patch("/users/me", response_model=UserResponse)
 async def update_my_profile(payload: UpdateProfileRequest, user: User = Depends(get_current_user)):
-    changed = False
     if payload.name is not None:
         user.name = payload.name
-        changed = True
-    if payload.email is not None and payload.email != user.email:
-        auth_service.require_allowed_email_domain(payload.email)
-        existing = await User.find_one(User.email == payload.email)
-        if existing and str(existing.id) != str(user.id):
-            raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
-        user.email = payload.email
-        changed = True
-    if changed:
         user.updated_at = datetime.now(timezone.utc)
         await user.save()
     return _to_user_response(user)

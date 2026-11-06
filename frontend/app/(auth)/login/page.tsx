@@ -17,7 +17,10 @@ import { loginSchema, type LoginInput } from "@/lib/validation/auth.schema";
 import { useAuth } from "@/providers/auth-provider";
 
 function LoginForm() {
-  const next = safeNextPath(useSearchParams().get("next"));
+  const params = useSearchParams();
+  const next = safeNextPath(params.get("next"));
+  // Set by apiFetch when a request came back 401 after the refresh failed (lib/api/client.ts).
+  const expired = params.get("expired") === "1";
   const { login, isAuthenticating, user, isRestoringSession } = useAuth();
   const router = useRouter();
   // One session per browser: a tab that opens /login while signed in goes back to the app rather
@@ -71,6 +74,12 @@ function LoginForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {expired && !formError && (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="size-4 shrink-0" />
+              Your session expired. Sign in again to continue where you left off.
+            </p>
+          )}
           {formError && (
             <div
               role="alert"

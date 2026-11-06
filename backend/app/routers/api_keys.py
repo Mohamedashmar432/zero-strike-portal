@@ -2,8 +2,10 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.core import security
+from app.core import rate_limit, security
+from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.rate_limit import client_ip
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.schemas.api_key import (
@@ -38,7 +40,17 @@ def _to_response(key: ApiKey) -> ApiKeyResponse:
 
 @router.post("/validate", response_model=ApiKeyValidateResponse)
 async def validate_key(payload: ApiKeyValidateRequest, request: Request):
-    key = await api_key_service.resolve_api_key(payload.token, request)
+    # Unauthenticated by design (the key is the credential), so only failures are throttled: a
+    # valid scanner must never be locked out, a key-guessing client must be.
+    bucket = f"apikey-validate:{client_ip(request)}"
+    window = settings.rate_limit_apikey_validate_window_seconds
+    if not rate_limit.peek_ok(bucket, settings.rate_limit_apikey_validate_max_failures, window):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many attempts, try again later")
+    try:
+        key = await api_key_service.resolve_api_key(payload.token, request)
+    except HTTPException:
+        rate_limit.record_failure(bucket, window)
+        raise
     return ApiKeyValidateResponse(project_id=key.project_id, key_id=str(key.id), expires_at=key.expires_at)
 
 

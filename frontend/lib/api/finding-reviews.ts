@@ -34,6 +34,13 @@ export type FindingReviewItem = {
 
 export type FindingReviewList = { items: FindingReviewItem[]; pending_count: number };
 
+export type FindingReviewKindFilter = ReviewKind | "all";
+
+/** The queue endpoint filters by status only, so the kind filter is applied to the returned page. */
+export function filterByKind(items: FindingReviewItem[], kind: FindingReviewKindFilter): FindingReviewItem[] {
+  return kind === "all" ? items : items.filter((i) => i.review.kind === kind);
+}
+
 export function listFindingReviews(status: ReviewStatus) {
   return apiFetch<FindingReviewList>(`/admin/finding-reviews?status=${status}`);
 }

@@ -179,7 +179,7 @@ EXPECTED_TOOLS = {
     "get_system_log", "summarize_errors", "trace_request", "list_audit_logs", "inspect_job",
     "list_failed_jobs", "get_ai_health", "get_runtime_config", "get_data_stats", "list_projects",
     "lookup_user",
-}
+} | {t.__name__ for t in mcp_server.NEW_TOOLS}
 
 
 def test_exactly_the_planned_tools_are_listed_and_read_only(client, admin_token):
@@ -342,6 +342,9 @@ def test_runtime_config_is_an_allow_list_with_no_secrets(client, admin_token, mo
     assert out["configured"]["oauth_encryption_key"] is True
     assert out["settings"]["scan_timeout_seconds"] == settings.scan_timeout_seconds
     assert "email_templates" not in out["workspace"]
+    # Encrypted workspace fields never leave, even as ciphertext; only whether each is set.
+    assert not [k for k in out["workspace"] if k.endswith("_enc")]
+    assert out["workspace_secrets_set"]["alert_webhook_enc"] is False
 
 
 def test_overview_health_scanner_and_ai_tools_have_the_expected_shape(client, admin_token):

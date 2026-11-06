@@ -842,6 +842,7 @@ async def test_project_ai_provider(
     await _require_byok(project_id, user)
     config = await ai_provider_config_service.get_config_or_404(config_id, project_id)
     try:
+        await llm_client.vet_project_base_url(config)
         await llm_client.test_connection(
             provider=config.provider,
             model_name=config.model_name,

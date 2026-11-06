@@ -3,8 +3,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.project_insights import NewCves
-
 
 class DigestSettingsRequest(BaseModel):
     """PUT body. The `last_*` fields of the response are not accepted back (ignored if sent)."""
@@ -33,9 +31,12 @@ class DigestRow(BaseModel):
     cloud_failed: int = 0
     critical: int = 0
     high: int = 0
-    quota_used: int = 0
-    quota_limit: int = 0
-    new_cves: NewCves = Field(default_factory=NewCves)
+    # Over every repo of the project: resolved is all-time, new_findings were first seen in the period.
+    resolved: int = 0
+    new_findings: int = 0
+    # False-positive rate inputs: resolved as a false positive or admin-accepted as one, over all of them.
+    false_positives: int = 0
+    vulnerabilities: int = 0
 
 
 class DigestTotals(BaseModel):
@@ -45,37 +46,27 @@ class DigestTotals(BaseModel):
     cloud_failed: int = 0
     critical: int = 0
     high: int = 0
-    quota_used: int = 0
-    quota_limit: int = 0
-    new_cves: NewCves = Field(default_factory=NewCves)
 
 
-class NewAdvisory(BaseModel):
-    """An advisory id first reported by at least one project in the period (OSV lookup at scan time)."""
+class OutdatedPipeline(BaseModel):
+    """CI/CD scans in the period that ran a scanner other than the newest published binary, grouped by
+    (project, repository + runner host, version)."""
 
-    id: str
-    severity: str
-    projects: int
+    project_id: str
+    project: str
+    repository: str
+    scanner_version: str
+    runs: int
+    last_run_at: datetime | None = None
 
 
 class ScannerHealth(BaseModel):
     engine_available: bool
     backend_scanner_version: str
     latest_binary_version: str | None
-    outdated_ci_runners: int
-    rule_pack_version: int | None
-    # Custom rules in the active rule pack. The built-in SAST rules are the scanner's own and the
-    # portal does not hold a count of them.
-    rule_count: int
-    osv_reachable: bool
-    # Round-trip of each OSV.dev endpoint the scanner calls at scan time (querybatch, vulns/{id}); None =
-    # unreachable or 5xx. The scanner keeps no local CVE database, so this is the whole "feed" status.
-    osv_batch_ms: int | None = None
-    osv_vuln_ms: int | None = None
-    osv_checked_at: datetime | None = None
-    last_dependency_scan_at: datetime | None = None
-    new_cve_ids: list[str] = Field(default_factory=list)  # at most 5
-    new_advisories: list[NewAdvisory] = Field(default_factory=list)  # at most 8, worst first
+    projects_outdated: int = 0  # distinct projects in outdated_pipelines
+    outdated_pipelines: list[OutdatedPipeline] = Field(default_factory=list)  # oldest version first
+    # Advisory ids first reported by any project's dependency findings in the period (a count, no list).
     new_advisory_count: int = 0
 
 
@@ -111,4 +102,4 @@ class DigestSendError(BaseModel):
 class DigestSendResponse(BaseModel):
     sent: int
     errors: list[DigestSendError]
-    cards: int = 0  # cards posted to each channel (scanner health, project status, summary)
+    cards: int = 0  # cards posted to each channel (scanner, project status, summary; or one per project)

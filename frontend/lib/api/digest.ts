@@ -1,5 +1,4 @@
 import { apiFetch } from "./client";
-import type { NewCves } from "./project-insights";
 
 export type DigestSettings = {
   enabled: boolean;
@@ -22,36 +21,40 @@ export type DigestNumbers = {
   cloud_failed: number;
   critical: number;
   high: number;
-  quota_used: number;
-  quota_limit: number;
 };
 
 export type DigestRow = DigestNumbers & {
   project_id: string;
   name: string;
-  new_cves: NewCves;
+  /** All-time, over every repo of the project. */
+  resolved: number;
+  /** Vulnerabilities first seen in the period. */
+  new_findings: number;
+  false_positives: number;
+  vulnerabilities: number;
+};
+
+export type OutdatedPipeline = {
+  project_id: string;
+  project: string;
+  repository: string;
+  scanner_version: string;
+  runs: number;
+  last_run_at: string | null;
 };
 
 export type DigestPreview = {
   period_start: string;
   period_end: string;
   rows: DigestRow[];
-  totals: DigestNumbers & { new_cves?: NewCves };
+  totals: DigestNumbers;
   scanner: {
     engine_available: boolean;
     backend_scanner_version: string | null;
     latest_binary_version: string | null;
-    outdated_ci_runners: number;
-    rule_pack_version: string | null;
-    rule_count: number | null;
-    osv_reachable: boolean;
-    // Round-trip of each OSV.dev endpoint the scanner calls; null = unreachable.
-    osv_batch_ms: number | null;
-    osv_vuln_ms: number | null;
-    osv_checked_at: string | null;
-    last_dependency_scan_at: string | null;
-    new_cve_ids: string[];
-    new_advisories: { id: string; severity: string; projects: number }[];
+    projects_outdated: number;
+    /** CI/CD scans in the period on a scanner other than the latest binary; oldest version first. */
+    outdated_pipelines: OutdatedPipeline[];
     new_advisory_count: number;
   };
   stale_projects: { project_id: string; name: string; last_scan_at: string | null }[];

@@ -1,7 +1,7 @@
 """Admin-reviewed exemptions: a finding stops blocking CI only after a portal admin accepts it.
 
-A project member asks (`request_review`) -- false positive for code findings, accepted risk for
-dependency findings -- with a comment. The finding keeps blocking while the request is pending. A
+A project member asks (`request_review`) -- false positive for code findings, accepted risk for any
+finding -- with a comment. The finding keeps blocking while the request is pending. A
 portal admin accepts or rejects it (`decide`), and can later revoke an acceptance (`revoke`).
 
 An accepted review is an *exemption*: `accepted_exemptions` is the single source both consumers
@@ -12,12 +12,15 @@ so matching it alone would also silence the same snippet in another file of the 
 See docs/FINDING_REVIEW.md.
 """
 
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.models.vulnerability import FindingReview, ReviewKind, Vulnerability
+from app.models.workspace_settings import WorkspaceSettings
 from app.services import audit_service, notification_service, workspace_settings_service
 
 _REVIEW_LINK = "/admin/finding-reviews"
@@ -31,11 +34,42 @@ def normalize_path(path: str | None) -> str:
     return p
 
 
-def kind_allowed(vuln: Vulnerability) -> ReviewKind:
-    """The one review kind a finding may get: dependency findings are almost always real (a
-    published advisory against the installed version), so they can be accepted as a risk but never
-    called a false positive."""
-    return "accepted_risk" if vuln.current_kind == "sca" else "false_positive"
+# Accepting a risk is a standing exemption from the CI gate, so its justification has to say something.
+# Mirrored in the frontend's status dialog (its live counter).
+MIN_RISK_COMMENT_CHARS = 40
+_MIN_RISK_COMMENT_WORDS = 6
+_PLACEHOLDER_COMMENTS = frozenset({"n/a", "na", "none", "test", "testing", "asdf", "todo", "tbd", "ok", "accepted"})
+
+
+def validate_risk_comment(comment: str | None) -> str:
+    """The trimmed justification for an accepted risk, or a 422. At least MIN_RISK_COMMENT_CHARS, six
+    words of two or more letters, and not a placeholder or one word repeated."""
+    text = (comment or "").strip()
+    words = re.findall(r"[^\W\d_]{2,}", text)
+    if (
+        len(text) < MIN_RISK_COMMENT_CHARS
+        or len(words) < _MIN_RISK_COMMENT_WORDS
+        or text.lower() in _PLACEHOLDER_COMMENTS
+        or len({w.lower() for w in words}) < 3
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Accepting a risk needs a real justification: at least {MIN_RISK_COMMENT_CHARS} characters "
+            f"and {_MIN_RISK_COMMENT_WORDS} words explaining why it is acceptable.",
+        )
+    return text
+
+
+def kinds_allowed(vuln: Vulnerability) -> tuple[ReviewKind, ...]:
+    """The review kinds a finding may get. Any finding can be accepted as a risk; only code findings
+    can be called a false positive, because a dependency finding is a published advisory against the
+    installed version -- almost always real."""
+    return ("accepted_risk",) if vuln.current_kind == "sca" else ("false_positive", "accepted_risk")
+
+
+def _review_required(kind: ReviewKind, ws) -> bool:
+    """Whether a request of this kind waits for a portal admin. Two independent switches."""
+    return ws.risk_acceptance_review_required if kind == "accepted_risk" else ws.finding_review_required
 
 
 def _apply_acceptance(vuln: Vulnerability, review: FindingReview, now: datetime) -> None:
@@ -57,22 +91,24 @@ def _apply_acceptance(vuln: Vulnerability, review: FindingReview, now: datetime)
 
 
 async def request_review(vuln: Vulnerability, kind: ReviewKind, comment: str, user: User) -> Vulnerability:
-    comment = (comment or "").strip()
-    if not comment:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A comment explaining why is required")
-    allowed = kind_allowed(vuln)
-    if kind != allowed:
-        if vuln.current_kind == "sca":
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Dependency findings cannot be marked as false positive. Request accepted risk instead.",
-            )
+    if kind not in kinds_allowed(vuln):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Only dependency findings go through accepted-risk review; mark this one as a false positive.",
+            "Dependency findings cannot be marked as false positive. Request accepted risk instead.",
         )
+    if kind == "accepted_risk":
+        comment = validate_risk_comment(comment)
+    else:
+        comment = (comment or "").strip()
+        if not comment:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A comment explaining why is required")
     if vuln.review and vuln.review.status == "accepted":
         raise HTTPException(status.HTTP_409_CONFLICT, "This finding is already exempted by an admin")
+    if vuln.review and vuln.review.status == "pending" and vuln.review.kind != kind:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A different kind of review is already pending for this finding. Wait for the admin's decision.",
+        )
     file_path = normalize_path(vuln.current_location.file if vuln.current_location else None)
     if not file_path:
         raise HTTPException(status.HTTP_409_CONFLICT, "This finding has no file location to exempt")
@@ -87,12 +123,15 @@ async def request_review(vuln: Vulnerability, kind: ReviewKind, comment: str, us
     )
     label = "false positive" if kind == "false_positive" else "accepted risk"
 
-    if not (await workspace_settings_service.get_workspace_settings()).finding_review_required:
-        # Admin review is off: the request is its own acceptance. Nothing is pending, so no admin is asked.
+    ws = await workspace_settings_service.get_workspace_settings()
+    if not _review_required(kind, ws):
+        # Admin review is off for this kind: the request is its own acceptance. Nothing is pending, so no
+        # admin is asked.
         review.status = "accepted"
         review.reviewed_by_user_id = str(user.id)
         review.reviewed_at = now
-        review.review_comment = "Auto-accepted: admin review is off"
+        off = "admin review is off" if kind == "false_positive" else "admin review of risk acceptance is off"
+        review.review_comment = f"Auto-accepted: {off}"
         _apply_acceptance(vuln, review, now)
         vuln.updated_at = now
         await vuln.save()
@@ -110,7 +149,7 @@ async def request_review(vuln: Vulnerability, kind: ReviewKind, comment: str, us
             project_id=vuln.project_id,
             title=f"Your {label} request was accepted",
             body=f"{vuln.current_rule_name or vuln.current_rule_id} in {file_path}: accepted -- it no longer "
-            "blocks CI (admin review is off).",
+            f"blocks CI ({off}).",
             link=f"/projects/{vuln.project_id}/vulnerabilities/{vuln.id}",
             severity="info",
             only_user_ids=[str(user.id)],
@@ -292,5 +331,72 @@ async def migrate_unreviewed_false_positives() -> int:
             target_type="vulnerability",
             target_id=str(r["_id"]),
             metadata={"to": "pending review" if "review" in reopen else "open (dependency finding)"},
+        )
+    return len(rows)
+
+
+async def migrate_risk_review_toggle() -> bool:
+    """Startup migration: seed `risk_acceptance_review_required` from `finding_review_required` when the
+    stored settings predate it, so an upgrade never loosens review (the old switch governed accepted risk
+    on dependency findings). Reads the raw document because a Beanie load would fill in the default and
+    hide that the field was never stored. Idempotent: once stored, the field is never overwritten."""
+    coll = WorkspaceSettings.get_pymongo_collection()
+    doc = await coll.find_one({"risk_acceptance_review_required": {"$exists": False}})
+    if doc is None:
+        return False
+    await coll.update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"risk_acceptance_review_required": bool(doc.get("finding_review_required", False))}},
+    )
+    return True
+
+
+async def migrate_unreviewed_accepted_risks() -> int:
+    """Startup migration: an accepted risk set before it went through review (owner/admin-only
+    direct triage) was never reviewed, so it goes back to blocking as a pending request. The requester
+    and comment come from the audit trail when it can be found; otherwise the row simply reopens with no
+    request. Never auto-accepted. Idempotent: a migrated row is `open`, and only review-less
+    accepted_risk rows are touched."""
+    coll = Vulnerability.get_pymongo_collection()
+    now = datetime.now(timezone.utc)
+    rows = await coll.find({"status": "accepted_risk", "review": None}).to_list(length=None)
+    for r in rows:
+        vid = str(r["_id"])
+        trail = await AuditLog.get_pymongo_collection().find_one(
+            {
+                "target_type": "vulnerability",
+                "target_id": vid,
+                "action": "Vulnerability Status Updated",
+                "metadata.status.after": "accepted_risk",
+            },
+            sort=[("created_at", -1)],
+        )
+        location = (r.get("current_location") or {}).get("file")
+        reopen = {
+            "status": "open",
+            "resolution_reason": None,
+            "resolution_comment": None,
+            "resolved_at": None,
+            "resolved_by_user_id": None,
+            "reopened_at": now,
+            "updated_at": now,
+        }
+        requester = (trail or {}).get("actor_user_id")
+        if requester and location:
+            reopen["review"] = FindingReview(
+                kind="accepted_risk",
+                file_path=normalize_path(location),
+                requested_by_user_id=requester,
+                requested_at=trail.get("created_at") or now,
+                request_comment=r.get("resolution_comment") or "(accepted before risk review existed)",
+            ).model_dump()
+        await coll.update_one({"_id": r["_id"]}, {"$set": reopen})
+        await audit_service.record(
+            "Finding Review Migrated",
+            actor_type="system",
+            project_id=r.get("project_id"),
+            target_type="vulnerability",
+            target_id=vid,
+            metadata={"to": "pending review" if "review" in reopen else "open (requester unknown)"},
         )
     return len(rows)

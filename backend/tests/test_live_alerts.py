@@ -687,3 +687,33 @@ def test_audit_rows_are_system_actor_and_project_scoped(client, monkeypatch, pos
     assert row.metadata["advisories"] == ["GHSA-aaaa-bbbb-cccc"] and row.metadata["project_webhook"] == "sent"
     blob = json.dumps(row.metadata)
     assert "http" not in blob and "@" not in blob
+
+
+def _ledger_row(**overrides):
+    fields = dict(
+        project_id="p1", advisory_id="GHSA-aaaa-bbbb-cccc", advisory_ids=["GHSA-aaaa-bbbb-cccc", "CVE-2026-1111"],
+        summary="Prototype pollution in synthetic-lib allows remote code execution", ecosystem="npm",
+        package="synthetic-lib", package_norm="synthetic-lib", version="1.0.0", severity="high", cvss_score=8.1,
+        published_at=T0, fixed_versions=["1.0.4", "2.0.1"],
+    )
+    return LiveDependencyAlert(**{**fields, **overrides})
+
+
+def test_alert_fact_carries_severity_cvss_fix_version_and_impact():
+    message = adv.build_alert("Payments", "p1", [_ledger_row()], T0 + timedelta(minutes=30))
+    fact = dict(message.facts)["GHSA-aaaa-bbbb-cccc · CVE-2026-1111"]
+    assert fact.startswith("HIGH 8.1 · synthetic-lib 1.0.0 -> fix 1.0.4 · Prototype pollution in synthetic-lib")
+    assert "remote code execution" in fact
+
+
+def test_alert_fact_says_no_fix_yet_and_truncates_a_long_impact():
+    row = _ledger_row(fixed_versions=[], summary="word " * 80, cvss_score=None, severity="critical")
+    fact = dict(adv.build_alert("Payments", "p1", [row], T0 + timedelta(minutes=30)).facts)[
+        "GHSA-aaaa-bbbb-cccc · CVE-2026-1111"
+    ]
+    assert fact.startswith("CRITICAL · synthetic-lib 1.0.0 -> no fix yet · word word")
+    impact = fact.split(" · ")[2]
+    assert impact.endswith("...") and len(impact) == adv._MAX_IMPACT
+    # A missing summary adds no empty part, and the advisory's `details` is never read.
+    bare = dict(adv.build_alert("Payments", "p1", [_ledger_row(summary="")], T0).facts)["GHSA-aaaa-bbbb-cccc · CVE-2026-1111"]
+    assert "·  ·" not in bare and bare.split(" · ")[:2] == ["HIGH 8.1", "synthetic-lib 1.0.0 -> fix 1.0.4"]

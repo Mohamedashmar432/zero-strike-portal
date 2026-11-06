@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.auth import BcryptSafePassword
 
@@ -15,8 +15,11 @@ class RejectUserRequest(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
+    # The email is the identity a user registered (and was approved, invited, and audited) under, so
+    # it is never self-editable. Forbidding extras makes a request that tries it a 422, not a silent no-op.
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
-    email: EmailStr | None = None
 
 
 class ChangePasswordRequest(BaseModel):

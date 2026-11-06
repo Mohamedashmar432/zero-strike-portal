@@ -57,6 +57,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=scanner-builder /out/zerostrike /usr/local/bin/zerostrike
+# The scanner's built-in rule YAML (data only), so the Scan Engine page can list every rule, not just
+# those that have fired. Same ref as the binary: it comes from the checkout in the builder stage.
+COPY --from=scanner-builder /src/internal/rules/data /usr/local/share/zerostrike/rules
+ENV SCANNER_RULES_DIR=/usr/local/share/zerostrike/rules
 
 # Stamp which engine went in, so /health can report it. The binary cannot say: the build above
 # sets no version ldflag, so `zerostrike --version` prints "dev" regardless of the ref. Without
@@ -92,4 +96,4 @@ EXPOSE 8000
 # front (Azure Container Apps ingress, or Caddy in deploy/). Set it to the real proxy count for
 # other setups, e.g. 2 with Front Door or Application Gateway in front of ACA.
 ENV TRUSTED_PROXY_HOPS=1
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --no-server-header --host 0.0.0.0 --port ${PORT:-8000}"]

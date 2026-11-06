@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import {
   deleteCustomRule,
+  filterRules,
   fpRateLabel,
   getCustomRules,
   getPending,
@@ -194,6 +195,8 @@ function RulesTab() {
   const { data, isLoading, isError } = useQuery({ queryKey: [...queryKeys.admin.scanEngine(), "rules"], queryFn: getRules });
   const [historyRule, setHistoryRule] = useState<RuleRow | null>(null);
   const [retiring, setRetiring] = useState<RuleRow | null>(null);
+  const [query, setQuery] = useState("");
+  const visible = useMemo(() => filterRules(data?.rules ?? [], query), [data, query]);
 
   const retire = useMutation({
     mutationFn: ({ ruleId, reason }: { ruleId: string; reason: string }) => retireRule(ruleId, reason),
@@ -216,11 +219,34 @@ function RulesTab() {
   return (
     <div className="space-y-4">
       {data && <ThresholdsForm key={`${data.noisy_min_fp_tags}-${data.noisy_min_fp_percent}`} tags={data.noisy_min_fp_tags} percent={data.noisy_min_fp_percent} />}
+      {data && !data.catalog_loaded && (
+        <p className="text-sm text-muted-foreground">
+          Only rules that have produced a finding are listed. Set SCANNER_RULES_DIR on the backend to list every
+          built-in rule.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          type="search"
+          aria-label="Search rules"
+          placeholder="Search by rule id, name, language, category or CWE"
+          className="w-full max-w-md"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {data && (
+          <span className="text-sm text-muted-foreground">
+            Showing {visible.length} of {data.rules.length} rules
+          </span>
+        )}
+      </div>
       <DataTableCard
         isLoading={isLoading}
         isError={isError}
-        isEmpty={!!data && data.rules.length === 0}
-        emptyState={<EmptyState title="No rule has produced a finding yet." />}
+        isEmpty={!!data && visible.length === 0}
+        emptyState={
+          <EmptyState title={data && data.rules.length > 0 ? "No rules match your search." : "No rule has produced a finding yet."} />
+        }
       >
         <Table>
           <TableHeader>
@@ -237,11 +263,14 @@ function RulesTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.rules.map((r) => (
+            {visible.map((r) => (
               <TableRow key={r.rule_id}>
                 <TableCell>
                   <div className="font-mono text-xs">{r.rule_id}</div>
                   <div className="text-xs text-muted-foreground">{r.title ?? "—"}</div>
+                  {(r.category || r.cwe.length > 0) && (
+                    <div className="text-xs text-muted-foreground">{[r.category, ...r.cwe].filter(Boolean).join(" · ")}</div>
+                  )}
                 </TableCell>
                 <TableCell>{r.severity ?? "—"}</TableCell>
                 <TableCell>{r.language ?? "—"}</TableCell>

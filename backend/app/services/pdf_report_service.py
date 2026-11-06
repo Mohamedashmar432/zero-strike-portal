@@ -224,3 +224,49 @@ def build_report_filename(scan: Scan, report: Report, project_name: str) -> str:
     """"{project}-{repo}-{date}.pdf" — the name users see when they download a report."""
     date = (scan.started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
     return f"{_slugify(project_name)}-{_repo_name(scan, report)}-{date}.pdf"
+
+
+# --- risk acceptance report (docs/RISK_ACCEPT_REVIEW_AND_VULN_REDESIGN.md) ---------------------------------
+
+_MAX_RISK_ROWS = 2000
+_RISK_COMMENT_MAX_CHARS = 1000
+
+
+def _pdf_text(value: str | None) -> str:
+    """The built-in PDF fonts only carry cp1252; anything else would render as a black box."""
+    return (value or "").encode("cp1252", "replace").decode("cp1252")
+
+
+def render_risk_acceptance_html(project_name: str, items: list, generated_at: datetime | None = None) -> str:
+    """One table row per accepted risk: tables only (no <pre>: a block that must split across pages is
+    what crashes xhtml2pdf, see _SNIPPET_MAX_LINES), comments truncated, text made cp1252-safe."""
+    rows = [
+        {
+            "severity": (i.severity or "-").lower(),
+            "rule": _pdf_text(i.rule_name or i.rule_id or "-"),
+            "file": _pdf_text(i.file_path),
+            "requested_by": _pdf_text(i.requested_by_email or "-"),
+            "requested_at": i.requested_at.strftime("%Y-%m-%d") if i.requested_at else "-",
+            "accepted_by": _pdf_text(i.reviewed_by_email or "-"),
+            "accepted_at": i.reviewed_at.strftime("%Y-%m-%d") if i.reviewed_at else "-",
+            "auto": i.auto_accepted,
+            "comment": _pdf_text(
+                i.comment
+                if len(i.comment) <= _RISK_COMMENT_MAX_CHARS
+                else i.comment[:_RISK_COMMENT_MAX_CHARS] + "... (truncated; see the CSV)"
+            ),
+        }
+        for i in sorted(items, key=lambda x: _SEVERITY_ORDER.get((x.severity or "info").lower(), 5))[:_MAX_RISK_ROWS]
+    ]
+    return _env.get_template("risk_acceptance_report.html.j2").render(
+        project_name=_pdf_text(project_name),
+        rows=rows,
+        total=len(items),
+        truncated=len(items) > _MAX_RISK_ROWS,
+        generated_at=(generated_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M UTC"),
+    )
+
+
+async def render_risk_acceptance_pdf(project_name: str, items: list, generated_at: datetime | None = None) -> bytes:
+    html = render_risk_acceptance_html(project_name, items, generated_at)
+    return await asyncio.to_thread(_html_to_pdf_sync, html)

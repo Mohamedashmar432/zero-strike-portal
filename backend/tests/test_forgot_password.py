@@ -78,6 +78,21 @@ def test_expired_token_is_rejected(client, monkeypatch):
 
     r = client.post("/api/v1/auth/reset-password", json={"token": token, "new_password": "newpassword1"})
     assert r.status_code == 400
+    assert "has expired" in r.json()["detail"]
+    assert "5 minutes" in r.json()["detail"]
+    # The old password still works: an expired link changes nothing.
+    r = client.post("/api/v1/auth/login", json={"email": "forgot2@zerostrike.dev", "password": "oldpassword1"})
+    assert r.status_code == 200
+
+
+def test_reset_token_ttl_is_five_minutes():
+    assert settings.password_reset_token_ttl_minutes == 5
+
+
+def test_unknown_token_says_invalid_not_expired(client):
+    r = client.post("/api/v1/auth/reset-password", json={"token": "x" * 40, "new_password": "newpassword1"})
+    assert r.status_code == 400
+    assert "invalid or has already been used" in r.json()["detail"]
 
 
 def test_reset_token_is_single_use(client, monkeypatch):

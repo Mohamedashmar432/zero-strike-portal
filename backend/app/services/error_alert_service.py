@@ -39,6 +39,10 @@ def fingerprint(logger_name: str, message: str) -> str:
 
 
 def _eligible(row: dict) -> bool:
+    # main.py's catch-all handler logs every unhandled exception with its request id, then Starlette
+    # re-raises and uvicorn logs the same crash: alert on the first, not both.
+    if row["logger"].startswith("uvicorn") and row["message"].startswith("Exception in ASGI application"):
+        return False
     return row["level"] in _LEVELS and not row["logger"].startswith(_SKIP_LOGGER_PREFIXES)
 
 

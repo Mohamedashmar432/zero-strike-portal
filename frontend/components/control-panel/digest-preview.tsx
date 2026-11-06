@@ -3,9 +3,8 @@
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { DigestPreview } from "@/lib/api/digest";
+import type { DigestPreview, DigestRow } from "@/lib/api/digest";
 import { fmt, when } from "./date-range";
-import { NewCvesCell } from "./new-cves-cell";
 
 const num = "text-right font-mono tabular-nums";
 
@@ -17,6 +16,11 @@ function Fact({ label, value, bad }: { label: string; value: string; bad?: boole
     </div>
   );
 }
+
+const failRate = (r: DigestRow) => {
+  const total = r.pipeline_runs + r.cloud_scans;
+  return total > 0 ? `${Math.round(((r.pipeline_failed + r.cloud_failed) / total) * 100)}%` : "-";
+};
 
 /** The same table the Teams card carries, so an admin sees what will be posted before it is. */
 export function DigestPreviewTable({
@@ -34,7 +38,7 @@ export function DigestPreviewTable({
   if (!preview) return <p className="text-sm text-muted-foreground">{isLoading ? "Building preview…" : ""}</p>;
 
   const { totals, scanner: s } = preview;
-  const totalCves = preview.rows.reduce((n, r) => n + r.new_cves.count, 0);
+  const totalFailed = totals.pipeline_failed + totals.cloud_failed;
 
   return (
     <div className="space-y-4 rounded-lg border border-border p-4">
@@ -52,14 +56,13 @@ export function DigestPreviewTable({
           <TableHeader>
             <TableRow className="bg-muted/40 text-xs">
               <TableHead className="py-2.5">Project</TableHead>
-              <TableHead className={`py-2.5 ${num}`}>Pipeline runs</TableHead>
-              <TableHead className={`py-2.5 ${num}`}>Pipeline failed</TableHead>
-              <TableHead className={`py-2.5 ${num}`}>Cloud scans</TableHead>
-              <TableHead className={`py-2.5 ${num}`}>Cloud failed</TableHead>
+              <TableHead className={`py-2.5 ${num}`}>CI/CD</TableHead>
+              <TableHead className={`py-2.5 ${num}`}>Cloud</TableHead>
               <TableHead className={`py-2.5 ${num}`}>Critical</TableHead>
               <TableHead className={`py-2.5 ${num}`}>High</TableHead>
-              <TableHead className={`py-2.5 ${num}`}>Quota</TableHead>
-              <TableHead className="py-2.5">New CVEs</TableHead>
+              <TableHead className={`py-2.5 ${num}`}>Fail rate</TableHead>
+              <TableHead className={`py-2.5 ${num}`}>Resolved</TableHead>
+              <TableHead className={`py-2.5 ${num}`}>New findings</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -67,86 +70,77 @@ export function DigestPreviewTable({
               <TableRow key={r.project_id} className="text-xs">
                 <TableCell className="font-medium text-foreground">{r.name}</TableCell>
                 <TableCell className={num}>{fmt(r.pipeline_runs)}</TableCell>
-                <TableCell className={`${num} ${r.pipeline_failed > 0 ? "text-severity-critical" : ""}`}>
-                  {fmt(r.pipeline_failed)}
-                </TableCell>
                 <TableCell className={num}>{fmt(r.cloud_scans)}</TableCell>
-                <TableCell className={`${num} ${r.cloud_failed > 0 ? "text-severity-critical" : ""}`}>
-                  {fmt(r.cloud_failed)}
-                </TableCell>
                 <TableCell className={`${num} ${r.critical > 0 ? "text-severity-critical" : ""}`}>
                   {fmt(r.critical)}
                 </TableCell>
                 <TableCell className={`${num} ${r.high > 0 ? "text-severity-high" : ""}`}>{fmt(r.high)}</TableCell>
-                <TableCell className={num}>
-                  {r.quota_used}/{r.quota_limit}
+                <TableCell
+                  className={`${num} ${r.pipeline_failed + r.cloud_failed > 0 ? "text-severity-critical" : ""}`}
+                >
+                  {failRate(r)}
                 </TableCell>
-                <TableCell className="max-w-64 truncate">
-                  <NewCvesCell cves={r.new_cves} />
-                </TableCell>
+                <TableCell className={num}>{fmt(r.resolved)}</TableCell>
+                <TableCell className={num}>{fmt(r.new_findings)}</TableCell>
               </TableRow>
             ))}
             <TableRow className="border-t-2 bg-muted/30 text-xs font-medium hover:bg-muted/30">
               <TableCell>Total</TableCell>
               <TableCell className={num}>{fmt(totals.pipeline_runs)}</TableCell>
-              <TableCell className={num}>{fmt(totals.pipeline_failed)}</TableCell>
               <TableCell className={num}>{fmt(totals.cloud_scans)}</TableCell>
-              <TableCell className={num}>{fmt(totals.cloud_failed)}</TableCell>
               <TableCell className={num}>{fmt(totals.critical)}</TableCell>
               <TableCell className={num}>{fmt(totals.high)}</TableCell>
-              <TableCell className={num}>
-                {totals.quota_used}/{totals.quota_limit}
-              </TableCell>
-              <TableCell className="font-mono tabular-nums">{fmt(totals.new_cves?.count ?? totalCves)}</TableCell>
+              <TableCell className={num}>{totalFailed} failed</TableCell>
+              <TableCell className={num}>{fmt(preview.rows.reduce((n, r) => n + r.resolved, 0))}</TableCell>
+              <TableCell className={num}>{fmt(preview.rows.reduce((n, r) => n + r.new_findings, 0))}</TableCell>
             </TableRow>
           </TableBody>
         </Table>
       </div>
 
       <div className="space-y-1.5">
-        <h3 className="legend text-foreground">Scanner health</h3>
+        <h3 className="legend text-foreground">Scanner</h3>
         <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
           <Fact label="Engine" value={s.engine_available ? "available" : "unavailable"} bad={!s.engine_available} />
           <Fact label="Backend scanner" value={s.backend_scanner_version ?? "unknown"} />
           <Fact label="Latest published" value={s.latest_binary_version ?? "none"} />
           <Fact
-            label="CI runners on older scanner"
-            value={String(s.outdated_ci_runners)}
-            bad={s.outdated_ci_runners > 0}
+            label="Projects on an older scanner"
+            value={String(s.projects_outdated)}
+            bad={s.projects_outdated > 0}
           />
-          <Fact
-            label="Rule pack"
-            value={`${s.rule_pack_version ?? "unknown"}${s.rule_count !== null ? ` (${fmt(s.rule_count)} rules)` : ""}`}
-          />
-          <Fact label="Scanner" value={s.engine_available && s.osv_reachable ? "ready" : "not ready"} bad={!(s.engine_available && s.osv_reachable)} />
+          <Fact label="New CVEs added" value={fmt(s.new_advisory_count)} />
         </dl>
-        <h3 className="legend pt-1 text-foreground">CVE data (OSV.dev, queried live at scan time)</h3>
-        <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
-          <Fact
-            label="Batch lookup"
-            value={s.osv_batch_ms === null ? "unreachable" : `${s.osv_batch_ms} ms`}
-            bad={s.osv_batch_ms === null}
-          />
-          <Fact
-            label="Advisory lookup"
-            value={s.osv_vuln_ms === null ? "unreachable" : `${s.osv_vuln_ms} ms`}
-            bad={s.osv_vuln_ms === null}
-          />
-          <Fact label="Checked" value={when(s.osv_checked_at)} />
-          <Fact label="Last dependency scan" value={when(s.last_dependency_scan_at)} />
-          <Fact label="New advisories" value={fmt(s.new_advisory_count)} />
-        </dl>
-        {s.new_advisories.length > 0 && (
-          <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
-            {s.new_advisories.map((a) => (
-              <li key={a.id}>
-                {a.id} ({a.severity}), {a.projects} project{a.projects === 1 ? "" : "s"}
-              </li>
-            ))}
-            {s.new_advisory_count > s.new_advisories.length && (
-              <li>+ {s.new_advisory_count - s.new_advisories.length} more advisories.</li>
-            )}
-          </ul>
+        <h3 className="legend pt-1 text-foreground">Pipelines on an older scanner</h3>
+        {!s.latest_binary_version ? (
+          <p className="text-xs text-muted-foreground">
+            No scanner binary is published, so pipeline versions cannot be compared.
+          </p>
+        ) : s.outdated_pipelines.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Every pipeline in this period used {s.latest_binary_version}.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 text-xs">
+                <TableHead className="py-2.5">Project</TableHead>
+                <TableHead className="py-2.5">Repository</TableHead>
+                <TableHead className="py-2.5">Scanner used</TableHead>
+                <TableHead className={`py-2.5 ${num}`}>Runs</TableHead>
+                <TableHead className="py-2.5">Last run</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {s.outdated_pipelines.map((o) => (
+                <TableRow key={`${o.project_id}|${o.repository}|${o.scanner_version}`} className="text-xs">
+                  <TableCell className="font-medium text-foreground">{o.project}</TableCell>
+                  <TableCell className="font-mono">{o.repository}</TableCell>
+                  <TableCell className="font-mono">{o.scanner_version}</TableCell>
+                  <TableCell className={num}>{fmt(o.runs)}</TableCell>
+                  <TableCell>{when(o.last_run_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </div>
 

@@ -24,7 +24,7 @@ export function rejectUser(id: string, reason?: string) {
   });
 }
 
-export function updateMyProfile(payload: { name?: string; email?: string }) {
+export function updateMyProfile(payload: { name?: string }) {
   return apiFetch<User>("/users/me", {
     method: "PATCH",
     body: JSON.stringify(payload),

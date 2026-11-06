@@ -23,6 +23,9 @@ from app.services import alert_service
 logger = structlog.get_logger(__name__)
 
 _in_flight: set[asyncio.Task] = set()
+# The last enabled-channel list read successfully. When Mongo is down the channel lookup raises, and the
+# alert about that very outage would otherwise have nowhere to go; `portal.error` falls back to this.
+_last_channels: list[WebhookChannel] = []
 
 MIGRATED_NAME = "Admin alerts"
 
@@ -113,6 +116,19 @@ def matches(channel: WebhookChannel, event_key: str, project_id: str | None) -> 
     return not channel.project_ids or (project_id is not None and project_id in channel.project_ids)
 
 
+async def _enabled_channels(event_key: str) -> list[WebhookChannel]:
+    global _last_channels
+    try:
+        channels = await WebhookChannel.find(WebhookChannel.enabled == True).to_list()  # noqa: E712
+    except Exception:
+        if event_key != "portal.error":
+            raise
+        logger.warning("webhook channel lookup failed; using the last loaded channels", exc_info=True)
+        return _last_channels
+    _last_channels = channels
+    return channels
+
+
 async def route(
     event_key: str,
     *,
@@ -125,8 +141,7 @@ async def route(
     """Start delivery to every enabled channel subscribed to this event (and project). Returns how
     many deliveries were started. Never raises."""
     try:
-        channels = await WebhookChannel.find(WebhookChannel.enabled == True).to_list()  # noqa: E712
-        targets = [c for c in channels if matches(c, event_key, project_id)]
+        targets = [c for c in await _enabled_channels(event_key) if matches(c, event_key, project_id)]
         if not targets:
             return 0
         style = {"tone": tone_for(event_key), "eyebrow": BY_KEY[event_key].label}

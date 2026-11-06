@@ -18,6 +18,7 @@ from cryptography.fernet import InvalidToken
 from app.core import security
 from app.core.config import settings
 from app.core.job_queue import claim_next, drain_lock, reap_stuck
+from app.db.mongo import get_database
 from app.models.scan import Scan
 from app.services import cloud_scan_service, pipeline_alert_service, workdir_hygiene
 
@@ -140,9 +141,22 @@ async def sweep_stale_workdirs() -> int:
         return 0
 
 
+async def check_database() -> bool:
+    """Ping Mongo; log ERROR when it does not answer so `portal.error` raises the alarm (the channel list
+    it posts to is cached, see webhook_channel_service). Never raises."""
+    try:
+        await get_database().command("ping")
+        return True
+    except Exception as exc:
+        logger.error("database unreachable", error_type=type(exc).__name__)
+        return False
+
+
 async def poll_loop() -> None:
     while True:
         await asyncio.sleep(settings.queue_poll_interval_seconds)
+        if not await check_database():
+            continue  # every step below would only fail on the same outage
         try:
             await reap_stuck_scans()
             await sweep_stale_workdirs()

@@ -39,6 +39,7 @@ from app.models.advisory_watch_state import AdvisoryWatchState
 from app.models.dependency_inventory import DependencyInventory
 from app.models.live_dependency_alert import LiveDependencyAlert
 from app.models.scan_engine import CustomRule, NoisyRuleAlert, RuleOverride, RulePackVersion
+from app.models.risk_acknowledgement import RiskAcknowledgementBatch
 from app.models.vulnerability import Vulnerability
 from app.models.workspace_settings import WorkspaceSettings
 
@@ -107,6 +108,7 @@ async def connect_to_mongo() -> None:
             DependencyInventory,
             LiveDependencyAlert,
             AdvisoryWatchState,
+            RiskAcknowledgementBatch,
         ],
     )
 

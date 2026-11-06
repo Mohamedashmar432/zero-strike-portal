@@ -43,8 +43,8 @@ settings are deliberate follow-ups once the read surface has been used.
 **Output discipline.** Every list tool has a `limit` (default 50, hard cap 200); log messages
 and tracebacks are truncated (message 2 000 chars, exception 8 000) and passed through
 `secret_redaction.redact`. Runtime config is an explicit allow-list — never dump `settings`.
-User data is minimal: no "list all users" tool; `lookup_user` takes an email or id and returns
-role/status only.
+User data is minimal: `lookup_user` and `list_users` return identity, role and status only, never
+credentials.
 
 **Kill switch.** `settings.mcp_enabled` (default `True`). When off, `/mcp` is not mounted.
 
@@ -67,6 +67,41 @@ role/status only.
 | `get_data_stats` | Collection counts (optionally per project) | `data_management_service` |
 | `list_projects` | id, name, member count, last scan status/time — so other tools' ids mean something | `Project`, `Scan` |
 | `lookup_user` | One user by email or id: role, active, approval, created, last login. No list. | `User` |
+
+## Full-portal read tools
+
+Added 2026-11-03 so an admin's agent can look at everything the admin pages show, in particular the
+Scan Engine and its noisy rules. Same rules as phase 1 (audited per call, `limit` capped at 200, text
+clipped and run through `secret_redaction.redact`, `readOnlyHint`). They are registered through
+`_safe_tool`, which additionally drops any key named `password`, `repo_token`, `refresh_tokens`, or ending in
+`_hash` / `_enc` / `_encrypted` from the output, so a model field added later cannot leak through a
+tool that forgot to allow-list it. Rows are allow-listed field by field in the first place. A secret-type
+finding exposes its rule, location and masked value only (no message, snippet or scanner metadata), as the user MCP does.
+Webhook URLs are never returned, only their host.
+
+| Tool | Answers | Source |
+| --- | --- | --- |
+| `list_scan_rules` | Rules with finding counts, FP tags and rate; filter `query`, `state`, `noisy_only` | `scan_engine_service.rule_stats` |
+| `list_noisy_rules` | Rules over the noisy threshold, worst first | `rule_stats` |
+| `get_scan_rule` | One rule's stats, retire/custom state, who tagged which project's finding a false positive | `rule_stats`, `rule_fp_history`, `CustomRule` |
+| `get_rule_pack` | Active pack, recent versions, pending (unpublished) changes, custom-rule metadata | `RulePackVersion`, `pending_changes` |
+| `list_scans` / `get_scan` | Scans by project/status/type; one scan with stage, error, scanner version, CI fields, severity counts | `Scan` |
+| `list_findings` / `get_finding` | A scan's raw findings; one finding with guidance and triage | `Finding` |
+| `list_vulnerabilities` | Tracked vulnerabilities by project/severity/status/rule | `Vulnerability` |
+| `list_finding_reviews` | The admin false-positive / accepted-risk queue | `finding_reviews._items` |
+| `list_compliance_audits` / `get_compliance_audit` | Audits and one audit's control verdicts | `ComplianceAudit` |
+| `list_fix_proposals` / `list_remediation_jobs` | Auto-fix proposals (no code) and propose/apply jobs | `AIFixProposal`, `RemediationJob` |
+| `get_ai_usage` / `get_ai_budgets` | AI analytics portal-wide or per project; projects with budgets and month-to-date spend | `ai_analytics_service`, `ai_budget_service` |
+| `list_users` | Users by role/approval status | `User` |
+| `list_webhook_channels` | Channel name, host, events, project scope, last delivery status | `WebhookChannel` |
+| `get_digest_status` / `get_live_alert_status` | Digest schedule and last send; live advisory watcher health | `digest_service`, `live_alert_service.status` |
+| `get_project` | Full project config, overrides, and effective policies | `workspace_settings_service.effective_*` |
+| `list_api_keys` | A project's key metadata (prefix, label, expiry, last used) | `ApiKey` |
+
+## Not yet
+
+No write tools. Each needs its own design behind a per-token `allow_write` flag: retiring/restoring
+a rule, publishing or rolling back a rule pack, deciding a finding review, reaping or retrying jobs.
 
 ## Surfaces
 

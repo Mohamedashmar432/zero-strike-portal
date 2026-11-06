@@ -14,7 +14,7 @@ type AuthContextValue = {
   /** Resolves to the new account; a `pending` one is NOT signed in. */
   register: (email: string, password: string, name: string, inviteToken?: string | null) => Promise<authApi.User>;
   logout: () => Promise<void>;
-  updateProfile: (payload: { name?: string; email?: string }) => Promise<void>;
+  updateProfile: (payload: { name?: string }) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  async function updateProfile(payload: { name?: string; email?: string }) {
+  async function updateProfile(payload: { name?: string }) {
     setUser(await updateMyProfile(payload));
   }
 

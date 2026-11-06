@@ -7,6 +7,8 @@ export type RuleRow = {
   title: string | null;
   severity: string | null;
   language: string | null;
+  category: string | null;
+  cwe: string[];
   total_findings: number;
   fp_tags: number;
   fp_rate: number; // 0..1
@@ -22,6 +24,9 @@ export type RuleStats = {
   noisy_min_fp_tags: number;
   noisy_min_fp_percent: number;
   active_version: number | null;
+  /** False when the portal has no SCANNER_RULES_DIR: only rules with findings are listed. */
+  catalog_loaded: boolean;
+  catalog_count: number;
 };
 
 export type FpTag = {
@@ -65,6 +70,15 @@ const post = (path: string, body?: unknown) =>
   apiFetch(`${BASE}${path}`, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const fpRateLabel = (rate: number) => `${Math.round(rate * 100)}%`;
+
+/** Case-insensitive match on rule id, title, language, category and CWE. A blank query keeps all. */
+export const filterRules = (rules: RuleRow[], query: string): RuleRow[] => {
+  const q = query.trim().toLowerCase();
+  if (!q) return rules;
+  return rules.filter((r) =>
+    [r.rule_id, r.title, r.language, r.category, ...(r.cwe ?? [])].some((v) => v?.toLowerCase().includes(q)),
+  );
+};
 
 export const hasPendingChanges = (p: PendingChanges | undefined) =>
   !!p && Object.values(p).some((list) => list.length > 0);

@@ -75,21 +75,18 @@ def _isolate_alerting_and_activity(monkeypatch):
     dedupe.alerts.clear()
     activity_service.reset()
 
-    async def _osv_up():
-        from datetime import datetime, timezone
-
-        return digest_service.OsvProbe(batch_ms=40, vuln_ms=55, checked_at=datetime.now(timezone.utc))
-
     async def _no_network(url, content):
         raise RuntimeError("tests never post to a real webhook")
 
-    monkeypatch.setattr(digest_service, "_probe_osv", _osv_up)
     monkeypatch.setattr(digest_service, "_CARD_GAP_SECONDS", 0)
     # The once-an-hour "email is failing" admin alert is a process-wide gate; one test failing an email
     # must not silence the alert another test asserts on.
     from app.services import notification_service
 
     monkeypatch.setattr(notification_service, "_last_email_failure_alert", None)
+    from app.services import webhook_channel_service
+
+    monkeypatch.setattr(webhook_channel_service, "_last_channels", [])
     monkeypatch.setattr(alert_service, "post_card", _no_network)
     yield
 

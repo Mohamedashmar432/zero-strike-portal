@@ -291,3 +291,37 @@ def test_report_email_failure_never_raises(client, monkeypatch):
 
     monkeypatch.setattr(notification_service, "notify", boom)
     asyncio.run(notification_service.report_email_failure("signup decision"))
+
+
+def test_risk_events_are_catalogued_in_app_only_with_the_right_audience(client):
+    from app.core.notification_events import BY_KEY
+
+    assert BY_KEY["risk.acknowledgement_requested"].audience == "project"
+    assert BY_KEY["risk.acknowledged"].audience == "admin"
+    assert not BY_KEY["risk.acknowledgement_requested"].emailable
+    assert not BY_KEY["risk.acknowledged"].emailable
+    admin = _admin_headers(client, email="nt-risk-events@zs.dev")
+    events = {e["key"]: e for e in client.get(PREFS_URL, headers=admin).json()["events"]}
+    assert events["risk.acknowledged"]["emailable"] is False
+    assert events["risk.acknowledgement_requested"]["emailable"] is False
+
+
+def test_risk_event_addressed_to_one_user_is_not_emailed(client, monkeypatch):
+    admin = _admin_headers(client, email="nt-risk-owner@zs.dev")
+    project = _create_project(client, admin, name="Risk Owner")
+    uid = client.get("/api/v1/users/me", headers=admin).json()["id"]
+    sent = []
+
+    async def fake_send(addresses, *a, **k):
+        sent.extend(addresses)
+
+    monkeypatch.setattr(notification_service, "_send_emails", fake_send)
+
+    async def run():
+        n = await notification_service.notify(
+            "risk.acknowledgement_requested", project_id=project["id"], title="ack", only_user_ids=[uid]
+        )
+        await asyncio.sleep(0)
+        return n
+
+    assert asyncio.run(run()) == 1 and sent == []

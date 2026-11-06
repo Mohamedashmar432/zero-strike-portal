@@ -3,6 +3,7 @@ import type { FindingKind, FindingLocation, Severity } from "./findings";
 import type { ScanStatus, ScanType } from "./scans";
 import type { Page } from "./users";
 import type { PriorityTier } from "@/lib/priority";
+import { checkRiskComment } from "@/lib/risk-comment";
 
 // Mirrors backend/app/models/vulnerability.py -- keep these four literal unions in lockstep
 // with the Python Literal types they're read from.
@@ -155,22 +156,42 @@ export type ScanRegressionResponse = {
   fixed: RegressionBucket;
 };
 
-export type VulnerabilityListFilters = {
-  /** "false_positive" is a filter, not a stored status: resolved with the false-positive reason. */
-  status?: VulnerabilityStatus | "false_positive";
-  severity?: Severity;
-  kind?: FindingKind;
-  /** project_repo_id, or UNLINKED_REPO_KEY for the unlinked bucket. */
-  repo?: string;
-  assigneeUserId?: string;
-  regressionState?: RegressionState;
-  fixStatus?: FixStatus;
-  /** Matches rule name, message, or fingerprint. */
-  search?: string;
-  page?: number;
-  pageSize?: number;
-  sort?: string;
+/** Facet counts for the current filters; each facet is counted with every OTHER filter applied. */
+export type VulnerabilityFacets = {
+  total: number;
+  severity: Record<string, number>;
+  status: Record<string, number>;
+  kind: Record<string, number>;
+  repo: Record<string, number>;
+  review_state: Record<string, number>;
+  review_kind: Record<string, number>;
+  fix_status: Record<string, number>;
+  age: Record<string, number>;
+  rule: { id: string; name: string | null; count: number }[];
+  assignee: { id: string; email: string | null; count: number }[];
 };
+
+export type BulkAction =
+  | { action: "assign"; assignee_user_id: string | null }
+  | {
+      action: "status";
+      status: VulnerabilityStatus;
+      resolution_reason?: ResolutionReason | null;
+      resolution_comment?: string | null;
+    };
+
+export type BulkItemResult = {
+  id: string;
+  ok: boolean;
+  detail: string | null;
+  status: string | null;
+  review_status: string | null;
+  assignee_user_id: string | null;
+};
+
+export type BulkResponse = { results: BulkItemResult[]; succeeded: number; failed: number };
+
+export const BULK_MAX_IDS = 100;
 
 /**
  * Why a status change would be refused, or null if it's allowed.
@@ -187,9 +208,9 @@ export function statusChangeBlockReason(
   kind: FindingKind | null = null
 ): string | null {
   if (status === "accepted_risk") {
-    // Accepting risk has no scanner evidence behind it at all, so it always needs a reason.
-    if (comment.trim() === "") return "A comment is required to accept risk.";
-    return null;
+    // Accepting risk has no scanner evidence behind it at all, so it needs a real justification
+    // (backend validate_risk_comment: 40 chars, six words, not a placeholder).
+    return checkRiskComment(comment).message;
   }
   // A published advisory against the installed version is almost never wrong.
   if (status === "resolved" && reason === "false_positive" && kind === "sca") {
@@ -210,9 +231,9 @@ export function statusChangeBlockReason(
 
 /**
  * Whether a status change goes through the review path rather than a plain status change: a false
- * positive on a code finding, or accepted risk on a dependency finding. Either one, once an admin
- * accepts it, stops the finding blocking CI. Whether an admin must accept first is a workspace setting
- * (the server decides; read `review.status` on the response).
+ * positive on a code finding, or accepted risk on any finding. Either one, once accepted, stops the
+ * finding blocking CI. Whether an admin must accept first is a workspace setting per kind (the
+ * server decides; read `review.status` on the response).
  */
 export function needsAdminReview(
   status: VulnerabilityStatus,
@@ -220,23 +241,40 @@ export function needsAdminReview(
   kind: FindingKind | null
 ): boolean {
   if (status === "resolved" && reason === "false_positive") return kind !== "sca";
-  return status === "accepted_risk" && kind === "sca";
+  return status === "accepted_risk";
 }
 
-export function listVulnerabilities(projectId: string, filters: VulnerabilityListFilters = {}) {
-  const params = new URLSearchParams();
-  if (filters.status) params.set("status", filters.status);
-  if (filters.severity) params.set("severity", filters.severity);
-  if (filters.kind) params.set("kind", filters.kind);
-  if (filters.repo) params.set("repo", filters.repo);
-  if (filters.assigneeUserId) params.set("assignee_user_id", filters.assigneeUserId);
-  if (filters.regressionState) params.set("regression_state", filters.regressionState);
-  if (filters.fixStatus) params.set("fix_status", filters.fixStatus);
-  if (filters.search) params.set("search", filters.search);
-  params.set("page", String(filters.page ?? 1));
-  params.set("page_size", String(filters.pageSize ?? 25));
-  if (filters.sort) params.set("sort", filters.sort);
+/** `filters` are the API params from `toApiParams` (lib/vulnerability-filters). */
+export function listVulnerabilities(
+  projectId: string,
+  filters: URLSearchParams,
+  opts: { page?: number; pageSize?: number; sort?: string } = {}
+) {
+  const params = new URLSearchParams(filters);
+  params.set("page", String(opts.page ?? 1));
+  params.set("page_size", String(opts.pageSize ?? 25));
+  if (opts.sort) params.set("sort", opts.sort);
   return apiFetch<Page<Vulnerability>>(`/projects/${projectId}/vulnerabilities?${params.toString()}`);
+}
+
+export function getVulnerabilityFacets(projectId: string, filters: URLSearchParams) {
+  const qs = filters.toString();
+  return apiFetch<VulnerabilityFacets>(`/projects/${projectId}/vulnerabilities/facets${qs ? `?${qs}` : ""}`);
+}
+
+/** Up to BULK_MAX_IDS per call; a refused item reports why without stopping the rest. */
+export function bulkUpdateVulnerabilities(projectId: string, ids: string[], change: BulkAction) {
+  return apiFetch<BulkResponse>(`/projects/${projectId}/vulnerabilities/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ ids, ...change }),
+  });
+}
+
+/** Splits a selection into API-sized chunks. */
+export function chunkIds(ids: string[], size = BULK_MAX_IDS): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
 }
 
 export function getVulnerability(projectId: string, vulnerabilityId: string) {

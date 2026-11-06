@@ -155,3 +155,31 @@ def test_send_password_reset_email_includes_reset_url_in_both_bodies(monkeypatch
     assert reset_url in captured["html_body"]
     assert "30 minutes" in captured["text_body"]
     assert "30 minutes" in captured["html_body"]
+
+
+def test_a_failing_smtp_send_logs_at_error_without_the_recipient_and_still_raises(monkeypatch):
+    import smtplib
+
+    import pytest
+    import structlog
+
+    class _Refusing(_FakeSMTP):
+        def sendmail(self, from_addr, to_addrs, message):
+            raise smtplib.SMTPRecipientsRefused({to_addrs[0]: (550, b"no such user")})
+
+    monkeypatch.setattr(email_service.settings, "smtp_host", "smtp.example.invalid")
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _Refusing)
+    with structlog.testing.capture_logs() as logs, pytest.raises(smtplib.SMTPRecipientsRefused):
+        email_service.send_email("someone@example.com", "Subject", "body")
+    (entry,) = [e for e in logs if e["event"] == "SMTP send failed"]
+    assert entry["log_level"] == "error" and entry["error_type"] == "SMTPRecipientsRefused"
+    assert "someone@example.com" not in str(entry) and "exc_info" not in entry
+
+
+def test_an_unset_smtp_host_stays_a_warning_not_an_error(monkeypatch):
+    import structlog
+
+    monkeypatch.setattr(email_service.settings, "smtp_host", "")
+    with structlog.testing.capture_logs() as logs:
+        email_service.send_email("someone@example.com", "Subject", "body")
+    assert {e["log_level"] for e in logs} == {"warning"}

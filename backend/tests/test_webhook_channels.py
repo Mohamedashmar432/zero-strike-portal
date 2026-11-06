@@ -430,3 +430,89 @@ def test_cicd_status_failed_through_the_api_fires_scan_failed_once(client, monke
         )
         assert r.status_code == 200
     assert [c[0] for c in calls] == ["scan.failed"]
+
+
+# --- developer alerts: failures that must still reach portal.error ----------------------------
+
+
+def test_portal_error_falls_back_to_the_last_loaded_channels_when_mongo_is_down(client, posts, monkeypatch):
+    admin = _admin_headers(client, email="wc-dbdown@zs.dev")
+    _channel(client, admin, events=["portal.error", "scanner.unhealthy"])
+    _notify("portal.error", title="first")  # a healthy lookup fills the cache
+    assert len(posts) == 1
+    posts.clear()
+
+    async def down(*args, **kwargs):
+        raise RuntimeError("mongo is down")
+
+    class _Down:
+        def __getattr__(self, name):
+            return down
+
+    monkeypatch.setattr(WebhookChannel, "find", lambda *a, **k: _Down())
+    _notify("portal.error", title="database unreachable")
+    assert [p["title"] for p in posts] == ["database unreachable"] and posts[0]["url"] == HOOK
+    # Only portal.error gets the fallback: any other event stays silent rather than guessing at routing.
+    posts.clear()
+    _notify("scanner.unhealthy", title="engine down")
+    assert posts == []
+
+
+def test_a_fresh_process_with_mongo_down_has_no_cache_and_does_not_raise(client, posts, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("mongo is down")
+
+    monkeypatch.setattr(WebhookChannel, "find", boom)
+    assert _notify("portal.error", title="nowhere to send") == 0 and posts == []
+
+
+def test_the_poll_loop_ping_logs_error_when_the_database_is_unreachable(monkeypatch):
+    import structlog
+
+    from app.services import scan_queue_service
+
+    assert asyncio.run(scan_queue_service.check_database()) is True
+
+    class _Dead:
+        async def command(self, *args):
+            raise ConnectionError("mongodb://user:pw@host/db unreachable")
+
+    monkeypatch.setattr(scan_queue_service, "get_database", lambda: _Dead())
+    with structlog.testing.capture_logs() as logs:
+        assert asyncio.run(scan_queue_service.check_database()) is False
+    (entry,) = logs
+    assert entry["log_level"] == "error" and entry["event"] == "database unreachable"
+    assert "pw" not in str(entry)  # the exception type only, never its text
+
+
+def test_an_unhandled_exception_is_logged_at_error_and_answered_with_json_and_a_request_id(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import app.main as main_module
+
+    calls = []
+
+    class Recorder:
+        def __getattr__(self, level):
+            return lambda event, **kw: calls.append((level, event, kw))
+
+    monkeypatch.setattr(main_module, "logger", Recorder())
+    app = main_module.create_app()
+
+    @app.get("/boom-for-test")
+    async def boom():
+        raise RuntimeError("synthetic failure")
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.get("/boom-for-test", headers={"X-Request-ID": "req-123"})
+    assert r.status_code == 500 and r.headers["X-Request-ID"] == "req-123"
+    assert r.json() == {"detail": "Internal server error", "request_id": "req-123"}
+    (level, event, kw), = [c for c in calls if c[1] == "unhandled exception"]
+    assert level == "error" and kw["path"] == "/boom-for-test" and "synthetic failure" not in r.text
+
+
+def test_uvicorns_copy_of_an_unhandled_crash_does_not_alert_a_second_time():
+    ours = {"level": "error", "logger": "app.main", "message": "unhandled exception"}
+    theirs = {"level": "error", "logger": "uvicorn.error", "message": "Exception in ASGI application"}
+    other = {"level": "error", "logger": "uvicorn.error", "message": "Failed to bind"}
+    assert [error_alert_service._eligible(r) for r in (ours, theirs, other)] == [True, False, True]

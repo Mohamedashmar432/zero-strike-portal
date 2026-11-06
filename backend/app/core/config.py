@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Server-side (cloud) scan execution. The scanner runs as a subprocess — no Docker at runtime.
     # Point scanner_binary_path at a local `zerostrike`/`zerostrike.exe` (dev) or the container binary.
     scanner_binary_path: str = "zerostrike"
+    # Directory of the scanner's built-in rule YAML (its internal/rules/data). Read-only data, never
+    # code: the Scan Engine page lists every built-in rule from it, not just those that have fired.
+    # Unset or missing => only rules with findings are listed. The container image sets it.
+    scanner_rules_dir: str | None = None
     # Which scanner build is baked into this image, stamped from the Dockerfile's SCANNER_REF at
     # build time and reported by /health. Exists because "is the binary present" (which is all
     # /health used to answer) cannot tell you it is ten releases old and missing every large-repo
@@ -226,7 +230,7 @@ class Settings(BaseSettings):
     smtp_from_address: str = "noreply@zerostrike.dev"
 
     # Password reset tokens (auth_service.request_password_reset / reset_password).
-    password_reset_token_ttl_minutes: int = 30
+    password_reset_token_ttl_minutes: int = 5
     # How long past revocation/expiry a refresh token record is kept before pruning
     # (auth_service._prune_refresh_tokens) — bounds unbounded growth of User.refresh_tokens.
     refresh_token_retention_days: int = 7
@@ -246,6 +250,11 @@ class Settings(BaseSettings):
     rate_limit_register_window_seconds: int = 60
     rate_limit_forgot_password_max_attempts: int = 5
     rate_limit_forgot_password_window_seconds: int = 300
+    # Per client IP across all addresses, and failed /apikeys/validate attempts per IP (a CI fleet
+    # behind one NAT is why the latter counts failures only).
+    rate_limit_forgot_password_ip_max_attempts: int = 20
+    rate_limit_apikey_validate_max_failures: int = 20
+    rate_limit_apikey_validate_window_seconds: int = 300
     # Repo Sync does a network round trip (git ls-remote) per request, so it is limited per user.
     rate_limit_repo_sync_max_attempts: int = 10
     rate_limit_repo_sync_window_seconds: int = 60

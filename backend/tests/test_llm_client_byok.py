@@ -135,7 +135,10 @@ def test_byok_on_refuses_a_call_with_no_project_attribution(client, monkeypatch)
     assert seen == []
 
 
-def test_tool_capability_gate_is_answered_per_project(client):
+def test_tool_capability_gate_is_answered_per_project(client, monkeypatch):
+    # A project-owned lmstudio provider is vetted like any outbound URL; stand in for public DNS.
+    monkeypatch.setattr(ai_provider_config_service, "resolve_vetted_ips", lambda host: ["93.184.216.34"])
+
     async def run():
         # LM Studio is not in remediation_tool_capable_providers; anthropic is.
         await ai_provider_config_service.create_config(

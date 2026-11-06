@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,12 +24,19 @@ function ResetPasswordForm() {
     formState: { errors, isSubmitting },
   } = useForm<ResetPasswordInput>({ resolver: zodResolver(resetPasswordSchema) });
 
-  if (!token) {
+  // The server's reason for refusing the link ("expired", "already used"). Shown as a page state,
+  // not a toast: it is final, and the only useful next step is requesting a new link.
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  if (!token || linkError) {
+    const expired = linkError?.includes("expired");
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Invalid reset link</CardTitle>
-          <CardDescription>This password reset link is invalid or missing a token.</CardDescription>
+          <CardTitle>{expired ? "Reset link expired" : "Invalid reset link"}</CardTitle>
+          <CardDescription role="alert">
+            {linkError ?? "This password reset link is invalid or missing a token."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-center text-sm text-muted-foreground">
@@ -48,6 +55,10 @@ function ResetPasswordForm() {
       toast.success("Password reset — please sign in");
       router.push("/login");
     } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        setLinkError(err.message);
+        return;
+      }
       toast.error(err instanceof ApiError ? err.message : "Failed to reset password");
     }
   }

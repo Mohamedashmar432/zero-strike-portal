@@ -26,7 +26,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api/client";
 import {
   type FindingReviewItem,
+  type FindingReviewKindFilter,
   decideFindingReview,
+  filterByKind,
   listFindingReviews,
   revokeFindingReview,
 } from "@/lib/api/finding-reviews";
@@ -48,6 +50,7 @@ type Action = { item: FindingReviewItem; mode: "decide" | "revoke" };
 export default function FindingReviewsPage() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<ReviewStatus>("pending");
+  const [kindFilter, setKindFilter] = useState<FindingReviewKindFilter>("all");
   const [search, setSearch] = useState("");
   const [action, setAction] = useState<Action | null>(null);
   const [comment, setComment] = useState("");
@@ -83,7 +86,7 @@ export default function FindingReviewsPage() {
     onError,
   });
 
-  const items = (data?.items ?? []).filter((r) => {
+  const items = filterByKind(data?.items ?? [], kindFilter).filter((r) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return [r.project_name, r.requested_by_email, r.rule_name, r.rule_id, r.review.file_path, r.review.request_comment]
@@ -99,7 +102,7 @@ export default function FindingReviewsPage() {
         <PageHeader
           eyebrow="Administration / Requests"
           title="Finding Reviews"
-          description="Members ask for a finding to stop blocking CI: a false positive for code findings, an accepted risk for dependency findings. While admin review is required (Settings > General), nothing changes until you accept; when it is off, requests are accepted automatically and appear here as accepted, where you can still revoke them. An accepted finding is still detected and reported, at that file only, but the pipeline gate no longer counts it."
+          description="Members ask for a finding to stop blocking CI: a false positive (code findings only) or an accepted risk (any finding). Each kind has its own admin-review switch (Settings > General); while a kind requires review, nothing changes until you accept, and when it is off, requests of that kind are accepted automatically and appear here as accepted, where you can still revoke them. An accepted finding is still detected and reported, at that file only, but the pipeline gate no longer counts it."
         />
       </div>
 
@@ -136,6 +139,17 @@ export default function FindingReviewsPage() {
                 { value: "revoked", label: "Revoked" },
               ],
             },
+            {
+              type: "select",
+              value: kindFilter,
+              onChange: (v) => setKindFilter(v as FindingReviewKindFilter),
+              placeholder: "Kind",
+              options: [
+                { value: "all", label: "All kinds" },
+                { value: "false_positive", label: "False positive" },
+                { value: "accepted_risk", label: "Accepted risk" },
+              ],
+            },
           ]}
         />
 
@@ -150,7 +164,7 @@ export default function FindingReviewsPage() {
               title={filter === "pending" ? "Nothing awaiting review" : "No reviews match"}
               description={
                 filter === "pending"
-                  ? "Requests appear here when a member marks a finding as a false positive, or a dependency finding as an accepted risk."
+                  ? "Requests appear here when a member requests a false positive or an accepted risk."
                   : "Try a different status or clear the search."
               }
             />
@@ -161,7 +175,8 @@ export default function FindingReviewsPage() {
               <TableRow>
                 <TableHead>Finding</TableHead>
                 <TableHead>Project</TableHead>
-                <TableHead>Request</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Requested by</TableHead>
                 <TableHead>Reason given</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-36">
@@ -194,8 +209,12 @@ export default function FindingReviewsPage() {
                       <span className="font-mono text-[11px] text-muted-foreground">deleted project</span>
                     )}
                   </TableCell>
+                  <TableCell>
+                    <span className="legend rounded-sm border-l-2 border-border px-1.5 py-0.5 whitespace-nowrap">
+                      {KIND_LABEL[r.review.kind]}
+                    </span>
+                  </TableCell>
                   <TableCell className="text-[13px]">
-                    {KIND_LABEL[r.review.kind]}
                     <span className="block font-mono text-[11px] text-muted-foreground">
                       {r.requested_by_email ?? "unknown"} · {new Date(r.review.requested_at).toLocaleString()}
                     </span>

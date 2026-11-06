@@ -39,7 +39,8 @@ const SCOPE_MAP: { setting: string; scope: string; where: string; href?: string 
   { setting: "Audit evidence retention", scope: "Workspace → project override", where: "This page / Project → Compliance config" },
   { setting: "Default report template", scope: "Workspace → project override", where: "Settings → Report Templates", href: "/settings/report-templates" },
   { setting: "AI provider (portal-wide or per-project BYOK)", scope: "Workspace, or per-project when BYOK is on", where: "Settings → AI Provider", href: "/settings/ai-provider" },
-  { setting: "Admin review for false positives and accepted risk", scope: "Portal admin only (exemption policy)", where: "This page" },
+  { setting: "Admin review of false positives", scope: "Portal admin only (exemption policy)", where: "This page" },
+  { setting: "Admin review of risk acceptance", scope: "Portal admin only (exemption policy)", where: "This page" },
   { setting: "Auto-fix on/off, confidence threshold", scope: "Workspace → project may tighten", where: "Settings → Auto-fix", href: "/settings/auto-fix" },
   { setting: "Auto-fix allowance, blocking severities, quota grants", scope: "Portal admin only", where: "Settings → Auto-fix", href: "/settings/auto-fix" },
   { setting: "Notification subscriptions", scope: "Per user", where: "Settings → Notifications", href: "/settings/notifications" },
@@ -78,6 +79,7 @@ function WorkspaceDefaultsCard() {
         compliance_auto_audit_on_scan: body.compliance_auto_audit_on_scan,
         compliance_evidence_retention_days: body.compliance_evidence_retention_days,
         finding_review_required: body.finding_review_required,
+        risk_acceptance_review_required: body.risk_acceptance_review_required,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.settings.workspace(), updated);
@@ -149,13 +151,29 @@ function WorkspaceDefaultsCard() {
             />
             <span>
               <span className="block text-sm font-medium">
-                Require admin review for false positives and accepted risk
+                Admin review of false positives
               </span>
               <span className="block text-xs text-muted-foreground">
-                When off, a member&apos;s false positive or accepted risk takes effect immediately and
+                When off, a member&apos;s false positive on a code finding takes effect immediately and
                 stops blocking CI on the next scan. When on, a portal admin must accept it first.
-                Requests already pending and exemptions already accepted are not changed by flipping
-                this.
+                Flipping this never changes pending or accepted requests.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4"
+              checked={form.risk_acceptance_review_required}
+              onChange={(e) => setForm({ ...form, risk_acceptance_review_required: e.target.checked })}
+            />
+            <span>
+              <span className="block text-sm font-medium">Admin review of risk acceptance</span>
+              <span className="block text-xs text-muted-foreground">
+                Accepted risk can be requested on any finding, code or dependency, with a written
+                justification. When off, it is accepted immediately; when on, a portal admin must
+                accept it first. Independent of the false-positive switch above. Flipping this never
+                changes pending or accepted requests.
               </span>
             </span>
           </label>

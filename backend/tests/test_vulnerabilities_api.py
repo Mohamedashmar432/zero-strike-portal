@@ -311,6 +311,9 @@ def test_unknown_status_is_422(client):
     assert r.status_code == 422
 
 
+RISK_COMMENT = "Reviewed with the owner: the endpoint is internal only and gated by the gateway."
+
+
 def test_accepted_risk_leaves_first_seen_and_assignee_untouched(client):
     owner = register_and_login(client, email="vuln-accepted@zs.dev")
     headers = _headers(owner)
@@ -335,14 +338,14 @@ def test_accepted_risk_leaves_first_seen_and_assignee_untouched(client):
     before = client.get(f"{base}/{vid}", headers=headers).json()
     r = client.patch(
         f"{base}/{vid}/status",
-        json={"status": "accepted_risk", "resolution_comment": "Compensating control in the gateway."},
+        json={"status": "accepted_risk", "resolution_comment": "Compensating control in the gateway blocks every exploit path."},
         headers=headers,
     )
     assert r.status_code == 200
     after = r.json()
     assert after["first_seen_at"] == before["first_seen_at"]
     assert after["assignee_user_id"] == collab_id
-    assert after["resolution_comment"] == "Compensating control in the gateway."
+    assert after["resolution_comment"] == "Compensating control in the gateway blocks every exploit path."
 
 
 def test_accepted_risk_without_comment_is_rejected(client):
@@ -354,20 +357,21 @@ def test_accepted_risk_without_comment_is_rejected(client):
     url = f"{VULN_URL.format(project_id=project['id'])}/{vid}/status"
 
     r = client.patch(url, json={"status": "accepted_risk"}, headers=headers)
-    assert r.status_code == 400
+    assert r.status_code == 422
 
     r = client.patch(url, json={"status": "accepted_risk", "resolution_comment": "   "}, headers=headers)
-    assert r.status_code == 400
+    assert r.status_code == 422
 
     r = client.patch(
         url,
-        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted for Q1."},
+        json={"status": "accepted_risk", "resolution_comment": RISK_COMMENT},
         headers=headers,
     )
     assert r.status_code == 200
 
 
-def test_collaborator_cannot_accept_risk(client):
+def test_collaborator_may_request_accepted_risk(client):
+    """Accepted risk is a request any member can make (admin review, when on, is the gate)."""
     owner = register_and_login(client, email="vuln-ar-owner@zs.dev")
     headers = _headers(owner)
     project = _create_project(client, headers)
@@ -376,26 +380,15 @@ def test_collaborator_cannot_accept_risk(client):
     _seed_and_reconcile(project["id"], [{"fingerprint": "fp-a"}])
     vid = _vuln_id(project["id"], "fp-a")
     url = f"{VULN_URL.format(project_id=project['id'])}/{vid}/status"
-    collab_headers = _headers(collaborator)
 
     r = client.patch(
-        url,
-        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted."},
-        headers=collab_headers,
-    )
-    assert r.status_code == 403
-
-    # The 403 is the role gate, not the comment gate -- a collaborator can still move statuses
-    # that aren't accepted_risk.
-    r = client.patch(url, json={"status": "in_progress"}, headers=collab_headers)
-    assert r.status_code == 200
-
-    r = client.patch(
-        url,
-        json={"status": "accepted_risk", "resolution_comment": "Reviewed and accepted."},
-        headers=headers,
+        url, json={"status": "accepted_risk", "resolution_comment": RISK_COMMENT}, headers=_headers(collaborator)
     )
     assert r.status_code == 200
+    assert r.json()["review"]["kind"] == "accepted_risk"
+    # The exemption is not the collaborator's to undo.
+    r = client.patch(url, json={"status": "open"}, headers=_headers(collaborator))
+    assert r.status_code == 409 and "revoke" in r.json()["detail"]
 
 
 # --- assignment --------------------------------------------------------------------------

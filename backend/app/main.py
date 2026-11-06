@@ -6,6 +6,8 @@ from bson.errors import InvalidId
 from pydantic import ValidationError
 import structlog
 from fastapi import Depends, FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.routing import Route
@@ -14,7 +16,7 @@ from app.core.config import settings
 from app.core.request_context import bind_request_context
 from app.core import log_sink
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIDMiddleware
+from app.core.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
 from app.mcp import server as mcp_server
 from app.mcp import user_server as mcp_user_server
 from app.models.scan import Scan
@@ -52,6 +54,7 @@ from app.routers import (
     remediation_settings,
     repo_credentials,
     report_templates,
+    risk_acknowledgements,
     scanner_scans,
     scans,
     users,
@@ -88,6 +91,10 @@ async def lifespan(app: FastAPI):
     # False positives marked before admin review existed were never reviewed: back to blocking as
     # pending requests (docs/FINDING_REVIEW.md). Idempotent -- a migrated row carries a review.
     await finding_review_service.migrate_unreviewed_false_positives()
+    # Same for accepted risks that were set by direct triage, and the new risk-review switch inherits the
+    # old review switch's value so no upgrade loosens review. Both idempotent.
+    await finding_review_service.migrate_risk_review_toggle()
+    await finding_review_service.migrate_unreviewed_accepted_risks()
     # The single workspace alert webhook becomes the "Admin alerts" webhook channel. Idempotent.
     try:
         await webhook_channel_service.migrate_legacy_webhook()
@@ -157,11 +164,16 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # The interactive docs and schema map every route, admin ones included, to anyone: dev only.
+    expose_docs = settings.app_env == "development"
     app = FastAPI(
         title="thinkShield Portal API",
         version="0.1.0",
         lifespan=lifespan,
         dependencies=[Depends(bind_request_context)],
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
     )
 
     app.add_middleware(
@@ -175,6 +187,9 @@ def create_app() -> FastAPI:
         # hardcoded default — browsers expose only a fixed "safelist" of headers by default.
         expose_headers=["Content-Disposition"],
     )
+    # Added before RequestIDMiddleware on purpose: the request-id binding must stay the outermost
+    # layer, or the unhandled-exception handler below no longer sees the id it echoes back.
+    app.add_middleware(SecurityHeadersMiddleware)
     # Added after CORS so it's the outermost layer (Starlette wraps in reverse add order) —
     # every request gets a request_id bound before anything else runs.
     app.add_middleware(RequestIDMiddleware)
@@ -205,6 +220,8 @@ def create_app() -> FastAPI:
     app.include_router(admin_data.router, prefix="/api/v1")
     app.include_router(auto_fix_quota.router, prefix="/api/v1")
     app.include_router(finding_reviews.router, prefix="/api/v1")
+    app.include_router(risk_acknowledgements.router, prefix="/api/v1")
+    app.include_router(risk_acknowledgements.public_router, prefix="/api/v1")
     app.include_router(report_templates.router, prefix="/api/v1")
     app.include_router(ai_analysis.router, prefix="/api/v1")
     app.include_router(ai_analysis.finding_scan_router, prefix="/api/v1")
@@ -266,6 +283,28 @@ def create_app() -> FastAPI:
         if isinstance(exc, ValidationError) and not _is_bad_object_id(exc):
             raise exc
         return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
+        # FastAPI's default 422 echoes each rejected value back as `input`: a password typed into
+        # the wrong field would travel back (and into client logs). Field and reason stay.
+        exc = RequestValidationError(
+            [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        )
+        return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        # Logged at ERROR with the request id so `portal.error` reaches a developer with something to
+        # search for; the client gets JSON, never a stack trace. Starlette re-raises after this returns,
+        # so uvicorn still logs the traceback (error_alert_service skips that duplicate).
+        request_id = structlog.contextvars.get_contextvars().get("request_id")
+        logger.error("unhandled exception", method=request.method, path=request.url.path, exc_info=exc)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error", "request_id": request_id},
+            headers={"X-Request-ID": request_id} if request_id else None,
+        )
 
     @app.get("/health")
     async def health():

@@ -264,3 +264,47 @@ def test_scanner_rejecting_a_rule_is_a_readable_422_not_a_500(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         asyncio.run(engine._run_scanner_on("/tmp/zs/sample", "/tmp/zs/rules"))
     assert exc.value.status_code == 422 and "missing lifecycle" in exc.value.detail
+
+
+def _rules_dir(tmp_path):
+    (tmp_path / "python").mkdir()
+    (tmp_path / "python" / "a.yaml").write_text(
+        "id: ZS-CAT-1\nname: Catalog Eval\nlanguage: python\ncategory: dangerous-functions\n"
+        "severity: HIGH\ncwe:\n  - CWE-95\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "python" / "b.yaml").write_text(
+        "id: ZS-CAT-2\nname: Never Fired\nlanguage: go\ncategory: crypto\nseverity: low\n", encoding="utf-8"
+    )
+    (tmp_path / "python" / "bad.yaml").write_text("id: [unclosed\n  : :", encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_rule_stats_lists_the_builtin_catalog_with_zero_counts(client, admin, monkeypatch, tmp_path):
+    monkeypatch.setattr(engine.settings, "scanner_rules_dir", _rules_dir(tmp_path))
+
+    async def seed():
+        now = datetime.now(timezone.utc)
+        p = Project(name="Proj C", owner_id="o", created_at=now, updated_at=now)
+        await p.insert()
+        await _vuln(str(p.id), "ZS-CAT-1", "c1", false_positive=True)
+
+    asyncio.run(seed())
+    data = client.get(f"{BASE}/rules", headers=admin).json()
+    rows = {r["rule_id"]: r for r in data["rules"]}
+    assert data["catalog_loaded"] is True and data["catalog_count"] == 2  # bad YAML skipped
+    assert rows["ZS-CAT-1"]["total_findings"] == 1 and rows["ZS-CAT-1"]["fp_tags"] == 1
+    assert rows["ZS-CAT-1"]["category"] == "dangerous-functions" and rows["ZS-CAT-1"]["cwe"] == ["CWE-95"]
+    never = rows["ZS-CAT-2"]
+    assert never["title"] == "Never Fired" and never["language"] == "go" and never["severity"] == "low"
+    assert never["total_findings"] == 0 and never["fp_tags"] == 0 and never["projects_affected"] == 0
+    assert never["state"] == "active" and never["noisy"] is False
+    assert data["rules"][0]["rule_id"] == "ZS-CAT-1"  # FP tags first, then rule id
+
+
+def test_rule_stats_without_a_catalog_dir_behaves_as_before(client, admin, monkeypatch, tmp_path):
+    for value in (None, str(tmp_path / "missing")):
+        monkeypatch.setattr(engine.settings, "scanner_rules_dir", value)
+        data = client.get(f"{BASE}/rules", headers=admin).json()
+        assert data["catalog_loaded"] is False and data["catalog_count"] == 0
+        assert data["rules"] == []

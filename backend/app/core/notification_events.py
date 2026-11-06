@@ -109,6 +109,21 @@ EVENTS: tuple[NotificationEvent, ...] = (
         emailable=False,
     ),
     NotificationEvent(
+        key="risk.acknowledgement_requested",
+        label="Risk acknowledgement requested",
+        description="An admin asked the project owner to acknowledge the findings accepted as risk. "
+        "Sent to the project owner only.",
+        audience="project",
+        emailable=False,
+    ),
+    NotificationEvent(
+        key="risk.acknowledged",
+        label="Risk acknowledged",
+        description="A recipient acknowledged an accepted-risk batch an admin sent them.",
+        audience="admin",
+        emailable=False,
+    ),
+    NotificationEvent(
         key="scanner.unhealthy",
         label="Scanner unhealthy",
         description="The scanner binary is missing or failing to run.",

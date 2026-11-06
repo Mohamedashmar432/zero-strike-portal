@@ -1,27 +1,29 @@
-"""The Teams digest: settings, preview numbers, the Adaptive Card (pure builder against a fixture),
-test-send, and a scheduler that cannot double-send. OSV and webhooks are stubbed in conftest."""
+"""The Teams digest: settings, preview numbers, the Adaptive Cards (pure builders against a fixture),
+test-send, per-project routing, and a scheduler that cannot double-send. Webhooks are stubbed in conftest."""
 
 import asyncio
 import json
 
-import httpx
 from datetime import datetime, timedelta, timezone
+
+from beanie import PydanticObjectId
 
 from app.core.config import settings as app_settings
 from app.models.digest_settings import DigestSettings
 from app.models.finding import DependencyEmbedded, Finding, LocationEmbedded
 from app.models.project import Project
 from app.models.scan import Scan
+from app.models.scanner_binary import ScannerBinary
+from app.models.vulnerability import FindingReview, Vulnerability
 from app.schemas.digest import (
     DigestPreview,
     DigestRow,
     DigestTotals,
-    NewAdvisory,
+    OutdatedPipeline,
     QuotaWarning,
     ScannerHealth,
     StaleProject,
 )
-from app.schemas.project_insights import CveRef, NewCves
 from app.services import alert_service, digest_service
 from tests.test_auth_flow import register_and_login
 from tests.test_cloud_scan_quota import _seed
@@ -33,6 +35,13 @@ CHANNELS = "/api/v1/admin/webhook-channels"
 HOOK = "https://example.webhook.office.com/webhookb2/secret-token-123"
 
 
+def _outdated(project="Payments", repo="github.com/acme/pay (runner-1)", version="0.38.0", runs=5):
+    return OutdatedPipeline(
+        project_id="p1", project=project, repository=repo, scanner_version=version, runs=runs,
+        last_run_at=datetime(2026, 10, 27, 22, 5, tzinfo=timezone.utc),
+    )
+
+
 def _preview_fixture() -> DigestPreview:
     t0 = datetime(2026, 10, 27, 3, 30, tzinfo=timezone.utc)
     return DigestPreview(
@@ -40,65 +49,23 @@ def _preview_fixture() -> DigestPreview:
         period_end=t0 + timedelta(days=1),
         rows=[
             DigestRow(
-                project_id="p1",
-                name="Payments",
-                pipeline_runs=12,
-                pipeline_failed=1,
-                cloud_scans=4,
-                cloud_failed=2,
-                critical=3,
-                high=9,
-                quota_used=25,
-                quota_limit=30,
-                new_cves=NewCves(
-                    count=3,
-                    latest=[CveRef(id="CVE-2026-1234", severity="high"), CveRef(id="GHSA-xxxx-yyyy-zzzz", severity="critical")],
-                ),
+                project_id="p1", name="Payments", pipeline_runs=12, pipeline_failed=1, cloud_scans=4, cloud_failed=2,
+                critical=3, high=9, resolved=7, new_findings=5, false_positives=1, vulnerabilities=4,
             ),
             DigestRow(project_id="p2", name="Ledger", pipeline_runs=2),
         ],
-        totals=DigestTotals(
-            pipeline_runs=14,
-            pipeline_failed=1,
-            cloud_scans=4,
-            cloud_failed=2,
-            critical=3,
-            high=9,
-            quota_used=25,
-            quota_limit=60,
-            new_cves=NewCves(count=3),
-        ),
+        totals=DigestTotals(pipeline_runs=14, pipeline_failed=1, cloud_scans=4, cloud_failed=2, critical=3, high=9),
         scanner=ScannerHealth(
             engine_available=True,
             backend_scanner_version="v0.40.0",
             latest_binary_version="v0.41.0",
-            outdated_ci_runners=2,
-            rule_pack_version=4,
-            rule_count=7,
-            osv_reachable=True,
-            osv_batch_ms=120,
-            osv_vuln_ms=95,
-            osv_checked_at=t0 + timedelta(days=1),
-            last_dependency_scan_at=t0 + timedelta(hours=20),
-            new_cve_ids=["CVE-2026-1234", "GHSA-xxxx-yyyy-zzzz"],
-            new_advisories=[
-                NewAdvisory(id="GHSA-xxxx-yyyy-zzzz", severity="critical", projects=2),
-                NewAdvisory(id="CVE-2026-1234", severity="high", projects=1),
-            ],
+            projects_outdated=1,
+            outdated_pipelines=[_outdated(), _outdated(project="Ledger", version="0.39.0", runs=2)],
             new_advisory_count=2,
         ),
         stale_projects=[StaleProject(project_id="p2", name="Ledger", last_scan_at=None)],
         quota_warnings=[QuotaWarning(project_id="p1", name="Payments", used=25, limit=30)],
     )
-
-
-def _grid(card):
-    """The project table: every 7-column ColumnSet, as lists of cell texts."""
-    return [
-        [col["items"][0]["text"] for col in b["columns"]]
-        for b in card["body"]
-        if b["type"] == "ColumnSet" and len(b["columns"]) == 7
-    ]
 
 
 def _walk(node):
@@ -109,6 +76,15 @@ def _walk(node):
     elif isinstance(node, list):
         for v in node:
             yield from _walk(v)
+
+
+def _grid(card, columns=8):
+    """A table of the card: every ColumnSet with this many columns, as lists of cell texts."""
+    return [
+        [col["items"][0]["text"] for col in n["columns"]]
+        for n in _walk(card)
+        if n.get("type") == "ColumnSet" and len(n["columns"]) == columns
+    ]
 
 
 def _header(card):
@@ -127,12 +103,19 @@ def _text_of(card):
     return " ".join(n.get("text", "") for n in _walk(card))
 
 
+def _kpis(card):
+    """(caption, value) of every KPI tile: an ExtraLarge number over a subtle caption."""
+    return [
+        (n["items"][1]["text"], n["items"][0]["text"])
+        for n in _walk(card)
+        if n.get("type") == "Column" and n["items"][0].get("size") == "ExtraLarge"
+    ]
+
+
 def _realistic_rows(n):
     return [
         DigestRow(project_id=f"p{i}", name=f"Project number {i} with a long name", pipeline_runs=12, pipeline_failed=1,
-                  cloud_scans=5, critical=3, high=40, quota_used=4, quota_limit=10,
-                  new_cves=NewCves(count=2, latest=[CveRef(id="CVE-2026-1234", severity="high"),
-                                                    CveRef(id="GHSA-xxxx-yyyy-zzzz", severity="critical")]))
+                  cloud_scans=5, critical=3, high=40, resolved=120, new_findings=33)
         for i in range(n)
     ]
 
@@ -141,9 +124,13 @@ def _cards(preview=None):
     return digest_service.build_cards(preview or _preview_fixture(), frontend_origin="https://portal.example")
 
 
-def test_the_digest_is_scanner_health_then_projects_then_a_dated_summary():
+def _fits(card):
+    return len(json.dumps(card).encode()) <= digest_service._MAX_CARD_BYTES
+
+
+def test_the_digest_is_scanner_then_projects_then_a_dated_summary():
     cards = _cards()
-    assert [_header(c).split(" · ", 2)[2] for c in cards] == ["1/3 · SCANNER HEALTH", "2/3 · PROJECT STATUS", "3/3 · SUMMARY"]
+    assert [_header(c).split(" · ", 2)[2] for c in cards] == ["1/3 · SCANNER", "2/3 · PROJECT STATUS", "3/3 · SUMMARY"]
     # 1.4 and no Table: legacy Office 365 connector webhooks silently drop newer elements.
     assert all(c["type"] == "AdaptiveCard" and c["version"] == "1.4" for c in cards)
     assert not any(n.get("type") == "Table" for c in cards for n in _walk(c))
@@ -154,56 +141,73 @@ def test_the_digest_is_scanner_health_then_projects_then_a_dated_summary():
     assert summary["actions"][0]["url"] == "https://portal.example/admin/control-panel"
 
 
-def test_health_card_reports_the_scanner_and_the_live_cve_feed():
-    health = _cards()[0]
-    assert _title(health) == "Scanner ready, CVE feed live" and health["body"][0]["style"] == "good"
-    f = _facts(health)
-    assert f["Scanner in backend"] == "v0.40.0" and f["Latest published binary"] == "v0.41.0"
-    assert f["CI runners on an older scanner"] == "2" and f["Scan engine"] == "Available"
-    assert f["Batch lookup"] == "reachable, 120 ms" and f["Advisory lookup"] == "reachable, 95 ms"
-    assert f["Checked"] == "28 Oct 2026 03:30 UTC" and f["Last dependency scan"] == "27 Oct 2026 23:30 UTC"
-    assert "no local CVE database" in f["Source"]
-    text = _text_of(health)
-    assert "New advisories since 27 Oct 03:30 UTC: 2" in text
-    assert "GHSA-xxxx-yyyy-zzzz (critical), 2 projects" in text and "CVE-2026-1234 (high), 1 project" in text
+def test_scanner_card_has_the_five_facts_and_no_osv_section():
+    scanner = _cards()[0]
+    assert _title(scanner) == "Scanner ready" and scanner["body"][0]["style"] == "good"
+    assert _facts(scanner) == {
+        "Scanner in backend": "v0.40.0",
+        "Latest published binary": "v0.41.0",
+        "Projects on an older scanner": "1",
+        "New CVEs added": "2",
+        "Scan engine": "Available",
+    }
+    text = _text_of(scanner)
+    assert "OSV" not in text and "CVE data" not in text and "New advisories" not in text and "Rule pack" not in text
 
 
-def test_health_card_says_not_ready_when_osv_is_unreachable():
+def test_scanner_card_lists_outdated_pipelines_and_says_not_ready_without_the_engine():
     preview = _preview_fixture()
-    preview.scanner.osv_reachable = False
-    preview.scanner.osv_batch_ms = None
-    preview.scanner.new_advisories, preview.scanner.new_advisory_count = [], 0
-    health, _projects, summary = _cards(preview)
-    assert _title(health) == "Scanner NOT ready" and health["body"][0]["style"] == "attention"
-    assert _facts(health)["Batch lookup"] == "NOT REACHABLE"
-    assert "No advisory was first reported" in _text_of(health)
-    assert "The scanner or its CVE feed is not ready" in _text_of(summary)
+    preview.scanner.engine_available = False
+    scanner = _cards(preview)[0]
+    assert _title(scanner) == "Scanner NOT ready" and scanner["body"][0]["style"] == "attention"
+    assert _facts(scanner)["Scan engine"] == "NOT AVAILABLE"
+    rows = _grid(scanner, 5)
+    assert rows[0] == ["Project", "Repository", "Scanner used", "Runs", "Last run (UTC)"]
+    assert rows[1] == ["Payments", "github.com/acme/pay (runner-1)", "0.38.0", "5", "27 Oct 2026 22:05"]
+    assert rows[2][0] == "Ledger" and len(rows) == 3
 
 
-def test_project_card_lists_worst_first_with_a_header_row_and_no_totals_row():
-    _health, projects, _summary = _cards()
+def test_outdated_table_is_capped_and_has_its_two_empty_states():
+    preview = _preview_fixture()
+    preview.scanner.outdated_pipelines = [_outdated(repo=f"github.com/acme/r{i}") for i in range(18)]
+    scanner = _cards(preview)[0]
+    assert len(_grid(scanner, 5)) - 1 == digest_service._MAX_OUTDATED_ROWS == 15
+    assert "+ 3 more." in _text_of(scanner)
+
+    preview.scanner.outdated_pipelines = []
+    assert "Every pipeline in this period used v0.41.0." in _text_of(_cards(preview)[0])
+    assert _grid(_cards(preview)[0], 5) == []
+
+    preview.scanner.latest_binary_version = None
+    assert "No scanner binary is published" in _text_of(_cards(preview)[0])
+
+
+def test_project_card_lists_worst_first_with_fail_rate_resolved_and_new_findings():
+    _scanner, projects, _summary = _cards()
     rows = _grid(projects)
-    assert rows[0] == ["Project", "Pipeline", "Cloud", "Critical", "High", "Quota", "New CVEs"]
-    assert rows[1] == [
-        "Payments", "12 (1 failed)", "4 (2 failed)", "3", "9", "25/30", "3: CVE-2026-1234 (H), GHSA-xxxx-yyyy-zzzz (C)",
-    ]
-    assert rows[2][0] == "Ledger" and rows[2][-1] == "-" and len(rows) == 3
+    assert rows[0] == ["Project", "CI/CD", "Cloud", "Critical", "High", "Fail rate", "Resolved", "New findings"]
+    # 3 failed of 16 scans = 18.75%.
+    assert rows[1] == ["Payments", "12", "4", "3", "9", "19%", "7", "5"]
+    assert rows[2] == ["Ledger", "2", "0", "0", "0", "0%", "0", "0"] and len(rows) == 3
+    text = _text_of(projects)
+    assert "Quota" not in text and "New CVEs" not in text
     preview = _preview_fixture()
     preview.rows = [
         DigestRow(project_id="a", name="Calm"),
         DigestRow(project_id="b", name="Burning", critical=5),
-        DigestRow(project_id="c", name="Failing", cloud_failed=2),
+        DigestRow(project_id="c", name="Failing", cloud_failed=2, cloud_scans=2),
     ]
-    assert [r[0] for r in _grid(_cards(preview)[1])[1:4]] == ["Burning", "Failing", "Calm"]
+    graded = _grid(_cards(preview)[1])
+    assert [r[0] for r in graded[1:4]] == ["Burning", "Failing", "Calm"]
+    assert graded[3][5] == "-" and graded[2][5] == "100%"  # no scans: "-"; all failed: 100%
 
 
-def test_summary_carries_the_totals_and_what_needs_attention():
+def test_summary_has_exactly_three_kpis_and_nothing_else():
     summary = _cards()[-1]
+    assert _kpis(summary) == [("CI/CD SCANS", "14"), ("CLOUD SCANS", "4"), ("FAILED SCANS", "3")]
     text = _text_of(summary)
-    assert "No scan in 30 days: Ledger" in text and "Payments (25/30)" in text
-    assert "1 pipeline run(s) and 2 cloud scan(s) failed" in text
-    f = _facts(summary)
-    assert f["Projects"] == "2" and f["Scanner"] == "Ready (v0.40.0), OSV.dev live" and f["New advisories"] == "2"
+    assert not _facts(summary) and "Needs attention" not in text and "Scanner" not in text
+    assert summary["actions"][0]["title"] == "Open Control Panel"
 
 
 def test_projects_are_split_ten_per_card_and_every_card_fits_teams():
@@ -214,7 +218,7 @@ def test_projects_are_split_ten_per_card_and_every_card_fits_teams():
     assert [_title(c) for c in cards[1:-1]] == ["Projects 1-10 of 24", "Projects 11-20 of 24", "Projects 21-24 of 24"]
     assert [len(_grid(c)) - 1 for c in cards[1:-1]] == [10, 10, 4]
     assert [_header(c).split(" · ")[2] for c in cards] == ["1/5", "2/5", "3/5", "4/5", "5/5"]
-    assert all(len(json.dumps(c).encode()) <= digest_service._MAX_CARD_BYTES for c in cards)
+    assert all(_fits(c) for c in cards)
 
 
 def test_projects_beyond_the_card_cap_are_named_as_left_out_but_still_in_the_totals():
@@ -223,41 +227,46 @@ def test_projects_beyond_the_card_cap_are_named_as_left_out_but_still_in_the_tot
     cards = _cards(preview)
     assert len(cards) == 1 + digest_service._MAX_PROJECT_CARDS + 1
     assert "15 more projects were not listed on the project cards (totals include them)" in _text_of(cards[-1])
-    assert _facts(cards[-1])["Projects"] == "75"
+    assert all(_fits(c) for c in cards)
 
 
-def test_no_projects_means_a_health_card_and_a_summary_only():
+def test_no_projects_means_a_scanner_card_and_a_summary_only():
     preview = _preview_fixture()
     preview.rows = []
-    assert [_header(c).split(" · ")[3] for c in _cards(preview)] == ["SCANNER HEALTH", "SUMMARY"]
+    assert [_header(c).split(" · ")[3] for c in _cards(preview)] == ["SCANNER", "SUMMARY"]
 
 
-def test_advisories_merge_across_projects_worst_severity_first():
-    t = datetime(2026, 10, 28, tzinfo=timezone.utc)
-    out = digest_service._advisory_summary(
-        [("CVE-1", "high", t), ("CVE-1", "critical", t), ("GHSA-2", "low", t), ("CVE-3", "high", t)]
-    )
-    assert [(a.id, a.severity, a.projects) for a in out] == [
-        ("CVE-1", "critical", 2), ("CVE-3", "high", 1), ("GHSA-2", "low", 1),
+def test_the_worst_case_scanner_card_fits_teams():
+    preview = _preview_fixture()
+    preview.scanner.outdated_pipelines = [
+        _outdated(project=f"Project number with a long name {i}", repo="github.com/acme/" + "x" * 60 + f" (runner-{i})")
+        for i in range(200)
     ]
+    assert _fits(_cards(preview)[0])
 
 
-def test_live_osv_probe_times_each_endpoint_and_flags_a_5xx_or_a_network_failure():
-    def ok(request):
-        return httpx.Response(200, json={})
+def test_project_digest_card_has_the_six_figures_and_nothing_about_other_projects():
+    cards = digest_service.build_project_cards(_preview_fixture(), frontend_origin="https://portal.example")
+    assert [_title(c) for c in cards] == ["Payments", "Ledger"]
+    assert [_header(c).split(" · ", 2)[2] for c in cards] == ["1/2 · PROJECT DIGEST", "2/2 · PROJECT DIGEST"]
+    pay = cards[0]
+    assert _kpis(pay) == [("TOTAL SCANS", "16"), ("CI/CD SCANS", "12"), ("CLOUD SCANS", "4"), ("FAILED SCANS", "3")]
+    # 1 false positive of 4 vulnerabilities = 25%; resolved is all-time.
+    assert _facts(pay) == {"Resolved (all time)": "7", "False-positive rate": "25%"}
+    assert "Ledger" not in _text_of(pay) and "Scanner" not in _text_of(pay)
+    assert _facts(cards[1])["False-positive rate"] == "-"  # no vulnerabilities at all
+    assert pay["actions"][0]["url"] == "https://portal.example/projects/p1"
+    assert all(c["version"] == "1.4" and _fits(c) for c in cards)
 
-    def batch_down(request):
-        return httpx.Response(503) if request.url.path.endswith("querybatch") else httpx.Response(200, json={})
 
-    def offline(request):
-        raise httpx.ConnectError("no route")
+def test_percent_math():
+    assert digest_service._pct(1, 4) == "25%" and digest_service._pct(0, 5) == "0%" and digest_service._pct(3, 0) == "-"
+    assert digest_service._pct(1, 3) == "33%" and digest_service._pct(2, 3) == "67%"
 
-    up = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(ok)))
-    assert up.reachable and isinstance(up.batch_ms, int) and isinstance(up.vuln_ms, int)
-    half = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(batch_down)))
-    assert half.batch_ms is None and half.vuln_ms is not None and not half.reachable
-    down = asyncio.run(digest_service._probe_osv_live(transport=httpx.MockTransport(offline)))
-    assert (down.batch_ms, down.vuln_ms, down.reachable) == (None, None, False)
+
+def test_versions_sort_numerically_and_ignore_a_leading_v():
+    versions = ["v0.10.0", "0.9.0", "v0.2.1"]
+    assert sorted(versions, key=digest_service._version_key) == ["v0.2.1", "0.9.0", "v0.10.0"]
 
 
 # --- settings ---------------------------------------------------------------------------------
@@ -309,13 +318,41 @@ def _completed_scan_with_findings(pid, *, critical=0, high=0, age=timedelta(0)):
     asyncio.run(run())
 
 
-def test_preview_uses_current_exposure_counts_quota_stale_and_new_cves(client):
+def _vuln(pid, n, *, status="open", reason=None, review=None, first_seen=None):
+    async def run():
+        seen = first_seen or datetime.now(timezone.utc)
+        await Vulnerability(
+            project_id=pid, repo_scope_key="unlinked", fingerprint=f"fp-{pid}-{n}-{status}-{reason}-{review}",
+            status=status, resolution_reason=reason, review=review, first_seen_at=seen, last_seen_at=seen,
+        ).insert()
+
+    asyncio.run(run())
+
+
+def _review(kind, status):
+    return FindingReview(
+        kind=kind, status=status, file_path="a.py", requested_by_user_id="u1",
+        requested_at=datetime.now(timezone.utc), request_comment="c",
+    )
+
+
+def test_preview_uses_current_exposure_counts_stale_and_new_cves_and_vulnerability_figures(client):
     owner = _headers(register_and_login(client, email="dg-owner@zs.dev"))
     pid = _create_project(client, owner, "Digest P")["id"]
     stale_pid = _create_project(client, owner, "Stale P")["id"]
     _completed_scan_with_findings(pid, critical=2, high=1, age=timedelta(hours=2))
     _completed_scan_with_findings(pid, critical=1, high=0)  # newer scan supersedes the earlier one
     _seed(pid, 25, status="failed")  # 25 of 30 cloud scans: >= 80% (failed ones do not touch exposure)
+    long_ago = datetime.now(timezone.utc) - timedelta(days=40)
+    # 6 vulnerabilities: 2 resolved (one as a false positive), an accepted false-positive review, a
+    # pending one (not counted), a plain open one, and an old one first seen outside the period.
+    _vuln(pid, 1, status="resolved", reason="fixed")
+    _vuln(pid, 2, status="resolved", reason="false_positive")
+    _vuln(pid, 3, status="accepted_risk", review=_review("false_positive", "accepted"))
+    _vuln(pid, 4, review=_review("false_positive", "pending"))
+    _vuln(pid, 5)
+    _vuln(pid, 6, status="resolved", reason="fixed", first_seen=long_ago)
+    _vuln(stale_pid, 1)
 
     async def age_stale():
         project = await Project.get(stale_pid)
@@ -329,34 +366,30 @@ def test_preview_uses_current_exposure_counts_quota_stale_and_new_cves(client):
     row = next(r for r in body["rows"] if r["project_id"] == pid)
     # Current exposure = the latest completed scan per repo scope, not a sum over both scans.
     assert (row["critical"], row["high"]) == (1, 1)  # newest scan: 1 critical + the dependency finding (high)
-    assert row["cloud_scans"] == 25 and row["cloud_failed"] == 25 and row["quota_used"] == 25 and row["quota_limit"] == 30
-    assert row["pipeline_runs"] == 2
-    assert row["new_cves"]["count"] == 1 and row["new_cves"]["latest"][0]["id"] == "CVE-2026-9999"
-    assert body["totals"]["cloud_scans"] == 25 and body["totals"]["new_cves"]["count"] == 1
+    assert row["cloud_scans"] == 25 and row["cloud_failed"] == 25 and row["pipeline_runs"] == 2
+    assert row["resolved"] == 3  # all-time, including the one first seen 40 days ago
+    assert row["new_findings"] == 5  # first seen inside the period
+    assert (row["false_positives"], row["vulnerabilities"]) == (2, 6)  # resolved-as and accepted-review
+    other = next(r for r in body["rows"] if r["project_id"] == stale_pid)
+    assert (other["resolved"], other["new_findings"], other["vulnerabilities"]) == (0, 1, 1)
+    assert body["totals"] == {
+        "pipeline_runs": 2, "pipeline_failed": 0, "cloud_scans": 25, "cloud_failed": 25, "critical": 1, "high": 1,
+    }
     assert [w["project_id"] for w in body["quota_warnings"]] == [pid]
     assert [s["project_id"] for s in body["stale_projects"]] == [stale_pid]
-    assert body["scanner"]["osv_reachable"] is True and body["scanner"]["new_cve_ids"] == ["CVE-2026-9999"]
-    assert body["scanner"]["osv_batch_ms"] == 40 and body["scanner"]["osv_vuln_ms"] == 55
-    assert body["scanner"]["new_advisory_count"] == 1
-    assert body["scanner"]["new_advisories"] == [{"id": "CVE-2026-9999", "severity": "high", "projects": 1}]
-    assert body["scanner"]["last_dependency_scan_at"]
-    assert body["scanner"]["backend_scanner_version"] == (app_settings.scanner_build_ref or "unknown")
-    assert body["scanner"]["latest_binary_version"] is None and body["scanner"]["outdated_ci_runners"] == 0
+    assert body["scanner"] == {
+        "engine_available": body["scanner"]["engine_available"],
+        "backend_scanner_version": app_settings.scanner_build_ref or "unknown",
+        "latest_binary_version": None,
+        "projects_outdated": 0,
+        "outdated_pipelines": [],
+        "new_advisory_count": 1,  # CVE-2026-9999, counted once
+    }
     assert set(body) == {"period_start", "period_end", "rows", "totals", "scanner", "stale_projects", "quota_warnings"}
 
     client.put(BASE, json={"project_ids": [pid], "include_stale_projects": False}, headers=admin)
     scoped = client.get(f"{BASE}/preview", headers=admin).json()
     assert [r["project_id"] for r in scoped["rows"]] == [pid] and scoped["stale_projects"] == []
-
-
-def test_osv_unreachable_is_reported_not_fatal(client, monkeypatch):
-    async def down():
-        return digest_service.OsvProbe(batch_ms=None, vuln_ms=None, checked_at=datetime.now(timezone.utc))
-
-    monkeypatch.setattr(digest_service, "_probe_osv", down)
-    admin = _admin_headers(client, email="dg-osv@zs.dev")
-    scanner = client.get(f"{BASE}/preview", headers=admin).json()["scanner"]
-    assert scanner["osv_reachable"] is False and scanner["osv_batch_ms"] is None and scanner["osv_checked_at"]
 
 
 # --- sending ----------------------------------------------------------------------------------
@@ -393,9 +426,9 @@ def test_send_test_posts_the_card_to_digest_channels_only(client, monkeypatch):
     r = client.post(f"{BASE}/send-test", headers=admin).json()
     assert r["sent"] == 1 and r["errors"] == [] and r["cards"] == len(cards) >= 2
     assert {url for url, _ in cards} == {HOOK}  # only the digest channel
-    # In order: scanner health first, the dated summary last.
+    # In order: scanner first, the dated summary last.
     labels = [_header(card).split(" · ")[3] for _, card in cards]
-    assert labels[0] == "SCANNER HEALTH" and labels[-1] == "SUMMARY"
+    assert labels[0] == "SCANNER" and labels[-1] == "SUMMARY"
     assert all(card["version"] == "1.4" for _, card in cards)
     state = client.get(BASE, headers=admin).json()
     assert state["last_status"] == "sent" and state["last_sent_at"]
@@ -494,15 +527,115 @@ def test_scheduled_send_with_no_channel_records_an_error_and_audits(client, monk
     assert state["last_status"] == "error" and "switched on" in state["last_error"]
 
 
-def test_outdated_ci_runners_counts_runners_on_another_version(client):
-    # The preview 500'd once a binary was published: this path only runs when `latest` is set.
+def _cicd_scan(pid, version, *, repo="https://github.com/acme/pay.git", host="runner-1", age=timedelta(hours=1), kind="cicd"):
     async def run():
-        now = datetime.now(timezone.utc)
-        for host, version in (("old-runner", "0.39.0"), ("new-runner", "v0.40.0")):
-            await Scan(
-                project_id="p1", scan_type="cicd", status="completed", hostname=host,
-                scanner_version=version, created_at=now, updated_at=now,
-            ).insert()
-        return await digest_service._outdated_ci_runners("0.40.0")
+        at = datetime.now(timezone.utc) - age
+        await Scan(
+            project_id=pid, scan_type=kind, status="completed", hostname=host, repo_url=repo,
+            scanner_version=version, created_at=at, updated_at=at,
+        ).insert()
 
-    assert asyncio.run(run()) == 1
+    asyncio.run(run())
+
+
+def _publish_binary(version):
+    async def run():
+        await ScannerBinary(
+            version=version, os="linux", arch="amd64", filename="zerostrike", gridfs_file_id=PydanticObjectId(),
+            sha256="0" * 64, size_bytes=1, uploaded_at=datetime.now(timezone.utc), uploaded_by="qa",
+        ).insert()
+
+    asyncio.run(run())
+
+
+def test_outdated_pipelines_are_period_scoped_grouped_and_exclude_up_to_date_runs(client):
+    owner = _headers(register_and_login(client, email="dg-outdated@zs.dev"))
+    p1 = _create_project(client, owner, "Old Scanner P")["id"]
+    p2 = _create_project(client, owner, "Older Scanner P")["id"]
+    p3 = _create_project(client, owner, "Current P")["id"]
+    _publish_binary("0.41.0")
+    for hours in (1, 2, 3):  # one group: same project + repo + host + version
+        _cicd_scan(p1, "0.39.0", repo="https://x-token:s3cr3t@github.com/acme/pay.git", age=timedelta(hours=hours))
+    _cicd_scan(p1, "v0.41.0", repo="https://github.com/acme/ok")  # up to date (a leading v does not matter)
+    _cicd_scan(p1, "0.30.0", age=timedelta(days=3))  # before the period
+    _cicd_scan(p1, "0.30.0", kind="cloud")  # not a pipeline
+    _cicd_scan(p2, "0.38.0", repo="https://github.com/acme/ledger", host="runner-9")
+    _cicd_scan(p3, "0.41.0")
+    admin = _admin_headers(client, email="dg-outdated-admin@zs.dev")
+
+    scanner = client.get(f"{BASE}/preview", headers=admin).json()["scanner"]
+    assert scanner["latest_binary_version"] == "0.41.0" and scanner["projects_outdated"] == 2
+    assert [(o["project"], o["repository"], o["scanner_version"], o["runs"]) for o in scanner["outdated_pipelines"]] == [
+        ("Older Scanner P", "github.com/acme/ledger (runner-9)", "0.38.0", 1),  # oldest version first
+        ("Old Scanner P", "github.com/acme/pay.git (runner-1)", "0.39.0", 3),
+    ]
+    assert "s3cr3t" not in str(scanner) and scanner["outdated_pipelines"][1]["last_run_at"]
+
+
+def test_nothing_is_outdated_without_a_published_binary(client):
+    owner = _headers(register_and_login(client, email="dg-nobin@zs.dev"))
+    pid = _create_project(client, owner, "No Binary P")["id"]
+    _cicd_scan(pid, "0.1.0")
+    admin = _admin_headers(client, email="dg-nobin-admin@zs.dev")
+    scanner = client.get(f"{BASE}/preview", headers=admin).json()["scanner"]
+    assert scanner["outdated_pipelines"] == [] and scanner["projects_outdated"] == 0
+
+
+# --- per-project routing ----------------------------------------------------------------------
+
+
+def _scoped_channel(client, admin, project_ids, url):
+    r = client.post(
+        CHANNELS,
+        json={"name": "Scoped", "url": url, "include_digest": True, "project_ids": project_ids},
+        headers=admin,
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_a_scoped_channel_gets_one_card_per_project_and_not_the_global_digest(client, monkeypatch):
+    cards = _capture_cards(monkeypatch)
+    owner = _headers(register_and_login(client, email="dg-scope-owner@zs.dev"))
+    mine = _create_project(client, owner, "Scoped Mine")["id"]
+    _create_project(client, owner, "Someone Elses")
+    _completed_scan_with_findings(mine, critical=1)
+    _vuln(mine, 1, status="resolved", reason="false_positive")
+    _vuln(mine, 2)
+    admin = _admin_headers(client, email="dg-scope-admin@zs.dev")
+    _scoped_channel(client, admin, [mine], HOOK + "/scoped")
+    _digest_channel(client, admin, url=HOOK + "/global")
+
+    r = client.post(f"{BASE}/send-test", headers=admin).json()
+    assert r["sent"] == 2 and r["errors"] == []
+    scoped = [c for url, c in cards if url.endswith("/scoped")]
+    global_ = [c for url, c in cards if url.endswith("/global")]
+    # The scoped channel: exactly its project's card. No scanner card, no summary, no other project.
+    assert [_header(c).split(" · ")[3] for c in scoped] == ["PROJECT DIGEST"]
+    assert _title(scoped[0]) == "Scoped Mine"
+    assert _facts(scoped[0]) == {"Resolved (all time)": "1", "False-positive rate": "50%"}
+    assert "Someone Elses" not in " ".join(_text_of(c) for c in scoped)
+    # The unscoped channel: the global digest, which lists every project.
+    labels = [_header(c).split(" · ")[3] for c in global_]
+    assert labels[0] == "SCANNER" and labels[-1] == "SUMMARY"
+    assert "Someone Elses" in " ".join(_text_of(c) for c in global_)
+    assert all(_fits(c) for _url, c in cards)
+
+
+def test_a_scoped_channel_whose_projects_are_gone_reports_an_error_not_a_green_send(client, monkeypatch):
+    cards = _capture_cards(monkeypatch)
+    admin = _admin_headers(client, email="dg-scope-gone@zs.dev")
+    _scoped_channel(client, admin, ["a" * 24], HOOK + "/scoped")
+    r = client.post(f"{BASE}/send-test", headers=admin).json()
+    assert r["sent"] == 0 and "no active project" in r["errors"][0]["error"] and cards == []
+
+
+def test_the_scheduler_sends_a_scoped_channel_its_project_card(client, monkeypatch):
+    cards = _capture_cards(monkeypatch)
+    owner = _headers(register_and_login(client, email="dg-scope-sched-owner@zs.dev"))
+    mine = _create_project(client, owner, "Sched Mine")["id"]
+    admin = _admin_headers(client, email="dg-scope-sched@zs.dev")
+    _scoped_channel(client, admin, [mine], HOOK + "/scoped")
+    _enable(client, admin)
+    assert asyncio.run(digest_service.run_due(datetime(2026, 10, 28, 3, 40, tzinfo=timezone.utc))) is True
+    assert [_title(c) for _url, c in cards] == ["Sched Mine"]
+    assert client.get(BASE, headers=admin).json()["last_status"] == "sent"

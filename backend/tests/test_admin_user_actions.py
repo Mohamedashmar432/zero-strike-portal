@@ -80,3 +80,18 @@ def test_role_change_and_delete_are_audited(client):
         "from_role": "user",
         "to_role": "admin",
     }
+
+
+def test_user_cannot_change_own_email(client):
+    tokens = register_and_login(client, email="fixed-email1@zerostrike.dev")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    r = client.patch("/api/v1/users/me", json={"email": "someone-else@zerostrike.dev"}, headers=headers)
+    assert r.status_code == 422
+    r = client.patch("/api/v1/users/me", json={"name": "Renamed", "email": "x@zerostrike.dev"}, headers=headers)
+    assert r.status_code == 422  # no partial apply: the name is not saved either
+
+    me = client.get("/api/v1/users/me", headers=headers).json()
+    assert me["email"] == "fixed-email1@zerostrike.dev"
+    assert me["name"] != "Renamed"
+    assert client.patch("/api/v1/users/me", json={"name": "Renamed"}, headers=headers).json()["name"] == "Renamed"

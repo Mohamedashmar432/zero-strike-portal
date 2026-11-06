@@ -5,7 +5,6 @@ writes the human-triage fields (status, resolution, assignee) it owns outright, 
 touches reconcile_scan's own bookkeeping (first_seen_at, last_regression_*, current_*).
 """
 
-import re
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -16,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.deps import get_current_user
 from app.models.audit_log import AuditLog
 from app.models.finding import Finding
-from app.models.project_member import ProjectMember
 from app.models.scan import Scan
 from app.models.user import User
 from app.models.vulnerability import Vulnerability
@@ -28,6 +26,9 @@ from app.schemas.vulnerability import (
     ScanRegressionResponse,
     VulnerabilityActivityEvent,
     VulnerabilityAssignmentUpdateRequest,
+    VulnerabilityBulkItemResult,
+    VulnerabilityBulkRequest,
+    VulnerabilityBulkResponse,
     VulnerabilityDetailResponse,
     VulnerabilityCounts,
     VulnerabilityOut,
@@ -36,39 +37,22 @@ from app.schemas.vulnerability import (
     VulnerabilitySummaryResponse,
 )
 from app.services import (
-    audit_service,
-    finding_review_service,
     pr_status_service,
     project_repo_service,
     project_service,
     scan_engine_service,
     vulnerability_service,
+    vulnerability_query_service as query_svc,
+    vulnerability_triage_service,
 )
 from app.services import project_stats_service as stats_svc
 
 router = APIRouter(tags=["vulnerabilities"])
 
-# query key -> real Vulnerability field name. Anything else (including no `sort` at all)
-# falls back to the default below -- an unrecognized sort key degrading quietly to the
-# default is friendlier to a stale frontend build than a 422 on every page load.
-_SORT_FIELD_NAMES = {
-    "last_seen_at": "last_seen_at",
-    "first_seen_at": "first_seen_at",
-    "priority": "current_priority_score",
-}
-_DEFAULT_SORT = "-last_seen_at"
 # How many rows per regression bucket the scan-detail response carries. The bucket `count` is
 # always the true total -- this only bounds the inlined preview, since the first scan of a large
 # repo classifies every finding as "new" and would otherwise serialize thousands of rows.
 _REGRESSION_PREVIEW_LIMIT = 25
-
-
-def _sort_expr(sort: str) -> str:
-    desc = sort.startswith("-")
-    key = sort[1:] if desc else sort
-    if key not in _SORT_FIELD_NAMES:
-        return _DEFAULT_SORT
-    return f"{'-' if desc else '+'}{_SORT_FIELD_NAMES[key]}"
 
 
 async def _email_map(user_ids: set[str]) -> dict[str, str]:
@@ -164,75 +148,132 @@ def _emails_for(rows: list[Vulnerability]) -> set[str]:
 # --- list + detail -------------------------------------------------------------------------
 
 
+def _filters(
+    status_filter: str | None = Query(None, alias="status", description="comma-separated; includes false_positive"),
+    fix_status: Literal["open", "reopened", "fixed", "dismissed"] | None = Query(None),
+    severity: str | None = Query(None, description="comma-separated"),
+    kind: str | None = Query(None, description="comma-separated: sast,secret,sca,config"),
+    repo: str | None = Query(None, description="comma-separated project_repo_id / unlinked-bucket keys"),
+    rule_id: str | None = Query(None, description="comma-separated rule ids"),
+    path: str | None = Query(None, description="substring of the file path"),
+    assignee: str | None = Query(None, description="comma-separated user ids; __none__ = unassigned"),
+    assignee_user_id: str | None = Query(None, description="legacy single-user form of `assignee`"),
+    review_state: str | None = Query(None, description="comma-separated: none,pending,accepted,rejected,revoked"),
+    review_kind: str | None = Query(None, description="comma-separated: false_positive,accepted_risk"),
+    age: str | None = Query(None, description="comma-separated: 7d,30d,90d (first seen within), 90d+ (older)"),
+    regression_state: str | None = Query(None),
+    search: str | None = Query(None, description="matches rule name, message, or fingerprint"),
+) -> query_svc.VulnFilters:
+    """The filters the list and the facet counts share. Absent / empty = no filter."""
+    f: query_svc.VulnFilters = {
+        "status": query_svc.csv(status_filter),
+        "fix_status": fix_status,
+        "severity": query_svc.csv(severity),
+        "kind": query_svc.csv(kind),
+        "repo": query_svc.csv(repo),
+        "rule_id": query_svc.csv(rule_id),
+        "path": (path or "").strip(),
+        "assignee": query_svc.csv(assignee) + ([assignee_user_id] if assignee_user_id else []),
+        "review_state": [x for x in query_svc.csv(review_state) if x in query_svc.REVIEW_STATES],
+        "review_kind": query_svc.csv(review_kind),
+        "age": [x for x in query_svc.csv(age) if x in query_svc.AGE_VALUES],
+        "regression_state": regression_state,
+        "search": (search or "").strip(),
+    }
+    return {k: v for k, v in f.items() if v}
+
+
 @router.get("/projects/{project_id}/vulnerabilities", response_model=Page)
 async def list_vulnerabilities(
     project_id: str,
-    status_filter: str | None = Query(None, alias="status"),
-    fix_status: Literal["open", "reopened", "fixed", "dismissed"] | None = Query(None),
-    severity: str | None = Query(None),
-    kind: str | None = Query(None),
-    repo: str | None = Query(None, description="project_repo_id, or the unlinked-bucket key"),
-    assignee_user_id: str | None = Query(None),
-    regression_state: str | None = Query(None),
-    search: str | None = Query(None, description="matches rule name, message, or fingerprint"),
+    filters: query_svc.VulnFilters = Depends(_filters),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    sort: str = Query(_DEFAULT_SORT),
+    sort: str = Query(query_svc.DEFAULT_SORT, description="[-]last_seen_at|first_seen_at|priority|severity|rule|file"),
     user: User = Depends(get_current_user),
 ):
     await project_service.get_project_or_404(project_id)
     await project_service.require_member(project_id, user)
 
-    criteria: list = [Vulnerability.project_id == project_id]
-    # A rule retired in the active rule pack is noise by admin decision; its vulnerabilities
-    # reappear on their own if the rule is restored, because nothing about them was changed.
-    retired = await scan_engine_service.retired_rule_ids()
-    if retired:
-        criteria.append({"current_rule_id": {"$nin": sorted(retired)}})
-    if status_filter == "false_positive":
-        # Not a stored status: an accepted false positive is resolved with that reason.
-        criteria.append(Vulnerability.status == "resolved")
-        criteria.append(Vulnerability.resolution_reason == "false_positive")
-    elif status_filter:
-        criteria.append(Vulnerability.status == status_filter)
-    if fix_status:
-        criteria.append(vulnerability_service.fix_status_criteria(fix_status))
-    if severity:
-        criteria.append(Vulnerability.current_severity == severity)
-    if kind:
-        criteria.append(Vulnerability.current_kind == kind)
-    if repo:
-        criteria.append(Vulnerability.repo_scope_key == repo)
-    if assignee_user_id:
-        criteria.append(Vulnerability.assignee_user_id == assignee_user_id)
-    if regression_state:
-        criteria.append(Vulnerability.last_regression_state == regression_state)
-    if search:
-        pattern = re.escape(search)
-        criteria.append(
-            {
-                "$or": [
-                    {"current_rule_name": {"$regex": pattern, "$options": "i"}},
-                    {"current_message": {"$regex": pattern, "$options": "i"}},
-                    {"fingerprint": {"$regex": pattern, "$options": "i"}},
-                ]
-            }
-        )
+    criteria = query_svc.clauses(project_id, filters, await scan_engine_service.retired_rule_ids())
 
     # Server-side paging + filtering -- never load-all-then-slice, per the project's scale
     # concerns (see routers/audit_logs.py's own admission that the in-memory approach doesn't
     # scale, which this deliberately does not repeat).
-    query = Vulnerability.find(*criteria)
-    total = await query.count()
-    rows = (
-        await query.sort(_sort_expr(sort))
-        .skip((page - 1) * page_size)
-        .limit(page_size)
-        .to_list()
-    )
+    total = await Vulnerability.find(criteria).count()
+    skip = (page - 1) * page_size
+    by_severity, most_severe_first = query_svc.is_severity_sort(sort)
+    if by_severity:
+        rows = await query_svc.severity_ordered_page(
+            criteria, most_severe_first=most_severe_first, skip=skip, limit=page_size
+        )
+    else:
+        rows = (
+            await Vulnerability.find(criteria)
+            .sort(query_svc.sort_expr(sort) or query_svc.sort_expr(query_svc.DEFAULT_SORT))
+            .skip(skip)
+            .limit(page_size)
+            .to_list()
+        )
 
     emails = await _email_map(_emails_for(rows))
     return Page(items=[_to_out(v, emails) for v in rows], total=total, page=page, page_size=page_size)
+
+
+@router.get("/projects/{project_id}/vulnerabilities/facets")
+async def get_vulnerability_facets(
+    project_id: str,
+    filters: query_svc.VulnFilters = Depends(_filters),
+    user: User = Depends(get_current_user),
+):
+    """Counts per filter value, each computed with every *other* filter applied (so choosing High does not
+    zero out the other severities). Same query params as the list. Only non-zero values are present.
+    Registered before the `{vulnerability_id}` route so "facets" is never parsed as an id."""
+    await project_service.get_project_or_404(project_id)
+    await project_service.require_member(project_id, user)
+    return await query_svc.facets(
+        project_id, filters, await scan_engine_service.retired_rule_ids(), _email_map
+    )
+
+
+@router.post("/projects/{project_id}/vulnerabilities/bulk", response_model=VulnerabilityBulkResponse)
+async def bulk_update_vulnerabilities(
+    project_id: str, payload: VulnerabilityBulkRequest, user: User = Depends(get_current_user)
+):
+    """Apply one assignment or status change to up to 100 vulnerabilities. Every item goes through the same
+    rules and audit as the single routes, so a status that needs review becomes a review request, and an
+    item that is refused reports why without stopping the rest."""
+    await project_service.get_project_or_404(project_id)
+    role = await project_service.require_member(project_id, user)
+
+    results: list[VulnerabilityBulkItemResult] = []
+    for vid in dict.fromkeys(payload.ids):
+        try:
+            if not PydanticObjectId.is_valid(vid):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Vulnerability not found")
+            vuln = await _get_vuln_or_404(project_id, vid)
+            if payload.action == "assign":
+                vuln = await vulnerability_triage_service.apply_assignment(
+                    vuln, payload.assignee_user_id, user, role
+                )
+            else:
+                vuln = await vulnerability_triage_service.apply_status_change(
+                    vuln, payload.status, payload.resolution_reason, payload.resolution_comment, user
+                )
+        except HTTPException as e:
+            results.append(VulnerabilityBulkItemResult(id=vid, ok=False, detail=str(e.detail)))
+            continue
+        results.append(
+            VulnerabilityBulkItemResult(
+                id=vid,
+                ok=True,
+                status=vuln.status,
+                review_status=vuln.review.status if vuln.review else None,
+                assignee_user_id=vuln.assignee_user_id,
+            )
+        )
+    succeeded = sum(1 for r in results if r.ok)
+    return VulnerabilityBulkResponse(results=results, succeeded=succeeded, failed=len(results) - succeeded)
 
 
 @router.get("/projects/{project_id}/vulnerabilities/summary", response_model=VulnerabilitySummaryResponse)
@@ -386,93 +427,14 @@ async def update_vulnerability_status(
     user: User = Depends(get_current_user),
 ):
     await project_service.get_project_or_404(project_id)
-    role = await project_service.require_member(project_id, user)
+    await project_service.require_member(project_id, user)
     vuln = await _get_vuln_or_404(project_id, vulnerability_id)
 
     # A verdict that would stop the finding blocking CI is a *request* for a portal admin to review
-    # (docs/FINDING_REVIEW.md): false positive on code findings, accepted risk on dependency findings.
-    # The finding keeps its status, and keeps blocking, until an admin accepts.
-    wants_fp = payload.status == "resolved" and payload.resolution_reason == "false_positive"
-    if wants_fp or (payload.status == "accepted_risk" and vuln.current_kind == "sca"):
-        vuln = await finding_review_service.request_review(
-            vuln, "false_positive" if wants_fp else "accepted_risk", payload.resolution_comment or "", user
-        )
-        emails = await _email_map(_emails_for([vuln]))
-        return _to_out(vuln, emails)
-
-    now = datetime.now(timezone.utc)
-    before = {
-        "status": vuln.status,
-        "resolution_reason": vuln.resolution_reason,
-        "resolution_comment": vuln.resolution_comment,
-    }
-
-    if payload.status == "accepted_risk":
-        if role not in ("owner", "admin"):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, "Owner or admin privileges required to accept risk"
-            )
-        if not (payload.resolution_comment or "").strip():
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, "resolution_comment is required to accept risk"
-            )
-        was_resolved = vuln.status == "resolved"
-        vuln.status = "accepted_risk"
-        vuln.resolution_reason = None
-        vuln.resolution_comment = payload.resolution_comment
-        vuln.resolved_at = None
-        vuln.resolved_by_user_id = None
-        if was_resolved:
-            vuln.reopened_at = now
-    elif payload.status == "resolved":
-        if not payload.resolution_reason:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "resolution_reason is required to resolve a vulnerability",
-            )
-        # A human hitting "resolved -> fixed" through this endpoint is always a manual claim --
-        # the automatic "fixed" verdict comes only from reconcile_scan finding the fingerprint
-        # gone, never from this route -- so scanner evidence is preferred over an unexplained
-        # human assertion.
-        if payload.resolution_reason == "fixed" and not (payload.resolution_comment or "").strip():
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "resolution_comment is required when manually marking a vulnerability fixed",
-            )
-        vuln.status = "resolved"
-        vuln.resolution_reason = payload.resolution_reason
-        vuln.resolution_comment = payload.resolution_comment
-        vuln.resolved_at = now
-        vuln.resolved_by_user_id = str(user.id)
-    else:
-        was_resolved = vuln.status == "resolved"
-        vuln.status = payload.status
-        if was_resolved:
-            vuln.resolution_reason = None
-            vuln.resolution_comment = None
-            vuln.resolved_at = None
-            vuln.resolved_by_user_id = None
-            vuln.reopened_at = now
-        # in_progress / open: first_seen_at and assignee are left untouched -- this endpoint
-        # never writes them.
-
-    vuln.updated_at = now
-    await vuln.save()
-
-    after = {
-        "status": vuln.status,
-        "resolution_reason": vuln.resolution_reason,
-        "resolution_comment": vuln.resolution_comment,
-    }
-    changed = {k: {"before": before[k], "after": after[k]} for k in before if before[k] != after[k]}
-    await audit_service.record(
-        "Vulnerability Status Updated",
-        actor_type="user",
-        actor_user_id=str(user.id),
-        project_id=project_id,
-        target_type="vulnerability",
-        target_id=str(vuln.id),
-        metadata=changed,
+    # (docs/FINDING_REVIEW.md): false positive on code findings, accepted risk on any finding. The
+    # finding keeps its status, and keeps blocking, until the review is accepted.
+    vuln = await vulnerability_triage_service.apply_status_change(
+        vuln, payload.status, payload.resolution_reason, payload.resolution_comment, user
     )
     emails = await _email_map(_emails_for([vuln]))
     return _to_out(vuln, emails)
@@ -491,32 +453,7 @@ async def update_vulnerability_assignment(
     await project_service.get_project_or_404(project_id)
     role = await project_service.require_member(project_id, user)
     vuln = await _get_vuln_or_404(project_id, vulnerability_id)
-    target = payload.assignee_user_id
-
-    if role not in ("owner", "admin") and target not in (None, str(user.id)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Collaborators may only assign themselves")
-
-    if target is not None:
-        is_member = await ProjectMember.find_one(
-            ProjectMember.project_id == project_id, ProjectMember.user_id == target
-        )
-        if not is_member:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Assignee is not a member of this project")
-
-    before = vuln.assignee_user_id
-    if before != target:
-        vuln.assignee_user_id = target
-        vuln.updated_at = datetime.now(timezone.utc)
-        await vuln.save()
-        await audit_service.record(
-            "Vulnerability Assignment Updated",
-            actor_type="user",
-            actor_user_id=str(user.id),
-            project_id=project_id,
-            target_type="vulnerability",
-            target_id=str(vuln.id),
-            metadata={"assignee_user_id": {"before": before, "after": target}},
-        )
+    vuln = await vulnerability_triage_service.apply_assignment(vuln, payload.assignee_user_id, user, role)
 
     emails = await _email_map(_emails_for([vuln]))
     return _to_out(vuln, emails)

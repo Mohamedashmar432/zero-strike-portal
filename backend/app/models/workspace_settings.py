@@ -37,6 +37,10 @@ class WorkspaceSettings(Document):
     # project twin. Read by finding_review_service.request_review only; flipping it never touches
     # requests already pending or exemptions already accepted.
     finding_review_required: bool = False
+    # The same switch for accepted-risk requests (any finding kind), independent of the one above, which
+    # now governs false positives only. Seeded from finding_review_required at startup when absent
+    # (finding_review_service.migrate_risk_review_toggle) so an upgrade never loosens review.
+    risk_acceptance_review_required: bool = False
 
     # --- live dependency alerts (docs/LIVE_DEPENDENCY_ALERTS.md) ---------------
     # Alert a project when a newly published advisory affects a package in its dependency inventory.

@@ -1,31 +1,33 @@
-"""The scheduled Teams digest (docs/PROJECT_INSIGHTS_AND_CLOUD_SCAN_QUOTA.md section 6).
+"""The scheduled Teams digest (docs/DIGEST_V2_AND_DEV_ALERTS.md, scheduling rules in
+docs/PROJECT_INSIGHTS_AND_CLOUD_SCAN_QUOTA.md section 6).
 
-Three separable pieces: `build_preview` gathers the numbers (async, reads Mongo), `build_card` turns
-them into an Adaptive Card 1.5 `Table` (a pure function -- unit-tested against a fixture), and
-`run_due` / `scheduler_loop` decide when to send. A send claims its period with one atomic
-`find_one_and_update` on `DigestSettings.last_sent_for`, so a restart or a second replica can never
-double-send.
+Three separable pieces: `build_preview` gathers the numbers (async, reads Mongo), `build_cards` /
+`build_project_cards` turn them into Adaptive Cards 1.4 built from column sets (pure functions --
+unit-tested against a fixture), and `run_due` / `scheduler_loop` decide when to send. A send claims its
+period with one atomic `find_one_and_update` on `DigestSettings.last_sent_for`, so a restart or a second
+replica can never double-send.
 
 Critical/High are *current exposure* (each repo's latest completed scan, via project_stats_service),
-not a sum over every scan in the period. New CVE ids come from findings' advisory ids, which are OSV.dev
-lookups made at scan time -- the portal holds no CVE feed, so the card never claims a feed date.
+not a sum over every scan in the period. The new-CVE count comes from findings' advisory ids, which are
+OSV.dev lookups made at scan time -- the portal holds no CVE feed, so the card gives a count and never
+claims a feed date. A channel scoped to projects gets one card per project instead of the global digest.
 """
 
 import asyncio
-import time
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import structlog
 from pymongo import ReturnDocument
 
 from app.core.config import settings
+from app.core.repo_url import sanitize_repo_url
 from app.models.digest_settings import DigestSettings
-from app.models.finding import Finding
 from app.models.project import Project
 from app.models.scan import Scan
 from app.models.scanner_binary import ScannerBinary
+from app.models.vulnerability import Vulnerability
 from app.models.webhook_channel import WebhookChannel
 from app.schemas.digest import (
     DigestPreview,
@@ -33,19 +35,17 @@ from app.schemas.digest import (
     DigestSendError,
     DigestSendResponse,
     DigestTotals,
-    NewAdvisory,
+    OutdatedPipeline,
     QuotaWarning,
     ScannerHealth,
     StaleProject,
 )
-from app.schemas.project_insights import CveRef, NewCves
 from app.services import (
     audit_service,
     cloud_scan_quota_service,
     cloud_scan_service,
     project_insights_service,
     project_stats_service,
-    scan_engine_service,
     webhook_channel_service,
 )
 
@@ -54,10 +54,6 @@ logger = structlog.get_logger(__name__)
 STALE_AFTER = timedelta(days=30)
 QUOTA_WARN_FRACTION = 0.8
 _SLOT_GRACE = timedelta(hours=6)  # a slot missed by more than this (portal was down) is skipped, not sent late
-# The two OSV.dev endpoints the scanner itself calls at scan time (scanner: internal/scanner/sca/osv.go).
-_OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch"
-_OSV_PROBE_URL = "https://api.osv.dev/v1/vulns/GHSA-jfh8-c2jp-5v3q"
-_OSV_BATCH_PROBE = {"queries": [{"package": {"name": "lodash", "ecosystem": "npm"}, "version": "4.17.20"}]}
 # Teams refuses a message over ~28 KB (Power Automate reports RequestEntityTooLarge), and a Workflows
 # webhook still answers 202 first, so an oversize card is accepted by the portal's POST and then never
 # appears. That is why the digest is several small cards, not one: a project row costs ~1.2 KB, so 10 per
@@ -66,11 +62,11 @@ _OSV_BATCH_PROBE = {"queries": [{"package": {"name": "lodash", "ecosystem": "npm
 _MAX_CARD_BYTES = 20_000
 _ROWS_PER_CARD = 10
 _MAX_PROJECT_CARDS = 6  # 60 projects; the summary card names how many were left out (totals cover them)
-_MAX_ADVISORIES = 8
+_MAX_OUTDATED_ROWS = 15
+_MAX_SCOPED_CARDS = 20  # one card per project on a scoped channel; a longer list is cut here
 # Workflows runs each post as its own flow, so posts sent back to back can land out of order; the cards
 # are also numbered "n/N" so a reader can still tell.
 _CARD_GAP_SECONDS = 2.0
-_RUNNER_LOOKBACK = timedelta(days=14)
 
 
 # --- settings ---------------------------------------------------------------------------------
@@ -87,117 +83,120 @@ async def get_settings() -> DigestSettings:
 # --- gathering --------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class OsvProbe:
-    """Round-trip in ms of each OSV.dev endpoint the scanner calls; None = unreachable or a 5xx."""
-
-    batch_ms: int | None
-    vuln_ms: int | None
-    checked_at: datetime
-
-    @property
-    def reachable(self) -> bool:
-        return self.batch_ms is not None and self.vuln_ms is not None
-
-
-async def _probe_osv_live(transport: httpx.AsyncBaseTransport | None = None) -> OsvProbe:
-    async def timed(client: httpx.AsyncClient, method: str, url: str, **kw) -> int | None:
-        started = time.perf_counter()
-        try:
-            resp = await client.request(method, url, **kw)
-        except Exception:
-            return None
-        return None if resp.status_code >= 500 else round((time.perf_counter() - started) * 1000)
-
-    async with httpx.AsyncClient(timeout=3, follow_redirects=False, transport=transport) as client:
-        batch, vuln = await asyncio.gather(
-            timed(client, "POST", _OSV_BATCH_URL, json=_OSV_BATCH_PROBE), timed(client, "GET", _OSV_PROBE_URL)
-        )
-    return OsvProbe(batch_ms=batch, vuln_ms=vuln, checked_at=datetime.now(timezone.utc))
-
-
-async def _probe_osv() -> OsvProbe:
-    """Whether OSV.dev answers from this server, per endpoint. Any non-5xx HTTP response counts as
-    reachable; a network failure or timeout does not. Tests replace this -- they never touch the network."""
-    return await _probe_osv_live()
-
-
 def _norm_version(version: str | None) -> str:
     return (version or "").strip().lstrip("vV")
 
 
-async def _outdated_ci_runners(latest: str | None) -> int:
-    """CI runners (project + hostname) whose most recent scan reported a scanner older than -- or at
-    least different from -- the newest published binary."""
-    if not latest:
-        return 0
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", _norm_version(version)))
+
+
+async def _outdated_pipelines(
+    latest: str | None, names: dict[str, str], start: datetime, end: datetime
+) -> list[OutdatedPipeline]:
+    """CI/CD scans created in [start, end) whose scanner differs from the newest published binary,
+    grouped by (project, repository, runner host, version): oldest version first, then most runs."""
+    if not latest or not names:
+        return []
     pipeline = [
         {
             "$match": {
                 "scan_type": "cicd",
                 "scanner_version": {"$ne": None},
-                "created_at": {"$gte": datetime.now(timezone.utc) - _RUNNER_LOOKBACK},
+                "project_id": {"$in": list(names)},
+                "created_at": {"$gte": start, "$lt": end},
             }
         },
-        {"$sort": {"created_at": -1}},
-        {"$group": {"_id": {"p": "$project_id", "h": "$hostname"}, "v": {"$first": "$scanner_version"}}},
+        {
+            "$group": {
+                "_id": {"p": "$project_id", "r": "$repo_url", "h": "$hostname", "v": "$scanner_version"},
+                "runs": {"$sum": 1},
+                "last": {"$max": "$created_at"},
+            }
+        },
     ]
     # Motor's aggregate() is a cursor, not awaitable (see dashboard_service._severity_groups).
     rows = await Scan.get_pymongo_collection().aggregate(pipeline).to_list(length=None)
-    return sum(1 for row in rows if _norm_version(row["v"]) != _norm_version(latest))
+    out: list[OutdatedPipeline] = []
+    for row in rows:
+        key = row["_id"]
+        if _norm_version(key["v"]) == _norm_version(latest):
+            continue
+        repo = sanitize_repo_url(key.get("r"))
+        repository = (repo.split("://", 1)[-1] if repo else "-") + (f" ({key['h']})" if key.get("h") else "")
+        out.append(
+            OutdatedPipeline(
+                project_id=key["p"],
+                project=names[key["p"]],
+                repository=repository,
+                scanner_version=key["v"],
+                runs=row["runs"],
+                last_run_at=_utc(row["last"]),
+            )
+        )
+    return sorted(out, key=lambda o: (_version_key(o.scanner_version), -o.runs, o.project, o.repository))
 
 
-def _advisory_summary(found: list[tuple[str, str, datetime]]) -> list[NewAdvisory]:
-    """One row per advisory id across projects: its worst severity and how many projects first reported it."""
-    by_id: dict[str, tuple[str, int]] = {}
-    for advisory_id, severity, _first in found:
-        worst, projects = by_id.get(advisory_id, ("", 0))
-        by_id[advisory_id] = (max(worst, severity, key=lambda v: _SEV_RANK.get(v, 0)), projects + 1)
-    rows = [NewAdvisory(id=i, severity=sev or "info", projects=n) for i, (sev, n) in by_id.items()]
-    return sorted(rows, key=lambda a: (-_SEV_RANK.get(a.severity, 0), -a.projects, a.id))
+async def _vulnerability_stats(pids: list[str], start: datetime, end: datetime) -> dict[str, dict]:
+    """Per project, over every repo: all vulnerabilities, resolved (all-time), first seen in [start, end),
+    and false positives (resolved as one, or an admin-accepted false-positive review)."""
+    in_period = {"$and": [{"$gte": ["$first_seen_at", start]}, {"$lt": ["$first_seen_at", end]}]}
+    false_positive = {
+        "$or": [
+            {"$eq": ["$resolution_reason", "false_positive"]},
+            {"$and": [{"$eq": ["$review.kind", "false_positive"]}, {"$eq": ["$review.status", "accepted"]}]},
+        ]
+    }
+    pipeline = [
+        {"$match": {"project_id": {"$in": pids}}},
+        {
+            "$group": {
+                "_id": "$project_id",
+                "total": {"$sum": 1},
+                "resolved": {"$sum": {"$cond": [{"$eq": ["$status", "resolved"]}, 1, 0]}},
+                "new": {"$sum": {"$cond": [in_period, 1, 0]}},
+                "fp": {"$sum": {"$cond": [false_positive, 1, 0]}},
+            }
+        },
+    ]
+    rows = await Vulnerability.get_pymongo_collection().aggregate(pipeline).to_list(length=None)
+    return {row["_id"]: row for row in rows}
 
 
-async def _last_dependency_scan_at() -> datetime | None:
-    row = await Finding.find(Finding.kind == "sca").sort("-created_at").first_or_none()
-    return _utc(row.created_at) if row else None
-
-
-async def _scanner_health(advisories: list[NewAdvisory]) -> ScannerHealth:
+async def _scanner_health(
+    names: dict[str, str], new_cve_count: int, start: datetime, end: datetime
+) -> ScannerHealth:
     newest = await ScannerBinary.find_all().sort("-uploaded_at").first_or_none()
     latest = newest.version if newest else None
-    pack = await scan_engine_service.active_pack()
-    osv = await _probe_osv()
+    outdated = await _outdated_pipelines(latest, names, start, end)
     return ScannerHealth(
         engine_available=cloud_scan_service.scanner_available(),
         backend_scanner_version=settings.scanner_build_ref or "unknown",
         latest_binary_version=latest,
-        outdated_ci_runners=await _outdated_ci_runners(latest),
-        rule_pack_version=pack.version if pack else None,
-        rule_count=len(pack.custom_rules) if pack else 0,
-        osv_reachable=osv.reachable,
-        osv_batch_ms=osv.batch_ms,
-        osv_vuln_ms=osv.vuln_ms,
-        osv_checked_at=osv.checked_at,
-        last_dependency_scan_at=await _last_dependency_scan_at(),
-        new_cve_ids=[a.id for a in advisories[:5]],
-        new_advisories=advisories[:_MAX_ADVISORIES],
-        new_advisory_count=len(advisories),
+        projects_outdated=len({o.project_id for o in outdated}),
+        outdated_pipelines=outdated,
+        new_advisory_count=new_cve_count,
     )
 
 
-async def build_preview(digest: DigestSettings, now: datetime | None = None) -> DigestPreview:
+async def build_preview(
+    digest: DigestSettings, now: datetime | None = None, project_ids: list[str] | None = None
+) -> DigestPreview:
+    """`project_ids` overrides the digest's own project scope (a scoped channel's list)."""
     end = now or datetime.now(timezone.utc)
     start = end - (timedelta(days=7) if digest.frequency == "weekly" else timedelta(days=1))
 
     projects = [p for p in await Project.find_all().sort(-Project.id).to_list() if not p.is_archived]
-    if digest.project_ids:
-        chosen = set(digest.project_ids)
+    scope = project_ids if project_ids is not None else digest.project_ids
+    if scope:
+        chosen = set(scope)
         projects = [p for p in projects if str(p.id) in chosen]
     pids = [str(p.id) for p in projects]
 
     counts = await project_insights_service.scan_counts(start, end) if pids else {}
     quotas = await cloud_scan_quota_service.usage_many(projects) if pids else {}
     cves = await project_insights_service.new_cves(pids, start, end) if pids else {}
+    vulns = await _vulnerability_stats(pids, start, end) if pids else {}
 
     severity: dict = {}
     scan_ids_by_project: dict[str, list[str]] = {}
@@ -210,6 +209,7 @@ async def build_preview(digest: DigestSettings, now: datetime | None = None) -> 
     for p in projects:
         pid = str(p.id)
         mine = counts.get(pid)
+        mine_vulns = vulns.get(pid, {})
         crit = sum(severity[s].critical for s in scan_ids_by_project.get(pid, []) if s in severity)
         high = sum(severity[s].high for s in scan_ids_by_project.get(pid, []) if s in severity)
         rows.append(
@@ -222,28 +222,18 @@ async def build_preview(digest: DigestSettings, now: datetime | None = None) -> 
                 cloud_failed=mine["cloud"].failed if mine else 0,
                 critical=crit,
                 high=high,
-                quota_used=quotas[pid].used,
-                quota_limit=quotas[pid].limit,
-                new_cves=project_insights_service.new_cves_block(cves.get(pid, [])),
+                resolved=mine_vulns.get("resolved", 0),
+                new_findings=mine_vulns.get("new", 0),
+                false_positives=mine_vulns.get("fp", 0),
+                vulnerabilities=mine_vulns.get("total", 0),
             )
         )
 
-    all_new = sorted((c for found in cves.values() for c in found), key=lambda t: t[2], reverse=True)
     totals = DigestTotals(
         **{
             f: sum(getattr(r, f) for r in rows)
-            for f in (
-                "pipeline_runs",
-                "pipeline_failed",
-                "cloud_scans",
-                "cloud_failed",
-                "critical",
-                "high",
-                "quota_used",
-                "quota_limit",
-            )
-        },
-        new_cves=NewCves(count=len(all_new), latest=[CveRef(id=a, severity=s) for a, s, _ in all_new[:2]]),
+            for f in ("pipeline_runs", "pipeline_failed", "cloud_scans", "cloud_failed", "critical", "high")
+        }
     )
 
     stale: list[StaleProject] = []
@@ -252,17 +242,18 @@ async def build_preview(digest: DigestSettings, now: datetime | None = None) -> 
             reference = p.last_scan_at or p.created_at
             if _utc(reference) < end - STALE_AFTER:
                 stale.append(StaleProject(project_id=str(p.id), name=p.name, last_scan_at=_utc(p.last_scan_at)))
-    warnings = [
-        QuotaWarning(project_id=r.project_id, name=r.name, used=r.quota_used, limit=r.quota_limit)
-        for r in rows
-        if r.quota_limit > 0 and r.quota_used >= QUOTA_WARN_FRACTION * r.quota_limit
-    ]
+    warnings: list[QuotaWarning] = []
+    for p in projects:
+        q = quotas[str(p.id)]
+        if q.limit > 0 and q.used >= QUOTA_WARN_FRACTION * q.limit:
+            warnings.append(QuotaWarning(project_id=str(p.id), name=p.name, used=q.used, limit=q.limit))
+    new_cve_count = len({advisory for found in cves.values() for advisory, _sev, _first in found})
     return DigestPreview(
         period_start=start,
         period_end=end,
         rows=rows,
         totals=totals,
-        scanner=await _scanner_health(_advisory_summary(all_new)),
+        scanner=await _scanner_health({str(p.id): p.name for p in projects}, new_cve_count, start, end),
         stale_projects=stale,
         quota_warnings=warnings,
     )
@@ -276,13 +267,14 @@ def _utc(value: datetime | None) -> datetime | None:
 
 # --- the card (pure) --------------------------------------------------------------------------
 
-_SEV_LETTER = {"critical": "C", "high": "H", "medium": "M", "low": "L", "info": "I"}
-_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Column set, not the 1.5 Table element: legacy Office 365 connector webhooks (webhook.office.com)
 # render Adaptive Cards only up to 1.4 and drop a Table without an error, so the rows vanished.
-_COLUMNS = ("Project", "Pipeline", "Cloud", "Critical", "High", "Quota", "New CVEs")
-_WIDTHS = (30, 14, 14, 10, 10, 10, 22)
-_CENTERED = {3, 4, 5}
+_PROJECT_COLUMNS = ("Project", "CI/CD", "Cloud", "Critical", "High", "Fail rate", "Resolved", "New findings")
+_PROJECT_WIDTHS = (30, 10, 10, 10, 10, 11, 11, 13)
+_PROJECT_CENTERED = {1, 2, 3, 4, 5, 6, 7}
+_OUTDATED_COLUMNS = ("Project", "Repository", "Scanner used", "Runs", "Last run (UTC)")
+_OUTDATED_WIDTHS = (22, 34, 14, 8, 18)
+_OUTDATED_CENTERED = {3}
 
 
 def _text(value: str, *, bold: bool = False, color: str | None = None, center: bool = False) -> dict:
@@ -296,13 +288,15 @@ def _text(value: str, *, bold: bool = False, color: str | None = None, center: b
     return block
 
 
-def _grid_row(cells: list[dict], *, style: str | None = None, separator: bool = False) -> dict:
+def _grid_row(
+    cells: list[dict], widths: tuple[int, ...], *, style: str | None = None, separator: bool = False
+) -> dict:
     row: dict = {
         "type": "ColumnSet",
         "spacing": "Small",
         "columns": [
             {"type": "Column", "width": w, "verticalContentAlignment": "Center", "items": [c]}
-            for w, c in zip(_WIDTHS, cells)
+            for w, c in zip(widths, cells)
         ],
     }
     if style:
@@ -312,31 +306,30 @@ def _grid_row(cells: list[dict], *, style: str | None = None, separator: bool = 
     return row
 
 
-def _runs(total: int, failed: int) -> str:
-    return f"{total} ({failed} failed)" if failed else str(total)
+def _header_row(columns: tuple[str, ...], widths: tuple[int, ...], centered: set[int]) -> dict:
+    cells = [_text(c, bold=True, center=i in centered) for i, c in enumerate(columns)]
+    return _grid_row(cells, widths, style="emphasis")
 
 
-def _cves_text(cves: NewCves) -> str:
-    if not cves.count:
-        return "-"
-    latest = ", ".join(f"{c.id} ({_SEV_LETTER.get(c.severity, '?')})" for c in cves.latest)
-    return f"{cves.count}: {latest}"
+def _pct(part: int, whole: int) -> str:
+    return "-" if whole <= 0 else f"{part / whole:.0%}"
 
 
-def _quota_text(used: int, limit: int) -> str:
-    return f"{used}/{limit}"
+def _fail_rate(r) -> str:
+    return _pct(r.pipeline_failed + r.cloud_failed, r.pipeline_runs + r.cloud_scans)
 
 
-def _row_cells(name: str, r, cves: str, *, bold: bool = False) -> list[dict]:
-    near_limit = r.quota_limit > 0 and r.quota_used >= r.quota_limit * 0.8
+def _row_cells(r) -> list[dict]:
+    failed = bool(r.pipeline_failed + r.cloud_failed)
     return [
-        _text(name, bold=True),
-        _text(_runs(r.pipeline_runs, r.pipeline_failed), bold=bold, color="Attention" if r.pipeline_failed else None),
-        _text(_runs(r.cloud_scans, r.cloud_failed), bold=bold, color="Attention" if r.cloud_failed else None),
+        _text(r.name, bold=True),
+        _text(str(r.pipeline_runs), center=True),
+        _text(str(r.cloud_scans), center=True),
         _text(str(r.critical), bold=True, color="Attention" if r.critical else None, center=True),
         _text(str(r.high), bold=True, color="Warning" if r.high else None, center=True),
-        _text(_quota_text(r.quota_used, r.quota_limit), bold=bold, color="Warning" if near_limit else None, center=True),
-        _text(cves, bold=bold, color="Attention" if cves != "-" else None),
+        _text(_fail_rate(r), color="Attention" if failed else None, center=True),
+        _text(str(r.resolved), center=True),
+        _text(str(r.new_findings), center=True),
     ]
 
 
@@ -413,81 +406,55 @@ def _note(text: str, *, spacing: str = "Small") -> dict:
     return {"type": "TextBlock", "text": text, "isSubtle": True, "size": "Small", "wrap": True, "spacing": spacing}
 
 
-def _ms(value: int | None) -> str:
-    return "NOT REACHABLE" if value is None else f"reachable, {value} ms"
+def _period(preview: DigestPreview) -> str:
+    return f"{preview.period_start:%d %b %Y %H:%M} to {preview.period_end:%d %b %Y %H:%M} UTC"
+
+
+def _open_action(frontend_origin: str, path: str, title: str) -> list[dict] | None:
+    return [{"type": "Action.OpenUrl", "title": title, "url": f"{frontend_origin}{path}"}] if frontend_origin else None
+
+
+def _outdated_section(s: ScannerHealth) -> list[dict]:
+    heading = {"type": "TextBlock", "text": "Pipelines on an older scanner", "weight": "Bolder", "wrap": True}
+    if not s.latest_binary_version:
+        return [heading, _note("No scanner binary is published, so pipeline versions cannot be compared.", spacing="None")]
+    if not s.outdated_pipelines:
+        return [heading, _note(f"Every pipeline in this period used {s.latest_binary_version}.", spacing="None")]
+    shown = s.outdated_pipelines[:_MAX_OUTDATED_ROWS]
+    rows = [_header_row(_OUTDATED_COLUMNS, _OUTDATED_WIDTHS, _OUTDATED_CENTERED)]
+    for i, o in enumerate(shown):
+        cells = [
+            _text(o.project, bold=True),
+            _text(o.repository),
+            _text(o.scanner_version, color="Warning"),
+            _text(str(o.runs), center=True),
+            _text(f"{o.last_run_at:%d %b %Y %H:%M}" if o.last_run_at else "-"),
+        ]
+        rows.append(_grid_row(cells, _OUTDATED_WIDTHS, separator=i > 0))
+    if len(s.outdated_pipelines) > len(shown):
+        rows.append(_note(f"+ {len(s.outdated_pipelines) - len(shown)} more.", spacing="Medium"))
+    return [heading, *rows]
 
 
 def _health_part(preview: DigestPreview) -> _Part:
     s = preview.scanner
-    ready = s.engine_available and s.osv_reachable
-    engine = [
-        ("Scan engine", "Available" if s.engine_available else "NOT AVAILABLE"),
+    facts = [
         ("Scanner in backend", s.backend_scanner_version),
         ("Latest published binary", s.latest_binary_version or "None published"),
-        ("CI runners on an older scanner", str(s.outdated_ci_runners)),
-        ("Rule pack", f"v{s.rule_pack_version} ({s.rule_count} custom rules)" if s.rule_pack_version else "None published"),
+        ("Projects on an older scanner", str(s.projects_outdated)),
+        ("New CVEs added", str(s.new_advisory_count)),
+        ("Scan engine", "Available" if s.engine_available else "NOT AVAILABLE"),
     ]
-    feed = [
-        ("Source", "OSV.dev, queried live at scan time. The scanner keeps no local CVE database."),
-        ("Batch lookup", _ms(s.osv_batch_ms)),
-        ("Advisory lookup", _ms(s.osv_vuln_ms)),
-        ("Checked", f"{s.osv_checked_at:%d %b %Y %H:%M} UTC" if s.osv_checked_at else "-"),
-        (
-            "Last dependency scan",
-            f"{s.last_dependency_scan_at:%d %b %Y %H:%M} UTC" if s.last_dependency_scan_at else "None recorded",
-        ),
-    ]
-    since = f"{preview.period_start:%d %b %H:%M} UTC"
-    advisories: list[dict] = [
-        {
-            "type": "TextBlock",
-            "text": f"New advisories since {since}: {s.new_advisory_count}",
-            "weight": "Bolder",
-            "wrap": True,
-        }
-    ]
-    if s.new_advisories:
-        advisories += [
-            {
-                "type": "TextBlock",
-                "text": f"- {a.id} ({a.severity}), {a.projects} project{'s' if a.projects != 1 else ''}",
-                "wrap": True,
-                "size": "Small",
-                "spacing": "None",
-                "color": "Attention" if a.severity in ("critical", "high") else "Default",
-            }
-            for a in s.new_advisories
-        ]
-        if s.new_advisory_count > len(s.new_advisories):
-            advisories.append(_note(f"+ {s.new_advisory_count - len(s.new_advisories)} more advisories."))
-    else:
-        advisories.append(_note("No advisory was first reported by any project in this period.", spacing="None"))
     body = [
-        {
-            "type": "Container",
-            "spacing": "Medium",
-            "items": [
-                {"type": "TextBlock", "text": "Scanner", "weight": "Bolder", "wrap": True},
-                {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in engine]},
-            ],
-        },
-        {
-            "type": "Container",
-            "spacing": "Medium",
-            "separator": True,
-            "items": [
-                {"type": "TextBlock", "text": "CVE data (OSV.dev)", "weight": "Bolder", "wrap": True},
-                {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in feed]},
-            ],
-        },
-        {"type": "Container", "spacing": "Medium", "separator": True, "items": advisories},
+        {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in facts]},
+        {"type": "Container", "spacing": "Medium", "separator": True, "items": _outdated_section(s)},
     ]
     return _Part(
-        "SCANNER HEALTH",
-        "Scanner ready, CVE feed live" if ready else "Scanner NOT ready",
-        f"{s.backend_scanner_version} · {s.new_advisory_count} new advisories in this period",
+        "SCANNER",
+        "Scanner ready" if s.engine_available else "Scanner NOT ready",
+        f"{s.backend_scanner_version} · {s.new_advisory_count} new CVEs in this period",
         body,
-        style="good" if ready else "attention",
+        style="good" if s.engine_available else "attention",
     )
 
 
@@ -499,12 +466,13 @@ def _project_parts(preview: DigestPreview) -> tuple[list[_Part], int]:
     parts: list[_Part] = []
     for start in range(0, len(shown), _ROWS_PER_CARD):
         chunk = shown[start : start + _ROWS_PER_CARD]
-        body = [_grid_row([_text(c, bold=True, center=i in _CENTERED) for i, c in enumerate(_COLUMNS)], style="emphasis")]
-        body += [_grid_row(_row_cells(r.name, r, _cves_text(r.new_cves)), separator=i > 0) for i, r in enumerate(chunk)]
+        body = [_header_row(_PROJECT_COLUMNS, _PROJECT_WIDTHS, _PROJECT_CENTERED)]
+        body += [_grid_row(_row_cells(r), _PROJECT_WIDTHS, separator=i > 0) for i, r in enumerate(chunk)]
         body.append(
             _note(
-                "Pipeline and Cloud count runs in this period. Critical and High are current exposure "
-                "(latest scan per repository).",
+                "CI/CD and Cloud count scans created in this period; Fail rate is failed over all of them. "
+                "Critical and High are current exposure (latest scan per repository). Resolved is all-time; "
+                "New findings were first seen in this period.",
                 spacing="Medium",
             )
         )
@@ -513,83 +481,76 @@ def _project_parts(preview: DigestPreview) -> tuple[list[_Part], int]:
 
 
 def _summary_part(preview: DigestPreview, left_out: int, frontend_origin: str) -> _Part:
-    t, s = preview.totals, preview.scanner
+    t = preview.totals
     end = preview.period_end
-    period = f"{preview.period_start:%d %b %Y %H:%M} to {end:%d %b %Y %H:%M} UTC"
-    ready = s.engine_available and s.osv_reachable
+    failed = t.pipeline_failed + t.cloud_failed
     body: list[dict] = [
         {
             "type": "ColumnSet",
             "spacing": "Medium",
             "columns": [
-                _kpi("Pipeline runs", t.pipeline_runs, None),
-                _kpi("Pipeline failed", t.pipeline_failed, "Attention" if t.pipeline_failed else None),
+                _kpi("CI/CD scans", t.pipeline_runs, None),
                 _kpi("Cloud scans", t.cloud_scans, None),
-                _kpi("Cloud failed", t.cloud_failed, "Attention" if t.cloud_failed else None),
-                _kpi("Critical", t.critical, "Attention" if t.critical else None),
-                _kpi("High", t.high, "Warning" if t.high else None),
+                _kpi("Failed scans", failed, "Attention" if failed else None),
+            ],
+        }
+    ]
+    if left_out:
+        body.append(_note(f"{left_out} more projects were not listed on the project cards (totals include them)."))
+    return _Part(
+        "SUMMARY",
+        f"Security digest, {end:%a %d %b %Y}",
+        f"Updated {end:%H:%M} UTC · period {_period(preview)}",
+        body,
+        actions=_open_action(frontend_origin, "/admin/control-panel", "Open Control Panel"),
+    )
+
+
+def build_cards(preview: DigestPreview, *, frontend_origin: str = "") -> list[dict]:
+    """The global digest as ordered Adaptive Cards 1.4: scanner, then project status
+    (`_ROWS_PER_CARD` per card), then a dated three-KPI summary. Pure: the same preview always yields the
+    same cards. Totals always cover every project; only the project cards are capped."""
+    project_parts, left_out = _project_parts(preview)
+    parts = [_health_part(preview), *project_parts, _summary_part(preview, left_out, frontend_origin)]
+    return [_envelope(part, i, len(parts)) for i, part in enumerate(parts, 1)]
+
+
+def _project_digest_part(preview: DigestPreview, r: DigestRow, frontend_origin: str) -> _Part:
+    failed = r.pipeline_failed + r.cloud_failed
+    body = [
+        {
+            "type": "ColumnSet",
+            "spacing": "Medium",
+            "columns": [
+                _kpi("Total scans", r.pipeline_runs + r.cloud_scans, None),
+                _kpi("CI/CD scans", r.pipeline_runs, None),
+                _kpi("Cloud scans", r.cloud_scans, None),
+                _kpi("Failed scans", failed, "Attention" if failed else None),
             ],
         },
         {
             "type": "FactSet",
             "facts": [
-                {"title": "Projects", "value": str(len(preview.rows))},
-                {
-                    "title": "Scanner",
-                    "value": f"{'Ready' if ready else 'NOT READY'} ({s.backend_scanner_version}), OSV.dev "
-                    + ("live" if s.osv_reachable else "NOT REACHABLE"),
-                },
-                {"title": "New advisories", "value": str(s.new_advisory_count)},
+                {"title": "Resolved (all time)", "value": str(r.resolved)},
+                {"title": "False-positive rate", "value": _pct(r.false_positives, r.vulnerabilities)},
             ],
         },
     ]
-    if left_out:
-        body.append(_note(f"{left_out} more projects were not listed on the project cards (totals include them)."))
-    attention: list[str] = []
-    if t.cloud_failed or t.pipeline_failed:
-        attention.append(f"{t.pipeline_failed} pipeline run(s) and {t.cloud_failed} cloud scan(s) failed this period")
-    if not ready:
-        attention.append("The scanner or its CVE feed is not ready; see the scanner health card")
-    if preview.quota_warnings:
-        attention.append(
-            "At 80% or more of cloud-scan quota: "
-            + ", ".join(f"{w.name} ({w.used}/{w.limit})" for w in preview.quota_warnings[:10])
-        )
-    if preview.stale_projects:
-        attention.append(
-            "No scan in 30 days: "
-            + ", ".join(p.name for p in preview.stale_projects[:10])
-            + (f" and {len(preview.stale_projects) - 10} more" if len(preview.stale_projects) > 10 else "")
-        )
-    if attention:
-        body.append(
-            {
-                "type": "Container",
-                "spacing": "Medium",
-                "style": "warning",
-                "items": [
-                    {"type": "TextBlock", "text": "Needs attention", "weight": "Bolder", "wrap": True},
-                    *({"type": "TextBlock", "text": f"- {line}", "wrap": True, "spacing": "Small"} for line in attention),
-                ],
-            }
-        )
-    actions = (
-        [{"type": "Action.OpenUrl", "title": "Open Control Panel", "url": f"{frontend_origin}/admin/control-panel"}]
-        if frontend_origin
-        else None
-    )
     return _Part(
-        "SUMMARY", f"Security digest, {end:%a %d %b %Y}", f"Updated {end:%H:%M} UTC · period {period}", body, actions=actions
+        "PROJECT DIGEST",
+        r.name,
+        _period(preview),
+        body,
+        actions=_open_action(frontend_origin, f"/projects/{r.project_id}", "Open project"),
     )
 
 
-def build_cards(preview: DigestPreview, *, frontend_origin: str = "") -> list[dict]:
-    """The digest as ordered Adaptive Cards 1.4: scanner health and CVE feed status, then project status
-    (`_ROWS_PER_CARD` per card), then a dated summary. Pure: the same preview always yields the same
-    cards. Totals always cover every project; only the project cards are capped."""
-    project_parts, left_out = _project_parts(preview)
-    parts = [_health_part(preview), *project_parts, _summary_part(preview, left_out, frontend_origin)]
-    return [_envelope(part, i, len(parts)) for i, part in enumerate(parts, 1)]
+def build_project_cards(preview: DigestPreview, *, frontend_origin: str = "") -> list[dict]:
+    """One card per project in the preview, for a channel scoped to those projects. Carries nothing
+    about any other project."""
+    rows = sorted(preview.rows, key=_rank, reverse=True)[:_MAX_SCOPED_CARDS]
+    return [_envelope(_project_digest_part(preview, r, frontend_origin), i, len(rows)) for i, r in enumerate(rows, 1)]
+
 
 
 # --- sending ----------------------------------------------------------------------------------
@@ -598,6 +559,8 @@ def build_cards(preview: DigestPreview, *, frontend_origin: str = "") -> list[di
 async def _post_cards(channel: WebhookChannel, cards: list[dict]) -> str | None:
     """Post the cards to one channel in order; the error text of the first failure, else None. Stops
     there: a digest missing its middle is worse than one that says which card it stopped at."""
+    if not cards:
+        return "no active project in this channel's scope"
     for i, card in enumerate(cards, 1):
         if i > 1:
             await asyncio.sleep(_CARD_GAP_SECONDS)
@@ -608,7 +571,9 @@ async def _post_cards(channel: WebhookChannel, cards: list[dict]) -> str | None:
 
 
 async def send_digest(digest: DigestSettings, *, now: datetime | None = None) -> DigestSendResponse:
-    """Post the current digest to every enabled channel with `include_digest`. Never raises."""
+    """Post the digest to every enabled channel with `include_digest`: the global digest to a channel with
+    no project scope, one card per listed project to a scoped one (it never sees other projects' numbers).
+    Never raises."""
     errors: list[DigestSendError] = []
     sent = 0
     card_count = 0
@@ -618,14 +583,24 @@ async def send_digest(digest: DigestSettings, *, now: datetime | None = None) ->
         ).to_list()
         if not channels:
             return DigestSendResponse(sent=0, errors=[])
-        cards = build_cards(await build_preview(digest, now), frontend_origin=settings.frontend_origin)
-        results = await asyncio.gather(*(_post_cards(c, cards) for c in channels))
+        origin = settings.frontend_origin
+        global_cards: list[dict] | None = None
+        plans: list[list[dict]] = []
+        for channel in channels:
+            if channel.project_ids:
+                preview = await build_preview(digest, now, project_ids=channel.project_ids)
+                plans.append(build_project_cards(preview, frontend_origin=origin))
+            else:
+                if global_cards is None:
+                    global_cards = build_cards(await build_preview(digest, now), frontend_origin=origin)
+                plans.append(global_cards)
+        results = await asyncio.gather(*(_post_cards(c, cards) for c, cards in zip(channels, plans)))
         for channel, error in zip(channels, results):
             if error is None:
                 sent += 1
             else:
                 errors.append(DigestSendError(channel_id=str(channel.id), name=channel.name, error=error))
-        card_count = len(cards)
+        card_count = max(len(cards) for cards in plans)
     except Exception as exc:
         logger.warning("digest send failed", exc_info=True)
         errors.append(DigestSendError(channel_id="", name="digest", error=type(exc).__name__))

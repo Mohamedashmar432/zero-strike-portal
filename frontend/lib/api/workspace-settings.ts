@@ -9,6 +9,8 @@ export interface WorkspaceSettings {
   project_byok_enabled: boolean;
   /** Admin-only, no project twin: a member's false positive / accepted risk waits for an admin when true. */
   finding_review_required: boolean;
+  /** Admin-only, independent of the false-positive switch: an accepted-risk request waits for an admin when true. */
+  risk_acceptance_review_required: boolean;
   scan_enable_secrets: boolean;
   scan_enable_sca: boolean;
   scan_enable_framework_checks: boolean;
@@ -37,6 +39,7 @@ export type WorkspaceSettingsUpdate = Partial<
     | "compliance_evidence_retention_days"
     | "signup_requires_approval"
     | "finding_review_required"
+    | "risk_acceptance_review_required"
     | "signup_notify_admin_ids"
   >
 >;

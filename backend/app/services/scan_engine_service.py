@@ -9,10 +9,12 @@ difference between the working copy and the active pack. Nothing here sends code
 statistics are counts only - no client code is shown across projects.
 """
 
+import functools
 import os
 import re
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 import structlog
 import yaml
@@ -138,9 +140,42 @@ async def _languages() -> dict[str, str]:
     return {g["_id"]: g["language"] for g in groups}
 
 
+@functools.lru_cache(maxsize=4)
+def _load_catalog(rules_dir: str) -> dict[str, dict]:
+    """Built-in rules from the scanner's YAML data files (id -> metadata). Data only, no scanner
+    import. A file that cannot be read is skipped with one warning; cached per directory."""
+    catalog: dict[str, dict] = {}
+    skipped = 0
+    for path in sorted(Path(rules_dir).rglob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            rid = str(doc["id"])
+        except Exception:
+            skipped += 1
+            continue
+        cwe = doc.get("cwe")
+        catalog[rid] = {
+            "name": doc.get("name"),
+            "language": doc.get("language"),
+            "category": doc.get("category"),
+            "severity": str(doc["severity"]).lower() if doc.get("severity") else None,
+            "cwe": [str(c) for c in cwe] if isinstance(cwe, list) else [],
+            "lifecycle": doc.get("lifecycle"),
+        }
+    if skipped:
+        logger.warning("scanner rule catalog: skipped unreadable rule files", skipped=skipped, dir=rules_dir)
+    return catalog
+
+
+def builtin_catalog() -> dict[str, dict] | None:
+    """None when SCANNER_RULES_DIR is unset or not a directory (behave as before)."""
+    d = settings.scanner_rules_dir
+    return _load_catalog(d) if d and os.path.isdir(d) else None
+
+
 async def rule_stats() -> dict:
-    """One row per rule that has produced a finding, plus any retired/custom rule without one.
-    Sorted by false-positive tags."""
+    """One row per built-in rule (when the catalog is configured) and per rule that has produced a
+    finding, plus any retired/custom rule without one. Sorted by false-positive tags."""
     min_tags, min_percent = await _thresholds()
     agg = await _aggregate_rules()
     langs = await _languages()
@@ -151,9 +186,12 @@ async def rule_stats() -> dict:
     base_custom = {r.rule_id: r.yaml for r in (pack.custom_rules if pack else [])}
 
     retired_now = {rid for rid, o in overrides.items() if o.state == "retired"}
+    catalog = builtin_catalog()
+    cat = catalog or {}
     rows = []
-    for rid in sorted(set(agg) | retired_now | set(customs)):
+    for rid in sorted(set(agg) | retired_now | set(customs) | set(cat)):
         g = agg.get(rid, {})
+        c = cat.get(rid, {})
         total, fp = g.get("total", 0), g.get("fp_tags", 0)
         is_retired = rid in retired_now
         is_custom = rid in customs
@@ -163,9 +201,11 @@ async def rule_stats() -> dict:
         rows.append(
             {
                 "rule_id": rid,
-                "title": g.get("title") or (None),
-                "severity": _top_severity(g.get("severities", [])),
-                "language": langs.get(rid) or (customs[rid].language if is_custom else None),
+                "title": g.get("title") or c.get("name"),
+                "severity": _top_severity(g.get("severities", [])) or c.get("severity"),
+                "language": langs.get(rid) or (customs[rid].language if is_custom else None) or c.get("language"),
+                "category": c.get("category"),
+                "cwe": c.get("cwe", []),
                 "total_findings": total,
                 "fp_tags": fp,
                 "fp_rate": round(fp / total, 4) if total else 0.0,
@@ -182,6 +222,8 @@ async def rule_stats() -> dict:
         "noisy_min_fp_tags": min_tags,
         "noisy_min_fp_percent": min_percent,
         "active_version": pack.version if pack else None,
+        "catalog_loaded": catalog is not None,
+        "catalog_count": len(cat),
     }
 
 

@@ -196,7 +196,7 @@ def test_message_never_claims_direct_or_transitive():
 
 def test_no_fix_malicious_and_critical_wording():
     nofix = adv.build_alert("P", "p1", [_row(fixed_versions=[])], NOW)
-    assert "fix none yet" in nofix.facts[2][1]
+    assert "no fix yet" in nofix.facts[2][1]
     mal = adv.build_alert("P", "p1", [_row(severity="critical", malicious=True, cvss_score=None)], NOW)
     assert mal.facts[2][1] == "MALICIOUS PACKAGE · remove example-widget 1.2.3"
     assert mal.notif_severity == "error"

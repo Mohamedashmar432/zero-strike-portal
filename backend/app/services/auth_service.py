@@ -444,12 +444,17 @@ async def reset_password(token: str, new_password: str) -> User:
     token_hash = security.hash_token(token)
     user = await User.find_one(User.password_reset_token_hash == token_hash)
 
-    if (
-        user is None
-        or user.password_reset_expires_at is None
-        or user.password_reset_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired reset token")
+    # Two messages, one status: a token that matches a stored hash but is past its expiry is the
+    # person's own link going stale, which they can act on ("request a new one"). Telling it apart
+    # from an unknown/used token reveals nothing -- the token is a 256-bit secret only they hold.
+    if user is None or user.password_reset_expires_at is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This reset link is invalid or has already been used.")
+    if user.password_reset_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This reset link has expired. Links are valid for {settings.password_reset_token_ttl_minutes} "
+            "minutes - please request a new one.",
+        )
 
     now = datetime.now(timezone.utc)
     user.password_hash = security.hash_password(new_password)

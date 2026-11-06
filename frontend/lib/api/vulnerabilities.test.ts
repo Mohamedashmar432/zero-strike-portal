@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fixedViaPrLabel, needsAdminReview, statusChangeBlockReason } from "./vulnerabilities";
+import { chunkIds, fixedViaPrLabel, needsAdminReview, statusChangeBlockReason } from "./vulnerabilities";
 
 test("fixedViaPrLabel names the PR only when there is one", () => {
   const pr = { pr_number: 12, pr_url: null, pr_provider: "github", merged_at: null, merge_commit: null };
@@ -21,7 +21,12 @@ describe("statusChangeBlockReason", () => {
   });
 
   test("allows accepting risk once explained", () => {
-    expect(statusChangeBlockReason("accepted_risk", null, "Compensating control in the gateway.")).toBeNull();
+    expect(
+      statusChangeBlockReason("accepted_risk", null, "Compensating control in the gateway blocks this path.")
+    ).toBeNull();
+    // A thin comment is refused with the same rule the server applies.
+    expect(statusChangeBlockReason("accepted_risk", null, "n/a")).toMatch(/placeholder/i);
+    expect(statusChangeBlockReason("accepted_risk", null, "Compensating control exists")).toMatch(/40 characters/);
   });
 
   test("blocks resolving without a reason", () => {
@@ -62,9 +67,17 @@ describe("admin-reviewed exemptions", () => {
   test("marks exactly the changes that wait for a portal admin", () => {
     expect(needsAdminReview("resolved", "false_positive", "sast")).toBe(true);
     expect(needsAdminReview("accepted_risk", null, "sca")).toBe(true);
-    // A code finding's accepted risk and every other transition apply immediately.
-    expect(needsAdminReview("accepted_risk", null, "sast")).toBe(false);
+    // Accepted risk now goes through review for every kind.
+    expect(needsAdminReview("accepted_risk", null, "sast")).toBe(true);
+    expect(needsAdminReview("accepted_risk", null, null)).toBe(true);
+    // Every other transition applies immediately.
     expect(needsAdminReview("resolved", "fixed", "sast")).toBe(false);
     expect(needsAdminReview("resolved", "false_positive", "sca")).toBe(false);
   });
+});
+
+test("chunkIds splits a selection into API-sized batches", () => {
+  const ids = Array.from({ length: 250 }, (_, i) => String(i));
+  expect(chunkIds(ids).map((c) => c.length)).toEqual([100, 100, 50]);
+  expect(chunkIds([])).toEqual([]);
 });

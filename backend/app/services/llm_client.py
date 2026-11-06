@@ -6,9 +6,11 @@ kimi/nvidia_nim/openrouter/custom) -- this module deliberately does not build a 
 "provider adapter" interface on top of it.
 """
 
+import asyncio
 import json
 import re
 import time
+from urllib.parse import urlparse
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -17,6 +19,7 @@ import structlog
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.repo_url import resolve_vetted_ips
 from app.core.retry import retry_transient
 from app.models.ai_provider_config import NO_KEY_REQUIRED_PROVIDERS, AIProvider
 from app.services import ai_budget_service, ai_provider_config_service, pricing_service
@@ -183,6 +186,18 @@ class LLMPermanentError(LLMError):
 
 class LLMMalformedResponseError(LLMError):
     """The call succeeded but the response content was not valid JSON."""
+
+
+async def vet_project_base_url(config) -> None:
+    """Re-vet a PROJECT-owned provider's base_url right before it is used. The write-time check can
+    be outlived by DNS (rebinding) and never ran on rows stored before it existed. The portal-wide
+    provider (project_id None) is admin-managed and may legitimately point at localhost/LAN."""
+    if not config.project_id or not config.base_url:
+        return
+    try:
+        await asyncio.to_thread(resolve_vetted_ips, urlparse(config.base_url).hostname or "")
+    except ValueError as exc:
+        raise LLMPermanentError(f"base_url rejected: {exc}") from exc
 
 
 # litellm exceptions worth retrying: transient upstream conditions that may clear on their own.
@@ -404,6 +419,7 @@ async def _completion_with_config(
 ) -> dict:
     """One completion attempt against one provider config. Usage is recorded against `config`, so a
     failed-over call bills the provider that actually served it."""
+    await vet_project_base_url(config)
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
     api_key = _resolve_api_key(config.provider, await load_api_key(config))
     kwargs: dict = {
@@ -627,6 +643,7 @@ async def _tool_completion_with_config(
     failover_from: str | None = None,
 ) -> LLMToolResponse:
     """One tool-calling attempt against one provider config."""
+    await vet_project_base_url(config)
     model, api_base = _resolve_model_and_base(config.provider, config.model_name, config.base_url)
     api_key = _resolve_api_key(config.provider, await load_api_key(config))
     kwargs: dict = {

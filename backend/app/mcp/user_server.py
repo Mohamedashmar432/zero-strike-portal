@@ -580,11 +580,12 @@ async def _vulnerability(vulnerability_id: str) -> Vulnerability:
 
 @_tool
 async def mark_false_positive(vulnerability_id: str, comment: str) -> dict[str, Any]:
-    """Mark a code finding (SAST, secret or config) as a FALSE POSITIVE, with a required justification in `comment` explaining why the finding is not a real issue. Get `vulnerability_id` from list_findings (project listings, field `vulnerability_id`). The exemption covers this finding in this file only. Dependency (SCA) findings cannot be false positives and are refused here; request accepted risk in the portal instead. Whether it takes effect immediately (the finding stops counting in the portal and in CI on the next scan) or waits for a portal admin to accept it depends on the workspace setting; the returned `review_status` says which: "accepted" or "pending"."""
+    """Mark a code finding (SAST, secret or config) as a FALSE POSITIVE, with a required justification in `comment` explaining why the finding is not a real issue. Get `vulnerability_id` from list_findings (project listings, field `vulnerability_id`). The exemption covers this finding in this file only. Dependency (SCA) findings cannot be false positives and are refused here. To accept a risk on any finding (which needs a longer written justification), use the portal's Vulnerabilities page. Whether it takes effect immediately (the finding stops counting in the portal and in CI on the next scan) or waits for a portal admin to accept it depends on the workspace setting; the returned `review_status` says which: "accepted" or "pending"."""
     v = await _vulnerability(vulnerability_id)
-    if finding_review_service.kind_allowed(v) != "false_positive":
+    if "false_positive" not in finding_review_service.kinds_allowed(v):
         raise ToolError(
-            "Dependency findings cannot be marked as false positive. Request accepted risk in the portal instead."
+            "Dependency findings cannot be marked as false positive. Request accepted risk in the portal instead, "
+            "with a written justification."
         )
     # Same path as the portal's status route, so the workspace review setting applies identically.
     # Any project member may request, exactly as on that route.
