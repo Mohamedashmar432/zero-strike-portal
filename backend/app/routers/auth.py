@@ -16,6 +16,7 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     TokenPairResponse,
+    RegisterResponse,
     UserResponse,
 )
 from app.schemas.common import MessageResponse
@@ -33,7 +34,7 @@ def _to_user_response(user: User) -> UserResponse:
     )
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, request: Request, background: BackgroundTasks):
     rate_limit.enforce(
         f"register:{client_ip(request)}",
@@ -49,7 +50,7 @@ async def register(payload: RegisterRequest, request: Request, background: Backg
         await audit_service.record(
             "Register Rejected", ip_address=client_ip(request), metadata={"reason": "email_exists"}
         )
-        return UserResponse(
+        return RegisterResponse(
             id=str(ObjectId()), email=payload.email, name=payload.name, role="user",
             approval_status=await auth_service.new_signup_status(),
         )
@@ -62,7 +63,7 @@ async def register(payload: RegisterRequest, request: Request, background: Backg
         await auth_service.announce_signup(user)
     if user.approval_status == "approved":
         background.add_task(auth_service.send_welcome_email, user)
-    return _to_user_response(user)
+    return RegisterResponse(**_to_user_response(user).model_dump())
 
 
 @router.post("/login", response_model=TokenPairResponse)

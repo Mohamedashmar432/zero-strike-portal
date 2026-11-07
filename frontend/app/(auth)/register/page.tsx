@@ -59,6 +59,10 @@ function RegisterForm() {
             An administrator will review your request. We&apos;ll email {submittedEmail} as soon as
             a decision is made, and you can sign in after your access is approved.
           </p>
+          <p>
+            If {submittedEmail} already has an account, no new account is created and your existing
+            one is unchanged. Check that inbox, then sign in or reset your password.
+          </p>
           <Link href={`/login${nextQuery}`} className="text-foreground underline underline-offset-4">
             Back to sign in
           </Link>

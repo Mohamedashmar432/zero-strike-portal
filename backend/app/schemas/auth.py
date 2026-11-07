@@ -45,6 +45,17 @@ class UserResponse(BaseModel):
     rejection_reason: str | None = None
 
 
+REGISTER_MESSAGE = (
+    "Sign-up request received. If this email already has an account, no new account was created "
+    "and the existing one is unchanged; the address's owner has been notified."
+)
+
+
+class RegisterResponse(UserResponse):
+    # Identical text for a new and an existing address, so it can state the outcome without revealing which.
+    message: str = REGISTER_MESSAGE
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
