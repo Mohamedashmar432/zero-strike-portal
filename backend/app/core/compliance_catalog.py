@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 # Scanner vocabularies the selectors below are allowed to reference. Kept here (rather than
 # imported from models.finding) so the catalog test can assert against a single source and
 # so a scanner-side rename shows up as a failing test instead of a dead selector.
-FINDING_KINDS: frozenset[str] = frozenset({"sast", "secret", "sca", "config"})
+FINDING_KINDS: frozenset[str] = frozenset({"sast", "secret", "sca", "config", "ioc"})
 
 # Categories the Go scanner's rule corpus actually emits (internal/rules/data/**/*.yaml),
 # plus the two hardcoded in internal/findings/builder.go for secret and dependency findings.

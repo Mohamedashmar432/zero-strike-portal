@@ -39,6 +39,7 @@ _KIND_LABELS = {
     "secret": "Secrets",
     "sca": "Dependencies (SCA)",
     "config": "Configuration",
+    "ioc": "Indicators of Compromise",
 }
 
 # Templates are written for xhtml2pdf's CSS subset, not a browser: no flex/grid/
@@ -119,7 +120,7 @@ def _overall_risk(by_severity: dict[str, int]) -> str:
 
 
 def _scanners_used(by_kind: dict[str, int]) -> list[str]:
-    return [_KIND_LABELS[kind] for kind in ("sast", "secret", "sca", "config") if by_kind.get(kind)]
+    return [_KIND_LABELS[kind] for kind in ("sast", "secret", "sca", "config", "ioc") if by_kind.get(kind)]
 
 
 def _executive_summary(report: Report, total_findings: int) -> str:

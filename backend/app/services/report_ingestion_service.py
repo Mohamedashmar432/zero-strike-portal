@@ -39,7 +39,7 @@ from app.schemas.report import (
 logger = structlog.get_logger(__name__)
 
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
-_KINDS = {"sast", "secret", "sca", "config"}
+_KINDS = {"sast", "secret", "sca", "config", "ioc"}
 
 # Ceiling on the raw report blob stored inline on the Report doc. Mongo refuses any
 # document over 16 MB, and a big-repo report can exceed that on its own — which used to

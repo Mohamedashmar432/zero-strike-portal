@@ -22,6 +22,7 @@ const KIND_LABELS: Record<string, string> = {
   secret: "Secret",
   sca: "Dependency (SCA)",
   config: "Config",
+  ioc: "Indicator of compromise",
 };
 const REVIEW_LABELS: Record<string, string> = {
   none: "No review",

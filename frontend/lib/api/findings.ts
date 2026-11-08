@@ -4,7 +4,7 @@ import type { Page } from "./users";
 import type { PriorityTier } from "@/lib/priority";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
-export type FindingKind = "sast" | "secret" | "sca" | "config";
+export type FindingKind = "sast" | "secret" | "sca" | "config" | "ioc";
 
 export type FindingLocation = {
   file: string;

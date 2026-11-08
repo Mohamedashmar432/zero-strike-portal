@@ -110,6 +110,12 @@ def test_invalid_severity_and_kind_coerced_to_none(client):
     assert mapped.kind is None
 
 
+def test_ioc_kind_is_kept(client):
+    """The scanner's --enable-ioc findings carry kind "ioc"; ingest must keep it, not drop it to None."""
+    f = GoFindingIn(severity="critical", kind="ioc", message="x", location=GoLocationIn(file="package.json"))
+    assert ingest_svc._map_finding("s1", "p1", f).kind == "ioc"
+
+
 def test_missing_message_falls_back_to_rule_name(client):
     f = GoFindingIn(rule_name="Some Rule", location=GoLocationIn(file="a.py"))
     mapped = ingest_svc._map_finding("s1", "p1", f)

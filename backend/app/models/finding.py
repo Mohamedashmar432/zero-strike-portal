@@ -83,7 +83,7 @@ class Finding(Document):
     owasp: list[str] = []
     references: list[str] = []
     metadata: dict[str, str] = Field(default_factory=dict)
-    kind: Literal["sast", "secret", "sca", "config"] | None = None
+    kind: Literal["sast", "secret", "sca", "config", "ioc"] | None = None
     secret: SecretEmbedded | None = None
     dependency: DependencyEmbedded | None = None
     config: ConfigEmbedded | None = None
