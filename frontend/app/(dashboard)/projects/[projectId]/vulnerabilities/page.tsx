@@ -29,7 +29,6 @@ import {
   getVulnerabilitySummary,
   listVulnerabilities,
   UNLINKED_REPO_KEY,
-  type Vulnerability,
 } from "@/lib/api/vulnerabilities";
 import { useHasRole } from "@/lib/hooks/use-has-role";
 import {
@@ -153,7 +152,6 @@ export default function VulnerabilitiesPage() {
     const r = repoById.get(key);
     return r ? r.label || r.repo_full_name : "Unlinked";
   };
-  const repoLabel = (v: Vulnerability) => (v.project_repo_id ? repoName(v.project_repo_id) : "Unlinked");
 
   function chipLabel(chip: Chip): string {
     if (chip.key === "repo") return repoName(chip.value);
@@ -214,6 +212,20 @@ export default function VulnerabilitiesPage() {
         <RiskAcceptedPanel projectId={projectId} isAdmin={isAdmin} isOwner={project?.my_role === "owner"} />
       ) : (
         <>
+          {/* The overall picture leads: it is the context for the filters and the table below. */}
+          <section aria-label="Project totals" className="space-y-2">
+            <p className="legend text-muted-foreground">Project totals, unfiltered</p>
+            <MetricStrip
+              isLoading={!summary}
+              metrics={[
+                { label: "Open", value: (summary?.open ?? 0).toLocaleString(), tone: (summary?.open ?? 0) > 0 ? "critical" : "default" },
+                { label: "In progress", value: (summary?.in_progress ?? 0).toLocaleString() },
+                { label: "Reopened", value: (summary?.reopened ?? 0).toLocaleString(), tone: (summary?.reopened ?? 0) > 0 ? "high" : "default" },
+                { label: "Fixed", value: (summary?.fixed ?? 0).toLocaleString(), tone: "signal" },
+              ]}
+            />
+          </section>
+
           {/* Sticky: the search, the active filters and the result count stay in view while the table scrolls. */}
           <div className="sticky top-0 z-30 -mx-2 space-y-2 border-b border-hairline bg-background/95 px-2 py-3 backdrop-blur">
             <div className="flex flex-wrap items-center gap-3">
@@ -310,7 +322,6 @@ export default function VulnerabilitiesPage() {
                       return n;
                     })
                   }
-                  repoLabel={repoLabel}
                 />
               </DataTableCard>
 
@@ -346,19 +357,6 @@ export default function VulnerabilitiesPage() {
             </div>
           </div>
 
-          {/* The overall picture sits below the work: the table is what people come here to act on. */}
-          <section aria-label="Project totals" className="space-y-2">
-            <p className="legend text-muted-foreground">Project totals, unfiltered</p>
-            <MetricStrip
-              isLoading={!summary}
-              metrics={[
-                { label: "Open", value: (summary?.open ?? 0).toLocaleString(), tone: (summary?.open ?? 0) > 0 ? "critical" : "default" },
-                { label: "In progress", value: (summary?.in_progress ?? 0).toLocaleString() },
-                { label: "Reopened", value: (summary?.reopened ?? 0).toLocaleString(), tone: (summary?.reopened ?? 0) > 0 ? "high" : "default" },
-                { label: "Fixed", value: (summary?.fixed ?? 0).toLocaleString(), tone: "signal" },
-              ]}
-            />
-          </section>
         </>
       )}
     </div>

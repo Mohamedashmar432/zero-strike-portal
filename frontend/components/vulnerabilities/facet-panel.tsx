@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MultiSelectFilter } from "@/components/vulnerabilities/multi-select-filter";
 import type { VulnerabilityFacets } from "@/lib/api/vulnerabilities";
 import { cn } from "@/lib/utils";
 import { UNASSIGNED, type FilterState, type MultiKey } from "@/lib/vulnerability-filters";
@@ -70,7 +71,9 @@ function Group({
 }) {
   if (options.length === 0) return null;
   return (
-    <fieldset className="space-y-1 border-0 p-0">
+    // min-w-0: a fieldset defaults to min-width:min-content, which stops `truncate` and lets long labels
+    // spill over the table.
+    <fieldset className="min-w-0 space-y-1 border-0 p-0">
       <legend className="legend mb-1 text-muted-foreground">{title}</legend>
       {options.map((o) => {
         const checked = selected.includes(o.value);
@@ -155,7 +158,11 @@ export function FacetPanel({
   );
 
   return (
-    <aside aria-label="Filter findings" className="space-y-4">
+    // Sticky below the search bar and scrolling on its own, so the filters stay reachable beside a long table.
+    <aside
+      aria-label="Filter findings"
+      className="min-w-0 space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1"
+    >
       <Group
         title="Severity"
         options={build(facets?.severity, filters.severity, (v) => v, SEVERITY_ORDER)}
@@ -206,14 +213,14 @@ export function FacetPanel({
         selected={filters.age}
         onToggle={(v) => onToggle("age", v)}
       />
-      <Group
+      <MultiSelectFilter
         title="Repository"
         options={build(facets?.repo, filters.repo, repoLabel)}
         selected={filters.repo}
         onToggle={(v) => onToggle("repo", v)}
       />
-      <Group title="Assignee" options={assignee} selected={filters.assignee} onToggle={(v) => onToggle("assignee", v)} />
-      <Group title="Rule" options={rule} selected={filters.rule} onToggle={(v) => onToggle("rule", v)} />
+      <MultiSelectFilter title="Assignee" options={assignee} selected={filters.assignee} onToggle={(v) => onToggle("assignee", v)} />
+      <MultiSelectFilter title="Rule" options={rule} selected={filters.rule} onToggle={(v) => onToggle("rule", v)} />
 
       <div className="space-y-1">
         <label htmlFor="facet-path" className="legend text-muted-foreground">
